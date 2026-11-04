@@ -1,0 +1,107 @@
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { after, test } from 'node:test';
+import { project, runScript, SMOKE } from './helpers/harness.mjs';
+
+const made = [];
+after(() => made.forEach((p) => p.remove()));
+
+const CHROME = [process.env.CHROME_BIN, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((p) => p && existsSync(p));
+let port = 4300 + (process.pid % 400);
+
+// A stand-in for the Angular CLI, so the script's real process handling runs in seconds.
+function fakeApp(cliBody, { index = '<html><body><app-root></app-root></body></html>' } = {}) {
+  const cli = `const http = require('http');\nconst port = Number(process.argv[process.argv.indexOf('--port') + 1]);\n${cliBody}`;
+  const p = project({ deps: { '@angular/core': '^21.0.0' }, files: { 'node_modules/@angular/cli/bin/ng.js': cli, 'src/index.html': index } });
+  made.push(p);
+  return p;
+}
+const server = (html) => `http.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end(${JSON.stringify(html)}); }).listen(port, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + port + '/'));`;
+const check = async (p, ...extra) => {
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--json', ...extra], { cwd: p.dir });
+  return { code: r.code, result: JSON.parse(r.stdout || '{}'), stderr: r.stderr };
+};
+
+test('a server that starts and serves the page passes', async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root>hello</app-root></body></html>')), '--no-browser');
+  assert.equal(code, 0);
+  assert.equal(result.serve, 'ready');
+  assert.equal(result.http, 200);
+});
+
+test('positive control: a build error from the dev server fails, even with a passing page', async () => {
+  const { code, result } = await check(fakeApp("console.error('X [ERROR] Could not resolve \"marked-katex-extension\"');\nconsole.error('Application bundle generation failed.');\nsetTimeout(() => process.exit(1), 100);"), '--no-browser');
+  assert.equal(code, 1);
+  assert.equal(result.serve, 'failed');
+  assert.match(result.serverErrors.join(), /marked-katex-extension/);
+});
+
+test('a server that dies quietly fails', async () => {
+  const { code, result } = await check(fakeApp('process.exit(3);'), '--no-browser');
+  assert.equal(code, 1);
+  assert.equal(result.serve, 'failed');
+});
+
+test('a server that never gets ready fails on the timeout', async () => {
+  const p = fakeApp("setInterval(() => {}, 1000);");
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '2', '--json', '--no-browser'], { cwd: p.dir });
+  assert.equal(r.code, 1);
+  assert.equal(JSON.parse(r.stdout).serve, 'timeout');
+});
+
+test('a page that answers with an error fails', async () => {
+  const { code, result } = await check(fakeApp("http.createServer((q, r) => { r.writeHead(500); r.end('nope'); }).listen(port, '127.0.0.1', () => console.log('Compiled successfully.'));"), '--no-browser');
+  assert.equal(code, 1);
+  assert.equal(result.http, 500);
+});
+
+test('a project with no install says what to do', async () => {
+  const p = project({ deps: { '@angular/core': '^21.0.0' } });
+  made.push(p);
+  const { code, result } = await check(p, '--no-browser');
+  assert.equal(code, 1);
+  assert.equal(result.serve, 'no-cli');
+  assert.match(result.serverErrors.join(), /Install the project's dependencies/);
+});
+
+test('the server is stopped afterwards, so the port is free again', async () => {
+  const p = fakeApp(server('<html><body><app-root>hello</app-root></body></html>'));
+  const used = port++;
+  const first = await runScript(SMOKE, ['--project', p.dir, '--port', String(used), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir });
+  assert.equal(first.code, 0);
+  await new Promise((r) => setTimeout(r, 500));
+  const again = await runScript(SMOKE, ['--project', p.dir, '--port', String(used), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir });
+  assert.equal(again.code, 0, again.stdout);
+});
+
+test('the text report leads with the verdict', async () => {
+  const p = fakeApp(server('<html><body><app-root>hello</app-root></body></html>'));
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--no-browser'], { cwd: p.dir });
+  assert.match(r.stdout, /^App check: PASS/);
+});
+
+test('in Chrome: an app that renders with no errors passes', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root><h1>hello</h1></app-root></body></html>')));
+  assert.equal(result.browser, 'chrome');
+  assert.equal(result.rendered, true);
+  assert.deepEqual(result.consoleErrors, []);
+  assert.equal(code, 0);
+});
+
+test('in Chrome, positive control: a thrown error fails even though the server is fine', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root><h1>hi</h1></app-root><script>throw new Error("NG0201: boom")</script></body></html>')));
+  assert.equal(code, 1);
+  assert.match(result.consoleErrors.join(), /boom/);
+});
+
+test('in Chrome, positive control: an empty root element fails, because the app never booted', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root></app-root></body></html>')));
+  assert.equal(code, 1);
+  assert.equal(result.rendered, false);
+});
+
+test('in Chrome: an Angular console.error fails', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root>hi</app-root><script>console.error("ERROR", "bad thing")</script></body></html>')));
+  assert.equal(code, 1);
+  assert.match(result.consoleErrors.join(), /ERROR/);
+});
