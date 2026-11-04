@@ -1,0 +1,12 @@
+node_modules/
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Eval output lives in ../ng-hop-workspace
+evals/results/
+
+# The global gitignore hides these, and this repo commits them
+!AGENTS.md
+!CLAUDE.md

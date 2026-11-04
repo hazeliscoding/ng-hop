@@ -1,0 +1,13 @@
+{
+  "name": "ng-hop-repo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Development scripts for the ng-hop agent skill. The skill itself has no install step.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/plan.test.mjs test/guide.test.mjs test/smoke.test.mjs test/skill.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
