@@ -27,11 +27,13 @@ for (const name of names) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
     }
-    if (fixture.styles || fixture.scripts) {
+    if (fixture.styles || fixture.scripts || fixture.noBudgets) {
       const ng = JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8'));
-      const options = Object.values(ng.projects)[0].architect.build.options;
+      const build = Object.values(ng.projects)[0].architect.build;
+      const options = build.options;
       if (fixture.styles) options.styles = [...fixture.styles, ...(options.styles || [])];
       if (fixture.scripts) options.scripts = fixture.scripts;
+      if (fixture.noBudgets) build.configurations.production.budgets = [];
       writeFileSync(join(dir, 'angular.json'), `${JSON.stringify(ng, null, 2)}\n`);
     }
     run('npm install --no-audit --no-fund', dir);

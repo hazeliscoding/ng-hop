@@ -9,6 +9,11 @@ const config = (imports, providers) => ({
   'src/app/app.config.ts': `import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';\nimport { provideRouter } from '@angular/router';\nimport { routes } from './app.routes';\n${imports.join('\n')}\n\nexport const appConfig: ApplicationConfig = {\n  providers: [provideZoneChangeDetection({ eventCoalescing: true }), provideRouter(routes), ${providers.join(', ')}],\n};\n`,
 });
 
+// `ng new` from Angular 21 on makes zoneless apps with no zone.js installed.
+const zonelessConfig = (imports, providers) => ({
+  'src/app/app.config.ts': `import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';\nimport { provideRouter } from '@angular/router';\nimport { routes } from './app.routes';\n${imports.join('\n')}\n\nexport const appConfig: ApplicationConfig = {\n  providers: [provideBrowserGlobalErrorListeners(), provideRouter(routes), ${providers.join(', ')}],\n};\n`,
+});
+
 export const FIXTURES = {
   // Every library has a release for each major, and the numbers don't line up with Angular's.
   'clean-path': {
@@ -40,7 +45,7 @@ export const FIXTURES = {
     angular: 21,
     install: ['@angular/animations@21', 'ngx-toastr@20.0.5'],
     files: {
-      ...config(["import { provideAnimations } from '@angular/platform-browser/animations';", "import { provideToastr } from 'ngx-toastr';"], ['provideAnimations()', 'provideToastr()']),
+      ...zonelessConfig(["import { provideAnimations } from '@angular/platform-browser/animations';", "import { provideToastr } from 'ngx-toastr';"], ['provideAnimations()', 'provideToastr()']),
       ...shell(["import { inject } from '@angular/core';", "import { ToastrService } from 'ngx-toastr';"], `<button (click)="show()">Show</button>`, { body: "\n  private toastr = inject(ToastrService);\n  show() { this.toastr.success('Saved'); }\n" }),
     },
   },
@@ -95,9 +100,10 @@ export const FIXTURES = {
   'ag-grid-open': {
     angular: 20,
     install: ['ag-grid-community@34.3.1', 'ag-grid-angular@34.3.1'],
+    noBudgets: true, // AG Grid alone is past the default bundle budget, which has nothing to do with upgrading.
     files: {
       ...config([], []),
-      ...shell(["import { AgGridAngular } from 'ag-grid-angular';", "import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';", '', 'ModuleRegistry.registerModules([AllCommunityModule]);'], `<ag-grid-angular style="height: 200px" [rowData]="rows" [columnDefs]="cols" />`, { componentImports: 'AgGridAngular', body: "\n  rows = [{ a: 1 }];\n  cols = [{ field: 'a' }];\n" }),
+      ...shell(["import { AgGridAngular } from 'ag-grid-angular';", "import { AllCommunityModule, ColDef, ModuleRegistry } from 'ag-grid-community';", '', 'ModuleRegistry.registerModules([AllCommunityModule]);'], `<ag-grid-angular style="height: 200px" [rowData]="rows" [columnDefs]="cols" />`, { componentImports: 'AgGridAngular', body: "\n  rows = [{ a: 1 }];\n  cols: ColDef[] = [{ field: 'a' }];\n" }),
     },
   },
 
