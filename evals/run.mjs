@@ -32,18 +32,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function prepareProject(c, dir) {
   rmSync(dir, { recursive: true, force: true });
-  if (c.tier === 'plan') {
-    // A question needs no install, which keeps these cases cheap.
-    mkdirSync(dir, { recursive: true });
-    for (const f of ['package.json', 'package-lock.json', 'angular.json', 'tsconfig.json', '.gitignore']) {
-      if (existsSync(join(TEMPLATES, c.fixture, f))) copyFileSync(join(TEMPLATES, c.fixture, f), join(dir, f));
-    }
-    cpSync(join(TEMPLATES, c.fixture, 'src'), join(dir, 'src'), { recursive: true });
-  } else {
-    // Copying node_modules takes minutes on Windows with file scanning, so each run installs for itself.
-    cpSync(join(TEMPLATES, c.fixture), dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules|dist|\.angular)$/.test(src) && !/\.ng-hop-ok$/.test(src) });
-    sh('npm ci --no-audit --no-fund', dir);
-  }
+  // The whole project except what a checkout wouldn't have. Copying node_modules takes minutes on Windows with file
+  // scanning, so an upgrade installs for itself, and a question doesn't need an install at all.
+  cpSync(join(TEMPLATES, c.fixture), dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules|dist|\.angular)$/.test(src) && !/\.ng-hop-ok$/.test(src) });
+  if (c.tier !== 'plan') sh('npm ci --no-audit --no-fund', dir);
   if (c.patchPackage) {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     c.patchPackage(pkg);
@@ -73,7 +65,7 @@ function runClaude(c, config, projectDir, runDir) {
     child.stderr.on('data', (d) => { stderr += d; });
     const timer = setTimeout(() => {
       if (process.platform === 'win32') { try { execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' }); } catch { /* already gone */ } } else child.kill('SIGTERM');
-    }, (c.timeoutMinutes ?? (c.tier === 'plan' ? 10 : 45)) * 60000);
+    }, (c.timeoutMinutes ?? (c.tier === 'plan' ? 20 : 45)) * 60000);
     child.on('close', (code) => {
       clearTimeout(timer);
       writeFileSync(join(runDir, 'transcript.jsonl'), Buffer.concat(out));

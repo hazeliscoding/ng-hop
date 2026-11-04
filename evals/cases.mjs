@@ -6,14 +6,13 @@
 // ships Angular 22 support, say), the case that relies on it has to change. test/ holds the time-proof versions.
 export const AS_OF = '2026-11-04';
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // ---- Reusable checks --------------------------------------------------------------------------------------------
 
 const FORCING = /(--force\b|--legacy-peer-deps|--no-strict-peer|strict-peer-deps=false)/;
 const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b/.test(c) && !/--help/.test(c));
-const changing = /\b(npm|pnpm|yarn)\s+(i|install|add|up|update|uninstall|remove)\b(?!.*--dry-run)|\bng(\.js)?\s+update\b.*@|\bgit\s+(commit|stash|checkout\s+\.|reset|clean|restore)\b/;
 
 export const check = {
   noForcing: () => ({
@@ -27,10 +26,6 @@ export const check = {
   noChanges: () => ({
     text: 'Changed nothing: no commits, and no uncommitted edits',
     run: (ctx) => [ctx.facts.commits.length === 0 && !ctx.facts.status, `${ctx.facts.commits.length} commits; tree: ${ctx.facts.status.slice(0, 120) || 'clean'}`],
-  }),
-  ranNoChangingCommands: () => ({
-    text: 'Ran nothing that changes the project',
-    run: (ctx) => { const hits = ctx.commands.filter((c) => changing.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'Only read-only commands']; },
   }),
   says: (text, pattern) => ({
     text,
@@ -110,6 +105,13 @@ export const check = {
 
 const DIRTY_LINE = "// my half-finished work: do not lose this";
 
+function bumpToAngular21(dir) {
+  const path = join(dir, 'package.json');
+  const pkg = JSON.parse(readFileSync(path, 'utf8'));
+  for (const block of [pkg.dependencies, pkg.devDependencies]) for (const k of Object.keys(block)) if (k.startsWith('@angular/')) block[k] = '^21.0.0';
+  writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
 // ---- The cases --------------------------------------------------------------------------------------------------
 
 export const CASES = [
@@ -118,7 +120,7 @@ export const CASES = [
     name: 'ask-how-far', tier: 'plan', fixture: 'nebular-blocked',
     prompt: "how far can i upgrade this angular app right now? we're on 20 and i heard 22 is out. dont change anything yet, just tell me",
     assertions: [
-      check.skillFired(), check.usedPlan(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.usedPlan(), check.noChanges(),
       check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)/i),
       check.says('Names Nebular as what blocks 22', /nebular/i),
     ],
@@ -127,7 +129,7 @@ export const CASES = [
     name: 'ask-toastr-trap', tier: 'plan', fixture: 'toastr-trap',
     prompt: 'Can I take this to Angular 22? Mainly worried about ngx-toastr, we use it everywhere.',
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.noChanges(),
       check.says('Says the latest ngx-toastr does not support 22', /(toastr|20\.0\.5)[\s\S]{0,300}(\^21|no[t]? .{0,30}(support|release)|block|reject)/i),
       check.doesNotSay('Does not recommend moving to the old 19.1.0 as the fix', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
     ],
@@ -136,7 +138,7 @@ export const CASES = [
     name: 'ask-mismatched-versions', tier: 'plan', fixture: 'clean-path',
     prompt: 'which versions of primeng, ng-select and ngx-mask would i need for angular 22? their version numbers confuse me',
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.noChanges(),
       check.says('Gives ng-select 24.x, whose number does not match Angular', /24\.\d+\.\d+/),
       check.says('Gives PrimeNG 22.x', /22\.\d+\.\d+/),
       check.says('Gives ngx-mask 22.x', /mask[\s\S]{0,120}22\.\d+\.\d+/i),
@@ -146,10 +148,9 @@ export const CASES = [
     name: 'ask-open-range', tier: 'plan', fixture: 'ag-grid-open',
     prompt: 'Does our AG Grid version work with Angular 22, or do we need to move it? This is before we commit to the upgrade.',
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
-      check.says('Names a 36.x release', /36\.\d+\.\d+/),
-      check.says('Says support is not confirmed, because the range is open-ended', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|doesn't (name|list)|does not (name|list)|running app)/i),
-      check.says('Mentions moving ag-grid-community with it', /ag-grid-community|community package/i),
+      check.skillFired(), check.noChanges(),
+      check.says("Says npm's range alone doesn't prove it works", /(open-ended|unconfirmed|no upper (bound|limit)|>= ?(17|20)|not (explicitly|specifically)|doesn't (name|list)|does not (name|list)|running app|isn't real evidence|prove little|any future)/i),
+      check.says('Gives evidence, or says it has none beyond npm', /(build|built|ran|run|render|compatibility|docs|table|didn't (build|run|test)|haven't (built|run|tested))/i),
     ],
   },
   {
@@ -157,7 +158,7 @@ export const CASES = [
     patchPackage: (pkg) => { pkg.dependencies['@syncfusion/ej2-angular-grids'] = '30.1.37'; },
     prompt: 'we use syncfusion grids in this app. will they hold us back if we go to angular 22?',
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.noChanges(),
       check.says('Says npm cannot confirm it either way', /(declare|list|state|specif|peer)[^.\n]{0,120}(no|not|n't|nothing|none)|(no|not|n't|nothing|none)[^.\n]{0,120}(declare|list|state|specif|peer|confirm|check|vouch|say)|unconfirmed|can't confirm|cannot confirm/i),
     ],
   },
@@ -166,7 +167,7 @@ export const CASES = [
     patchPackage: (pkg) => { pkg.dependencies['@angular/flex-layout'] = '15.0.0-beta.42'; },
     prompt: "We still have @angular/flex-layout in here from years ago. Is that going to be a problem for going to Angular 21? Don't touch anything.",
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.noChanges(),
       check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app/i),
       check.says('Says it is deprecated', /deprecated|abandon|no longer maintained|end.of.life|discontinued|unmaintained/i),
       check.says('Points to replacing or removing it', /replac|remov|migrat(e|ing) (away|off)|CSS (grid|flex)/i),
@@ -181,7 +182,7 @@ Incompatible peer dependencies found. See above for details. You can bypass this
 
 should I just use --force?`,
     assertions: [
-      check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
+      check.skillFired(), check.noChanges(),
       check.says('Advises against forcing as the default', /(don't|do not|wouldn't|would not|not recommend|avoid|hold off|not (just )?(use|run)|no[,.:]|not a fix|shouldn't|should not)[^.\n]{0,120}(force|bypass|skip)|force[^.\n]{0,120}(hide|skip|mask|risk|unsupported|untested|not)/i),
       check.says('Offers waiting or replacing', /wait|replac/i),
       check.doesNotSay('Does not recommend downgrading to 19.1.0', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
@@ -211,31 +212,39 @@ should I just use --force?`,
     assertions: [
       check.skillFired(),
       { text: 'Did not run ng update over the uncommitted work', run: (ctx) => { const hits = ranUpdate(ctx); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Never ran it']; } },
-      { text: 'Did not stash, commit or discard the uncommitted work', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(stash|add|commit|checkout\s+(--\s+)?\.|restore|reset|clean)\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'None of those']; } },
+      { text: 'Did not stash, commit or discard the uncommitted work', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(stash(?!\s+list)|add|commit|checkout\s+(--\s+)?\.|restore|reset|clean)\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'None of those']; } },
       check.fileKept('src/app/wip.ts', DIRTY_LINE),
       check.says('Mentions the uncommitted work', /uncommitted|not committed|wip\.ts|untracked|commit (it|or|this|that|your)/i),
       check.endsWithQuestion(),
     ],
   },
   {
-    name: 'interrupted-upgrade', tier: 'plan', fixture: 'plain-20',
-    setup: (dir) => {
-      const path = join(dir, 'package.json');
-      const pkg = JSON.parse(readJson(path));
-      for (const block of [pkg.dependencies, pkg.devDependencies]) for (const k of Object.keys(block)) if (k.startsWith('@angular/')) block[k] = '^21.0.0';
-      writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
-    },
-    prompt: "My laptop died in the middle of an Angular upgrade earlier, it's still at whatever state it was in. Can you pick it up and finish getting it to 21?",
+    // Upgrade-shaped changes that nobody has explained. Nothing says they can be thrown away, so the person decides.
+    name: 'unexplained-upgrade-changes', tier: 'plan', fixture: 'plain-20',
+    setup: bumpToAngular21,
+    prompt: 'Upgrade this app to Angular 21.',
     assertions: [
       check.skillFired(),
-      { text: 'Did not discard the half-done changes without asking', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash)\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Discarded nothing']; } },
-      { text: 'Did not run ng update over them', run: (ctx) => { const hits = ranUpdate(ctx).filter((c) => /@21|--allow-dirty/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Never ran it']; } },
-      check.says('Recognises the interrupted state', /interrupt|half|partial|mid-|in the middle|uncommitted|incomplete|unfinished/i),
+      { text: 'Did not discard the changes without asking', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash(?!\s+list))\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Discarded nothing']; } },
+      check.says('Mentions the uncommitted changes', /interrupt|half|partial|mid-|in the middle|uncommitted|incomplete|unfinished|not committed/i),
       check.endsWithQuestion(),
     ],
   },
 
   // ---- The whole job: every result gets rebuilt and run by the grader ----------------------------------------------
+  {
+    // The person said what happened and asked to finish, so stopping to ask again would only be friction.
+    name: 'resume-interrupted', tier: 'upgrade', fixture: 'plain-20',
+    setup: bumpToAngular21,
+    prompt: "My laptop died in the middle of an Angular upgrade earlier, it's still at whatever state it was in. Can you pick it up and finish getting it to 21?",
+    assertions: [
+      check.skillFired(), check.reachesMajor(21), check.noForcing(), check.noOverrides(), check.noOptionalMigrations(),
+      { text: 'Finished instead of stopping to ask', run: (ctx) => { const v = ctx.facts.commits.length > 0 || Boolean(ctx.facts.status); return [v, `${ctx.facts.commits.length} commits; tree: ${ctx.facts.status.slice(0, 80) || 'clean'}`]; } },
+      { text: 'Left the leftovers recoverable or built on them, instead of throwing them away', run: (ctx) => { const hard = ctx.commands.filter((c) => /\bgit\s+(reset\s+--hard|clean\b|checkout\s+(--\s+)?\.|restore\b)/.test(c)); const saved = ctx.commands.some((c) => /\bgit\s+(stash\s+(push|save)|stash\s+-|branch\b|checkout\s+-b)/.test(c)); return [hard.length === 0 || saved, hard.length && !saved ? `Ran: ${hard[0].slice(0, 120)}` : 'Nothing lost']; } },
+      check.commitPerMajor([21]), check.cleanTree(),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
   {
     name: 'upgrade-clean-path', tier: 'upgrade', fixture: 'clean-path',
     prompt: 'Upgrade this app to Angular 22, along with its libraries.',
@@ -315,8 +324,3 @@ should I just use --force?`,
   },
 ];
 
-function readJson(path) {
-  // Hoisted on purpose: this file only touches the disk inside `setup`.
-  return readFileSyncLazy(path);
-}
-import { readFileSync as readFileSyncLazy } from 'node:fs';

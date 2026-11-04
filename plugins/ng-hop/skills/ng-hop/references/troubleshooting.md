@@ -17,6 +17,7 @@ The packages are already installed. Packages whose migrations ran before the cra
    npx ng update <package> --migrate-only --from=<old version> --to=<new version> --allow-dirty
    ```
 3. If a package's migrations crash when loaded, as NgRx's can, check whether it has any for this move. The file named by `ng-update.migrations` in `node_modules/<package>/package.json` lists each migration's `version`. If none falls after the old version and at or before the new one, nothing was missed, so say that in your report. If some do, report them as not run, and apply them by hand from that package's docs.
+4. Check that `--migrate-only` really ran something. `ng update` can hand off to a temporary copy of the newest CLI, and in one upgrade to Angular 21 that printed success while the CLI's migrations never ran. If there's no `Executing migrations of package` line, set `NG_DISABLE_VERSION_CHECK=1` so it uses the project's own CLI, and run it again.
 
 ## `Package "x" has an incompatible peer dependency`
 
@@ -63,7 +64,7 @@ Migrations can rewrite a file with different line endings, mostly on Windows. Co
 
 ## Resuming after an interruption
 
-Committed majors are safe. The plan reads the lockfile, so it picks up at the next major on its own. Uncommitted changes from the major that was interrupted can't be trusted to be complete, so ask before discarding them, then restore the files, reinstall and redo that major.
+Committed majors are safe. The plan reads the lockfile, so it picks up at the next major on its own. Uncommitted changes from the major that was interrupted can't be trusted to be complete, so stash them as `SKILL.md` describes, reinstall and redo that major. Stashing keeps them recoverable, and reverting them outright wouldn't.
 
 ## Node has to change partway
 

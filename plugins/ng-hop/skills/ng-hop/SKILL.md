@@ -21,7 +21,8 @@ Scripts are in this skill's `scripts/` folder. They need Node 18 or newer and no
 Run `git status --short`. Commits are the safety net for this whole process, so it can't start on uncommitted changes.
 
 - **Uncommitted changes that look like the person's own work:** stop and ask them to commit or stash. Don't stash for them, because they may not notice it happened.
-- **Uncommitted changes that look like an interrupted upgrade** (`package.json`, the lockfile and migration edits): say so, and ask whether to discard them and redo that major. Discarding can't be undone, so wait for a yes. Then restore the files, reinstall, and continue from step 2.
+- **They told you an upgrade was interrupted and asked you to finish it:** you have your answer, so don't ask again. Leftovers from an interrupted major can't be trusted to be complete, and `ng update` skips migrations for a version `package.json` already claims, so save them with `git stash push --include-untracked -m "ng-hop: interrupted upgrade"`, reinstall, and redo that major from step 2. Say in your report that the leftovers are in the stash.
+- **Changes that look like an upgrade, but nobody has mentioned one** (`package.json`, the lockfile, migration edits): say so and ask whether they're safe to set aside.
 - **Not a git repo:** ask whether to run `git init` and commit first.
 
 If you're on the default branch, create `upgrade/angular-<target>` before changing anything. On any other branch, stay there. Never push.
