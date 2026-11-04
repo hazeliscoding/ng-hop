@@ -24,6 +24,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **A library that already names the major stays put (2026-11-04).** *Why:* an upgrade shouldn't change what it doesn't have to. *Gave up:* newer patch releases come later, by choice.
 - **Parse the Update Guide as text, never by running it (2026-11-04).** *Why:* it's TypeScript from the network. *Gave up:* a small parser that fails loudly if the file's shape changes.
 - **Evals run in clean headless sessions, and the grader rebuilds every result (2026-11-04).** *Why:* an agent's account of its own work is what an eval can't trust, so the grader reinstalls, builds, tests and runs the app itself. `claude plugin eval` can't run a build after a case, and refuses to grant Bash on Windows. *Gave up:* evals are slow, and they run by hand instead of in CI.
+- **Stay a plain Agent Skill, with the Claude Code plugin as one way to install it (2026-11-04).** *Why:* OpenCode and GitHub Copilot read the same `SKILL.md` format and both scan `.agents/skills/`, so nothing in the skill needs to know which agent runs it. The first OpenCode run also found a real plan bug, so other agents are worth testing on purpose. *Gave up:* no agent-specific features, such as a dialog for the final question.
 - **Library versions in eval cases come from the live registry (2026-11-04).** *Why:* an upgrade needs real packages. *Gave up:* cases expire when a library catches up, so they carry an as-of date, and `test/` holds the permanent versions on a fake registry.
 
 ## Milestones
@@ -66,6 +67,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 
 ## Later
 
+- Run the skill in GitHub Copilot for real, and take a whole upgrade through OpenCode. So far Copilot is checked from its docs and OpenCode on one question.
 - Real pnpm and yarn fixtures. The plan handles them, but evals only cover npm so far.
 - Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result.
 - A `--next` mode for upgrading to a prerelease Angular.

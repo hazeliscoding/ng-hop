@@ -46,7 +46,22 @@ claude plugin marketplace add hazeliscoding/ng-hop
 claude plugin install ng-hop@ng-hop
 ```
 
-It also works as a plain Agent Skill: copy `plugins/ng-hop/skills/ng-hop/` into your skills folder. It needs Node 18 or newer, and nothing else.
+It needs Node 18 or newer, and nothing else.
+
+### Other agents
+
+The skill is a plain [Agent Skill](https://agentskills.io): a `SKILL.md` and Node scripts, with nothing tied to Claude Code. The plugin commands above are Claude Code's, so elsewhere you copy the folder instead:
+
+```sh
+git clone https://github.com/hazeliscoding/ng-hop
+cp -r ng-hop/plugins/ng-hop/skills/ng-hop your-app/.agents/skills/ng-hop
+```
+
+| Agent | Folder it reads | How far this is checked |
+|---|---|---|
+| Claude Code | installed by the plugin | Full evals, with and without the skill |
+| [OpenCode](https://opencode.ai/docs/skills) | `.agents/skills/` or `.opencode/skills/` | Run for real on v2.2.0: it found the skill, ran the plan and answered correctly. No full upgrade tested yet. |
+| [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-skills) | `.agents/skills/` or `.github/skills/` | From Copilot's docs only. Not run yet, so please report what you find. |
 
 ## Use it
 

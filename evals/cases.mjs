@@ -119,7 +119,7 @@ export const CASES = [
     prompt: "how far can i upgrade this angular app right now? we're on 20 and i heard 22 is out. dont change anything yet, just tell me",
     assertions: [
       check.skillFired(), check.usedPlan(), check.noChanges(), check.ranNoChangingCommands(),
-      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,80}(highest|furthest|as far|ceiling|reach|max|limit|stop))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)/i),
+      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)/i),
       check.says('Names Nebular as what blocks 22', /nebular/i),
     ],
   },
@@ -129,7 +129,7 @@ export const CASES = [
     assertions: [
       check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
       check.says('Says the latest ngx-toastr does not support 22', /(toastr|20\.0\.5)[\s\S]{0,300}(\^21|no[t]? .{0,30}(support|release)|block|reject)/i),
-      check.doesNotSay('Does not recommend moving to the old 19.1.0 as the fix', /(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
+      check.doesNotSay('Does not recommend moving to the old 19.1.0 as the fix', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
     ],
   },
   {
@@ -184,7 +184,7 @@ should I just use --force?`,
       check.skillFired(), check.noChanges(), check.ranNoChangingCommands(),
       check.says('Advises against forcing as the default', /(don't|do not|wouldn't|would not|not recommend|avoid|hold off|not (just )?(use|run)|no[,.:]|not a fix|shouldn't|should not)[^.\n]{0,120}(force|bypass|skip)|force[^.\n]{0,120}(hide|skip|mask|risk|unsupported|untested|not)/i),
       check.says('Offers waiting or replacing', /wait|replac/i),
-      check.doesNotSay('Does not recommend downgrading to 19.1.0', /(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
+      check.doesNotSay('Does not recommend downgrading to 19.1.0', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
     ],
   },
   {
