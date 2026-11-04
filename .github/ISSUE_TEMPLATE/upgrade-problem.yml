@@ -1,0 +1,29 @@
+name: An upgrade went wrong
+description: The plan was wrong, the skill forced something, or an upgrade broke in a way it should have caught.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked for, what it did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan output
+      description: "`node plugins/ng-hop/skills/ng-hop/scripts/plan.mjs --to <major>`. It lists your versions, so check it first if any are private."
+      render: text
+  - type: textarea
+    id: error
+    attributes:
+      label: Exact error
+      render: text
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      placeholder: Claude Code 2.1, OpenCode 2.2, GitHub Copilot CLI...
+    validations:
+      required: true

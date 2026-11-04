@@ -98,11 +98,19 @@ async function fetchPage(url) {
   return { status: null, error: last?.cause?.code || last?.message };
 }
 
+const USAGE = 'Usage: smoke.mjs [--project <dir>] [--app <name>] [--port 4287] [--path /] [--timeout 300] [--no-browser] [--json]';
+
 async function main() {
-  const { values } = parseArgs({ options: {
-    project: { type: 'string' }, app: { type: 'string' }, port: { type: 'string' }, path: { type: 'string' },
-    timeout: { type: 'string' }, 'no-browser': { type: 'boolean' }, json: { type: 'boolean' },
-  } });
+  let values;
+  try {
+    ({ values } = parseArgs({ options: {
+      project: { type: 'string' }, app: { type: 'string' }, port: { type: 'string' }, path: { type: 'string' },
+      timeout: { type: 'string' }, 'no-browser': { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' },
+    } }));
+  } catch (err) {
+    throw new Error(`${err.message.split('.')[0]}.\n${USAGE}`);
+  }
+  if (values.help) { console.log(USAGE); return; }
   const dir = resolve(values.project || '.');
   const port = Number(values.port || 4287);
   const path = values.path || '/';

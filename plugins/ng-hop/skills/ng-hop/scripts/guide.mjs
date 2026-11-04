@@ -105,11 +105,19 @@ async function readSource(source) {
   return readFileSync(source, 'utf8');
 }
 
+const USAGE = 'Usage: guide.mjs --from <major> --to <major + 1> [--project <dir>] [--level 1|2|3] [--json] [--source <url or file>]';
+
 async function main() {
-  const { values } = parseArgs({ options: {
-    from: { type: 'string' }, to: { type: 'string' }, project: { type: 'string' }, level: { type: 'string' },
-    json: { type: 'boolean' }, source: { type: 'string' },
-  } });
+  let values;
+  try {
+    ({ values } = parseArgs({ options: {
+      from: { type: 'string' }, to: { type: 'string' }, project: { type: 'string' }, level: { type: 'string' },
+      json: { type: 'boolean' }, source: { type: 'string' }, help: { type: 'boolean' },
+    } }));
+  } catch (err) {
+    throw new Error(`${err.message.split('.')[0]}.\n${USAGE}`);
+  }
+  if (values.help) { console.log(USAGE); return; }
   const from = Number(values.from);
   const to = Number(values.to);
   if (!Number.isInteger(from) || !Number.isInteger(to) || to !== from + 1) {
