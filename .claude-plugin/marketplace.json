@@ -1,0 +1,15 @@
+{
+  "name": "ng-hop",
+  "description": "The ng-hop agent skill: upgrade an Angular app one tested major at a time, with its UI libraries.",
+  "owner": {
+    "name": "Hazel Granados",
+    "url": "https://github.com/hazeliscoding"
+  },
+  "plugins": [
+    {
+      "name": "ng-hop",
+      "source": "./plugins/ng-hop",
+      "description": "Upgrade an Angular app one tested major at a time, with its UI libraries, and stop to ask when one blocks the next major."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "ng-hop",
+  "version": "0.1.0",
+  "description": "Upgrade an Angular app one tested major at a time, with its UI libraries, and stop to ask when one blocks the next major.",
+  "author": {
+    "name": "Hazel Granados",
+    "url": "https://github.com/hazeliscoding"
+  },
+  "homepage": "https://github.com/hazeliscoding/ng-hop",
+  "repository": "https://github.com/hazeliscoding/ng-hop",
+  "license": "MIT",
+  "keywords": ["angular", "ng-update", "upgrade", "migration", "dependencies", "peer-dependencies", "ui-libraries"]
+}

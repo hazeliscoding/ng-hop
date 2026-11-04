@@ -10,3 +10,5 @@ evals/results/
 # The global gitignore hides these, and this repo commits them
 !AGENTS.md
 !CLAUDE.md
+!.claude-plugin/
+!.claude-plugin/**
