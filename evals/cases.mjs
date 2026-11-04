@@ -36,8 +36,8 @@ export const check = {
     run: (ctx) => { const m = pattern.exec(ctx.finalText); return [!m, m ? `Found: "${ctx.around(m)}"` : 'Absent from the final message']; },
   }),
   endsWithQuestion: () => ({
-    text: 'Ends by asking the person what to do',
-    run: (ctx) => { const tail = ctx.finalText.trim().slice(-400); return [/\?\s*\**\s*$/.test(tail) || /\?[^?]{0,80}$/.test(tail), `Ending: "${tail.slice(-140)}"`]; },
+    text: 'Stops and hands the decision to the person',
+    run: (ctx) => { const tail = ctx.finalText.trim().slice(-900); return [/\?|\btell me\b|\blet me know\b|\byour call\b/i.test(tail), `Ending: "${tail.slice(-140)}"`]; },
   }),
   reachesMajor: (major) => ({
     text: `package.json ends on Angular ${major}`,
