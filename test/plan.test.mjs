@@ -262,6 +262,64 @@ test('sibling libraries whose chosen versions disagree block instead of breaking
   assert.equal(r.plan.blockers[0].name, '@ngrx/store');
 });
 
+const cdk = () => pkg('@angular/cdk', { '20.2.14': { peer: '^20.0.0 || ^21.0.0', at: '2025-11-01' }, '21.2.14': { peer: '^21.0.0 || ^22.0.0', at: '2026-05-01' } });
+const nebular = () => pkg('@nebular/theme', {
+  '16.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { '@angular/cdk': '^20.0.0' } },
+  '17.0.0': { peer: '^21.0.0', at: '2026-01-15', peers: { '@angular/cdk': '^21.0.0' } },
+});
+const cdkApp = () => app({ deps: { ...base, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' }, lock: { ...lockBase, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' } });
+
+test('a library that could have stayed moves when a sibling needs it newer', async () => {
+  const r = await plan(world(cdk(), nebular()), cdkApp(), { to: 21 });
+  assert.equal(r.code, 0, JSON.stringify(r.plan?.blockers));
+  assert.equal(r.plan.status, 'ok');
+  assert.equal(libIn(r, 21, '@angular/cdk').to, '21.2.14');
+  assert.equal(libIn(r, 21, '@nebular/theme').to, '17.0.0');
+  assert.match(r.plan.hops[0].command, /@angular\/cdk@21\.2\.14/);
+});
+
+test('that move still leaves the real blocker at the next major', async () => {
+  const r = await plan(world(cdk(), nebular()), cdkApp());
+  assert.equal(r.plan.reachable, 21);
+  assert.equal(r.plan.blockedAt, 22);
+  assert.deepEqual(r.plan.blockers.map((b) => b.name), ['@nebular/theme']);
+});
+
+test('a chain of siblings follows through, and an old release stops counting once it moves', async () => {
+  const lib = pkg('needs-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { 'shared-lib': '^1.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { 'shared-lib': '^2.0.0' } } });
+  const shared = pkg('shared-lib', {
+    '1.0.0': { peer: '^20.0.0 || ^21.0.0', at: '2025-06-01', peers: { 'third-lib': '^1.0.0' } },
+    '2.0.0': { peer: '^20.0.0 || ^21.0.0', at: '2025-12-01', peers: { 'third-lib': '^2.0.0' } },
+  });
+  const third = pkg('third-lib', { '1.0.0': { peer: '^20.0.0 || ^21.0.0', at: '2025-06-01' }, '2.0.0': { peer: '^20.0.0 || ^21.0.0', at: '2025-12-01' } });
+  const versions = { 'needs-lib': '20.0.0', 'shared-lib': '1.0.0', 'third-lib': '1.0.0' };
+  const r = await plan(world(lib, shared, third), app({ deps: { ...base, ...versions }, lock: { ...lockBase, ...versions } }), { to: 21 });
+  assert.equal(r.code, 0, JSON.stringify(r.plan?.blockers));
+  assert.equal(libIn(r, 21, 'shared-lib').to, '2.0.0');
+  assert.equal(libIn(r, 21, 'third-lib').to, '2.0.0');
+});
+
+test('when no release of the sibling can satisfy it, that is a real conflict', async () => {
+  const fussy = pkg('fussy', { '1.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '2.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { '@angular/cdk': '>=21.5.0 <22.0.0' } } });
+  const r = await plan(world(cdk(), fussy), app({ deps: { ...base, '@angular/cdk': '20.2.14', fussy: '1.0.0' }, lock: { ...lockBase, '@angular/cdk': '20.2.14', fussy: '1.0.0' } }), { to: 21 });
+  assert.equal(r.code, 2);
+  assert.equal(r.plan.blockers[0].kind, 'peer-conflict');
+  assert.equal(r.plan.blockers[0].name, '@angular/cdk');
+});
+
+test('--help prints usage instead of a stack trace', async () => {
+  const r = await runScript(PLAN, ['--help']);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /Usage:/);
+});
+
+test('an unknown option says so in one line', async () => {
+  const r = await runScript(PLAN, ['--nope']);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /--nope/);
+  assert.doesNotMatch(r.stderr, /\n\s+at /);
+});
+
 test('sibling libraries that agree pass', async () => {
   const store = pkg('@ngrx/store', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.1': { peer: '^21.0.0', at: '2025-12-01' } });
   const effects = pkg('@ngrx/effects', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { '@ngrx/store': '20.0.0' } }, '21.0.1': { peer: '^21.0.0', at: '2025-12-02', peers: { '@ngrx/store': '21.0.1' } } });

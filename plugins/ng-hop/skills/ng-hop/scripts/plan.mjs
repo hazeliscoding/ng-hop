@@ -380,6 +380,35 @@ async function buildPlan({ projectDir, to }) {
       addPeers(name, manifest);
     }
 
+    // A library that could have stayed put may have to move anyway, because a sibling needs it newer:
+    // @angular/cdk 20 accepts Angular 21, but Nebular 17 on Angular 21 needs cdk ^21. Moving one can require moving
+    // another, so this repeats until nothing changes. The pass limit stops a cycle of releases chasing each other.
+    for (let pass = 0; pass < coupledNames.length + 1; pass++) {
+      let changed = false;
+      for (const lib of libs) {
+        const wants = requirements[lib.name];
+        if (!wants || wants.every((w) => semver.satisfies(lib.to, w.range, { includePrerelease: true }))) continue;
+        const doc = docs.get(lib.name);
+        const better = eligibleReleases(doc, lib.to).find((v) => {
+          if (!wants.every((w) => semver.satisfies(v, w.range, { includePrerelease: true }))) return false;
+          return ['declared', 'open'].includes(judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased));
+        });
+        if (!better) continue;
+        const manifest = doc.versions[better];
+        lib.to = better;
+        lib.support = judge(manifest, doc.time?.[better], major, frameworkVersion, angularReleased);
+        lib.peer = angularPeers(manifest).map(([, r]) => r)[0] || null;
+        lib.migrations = Boolean(manifest['ng-update']?.migrations);
+        lib.deprecated = manifest.deprecated || null;
+        current[lib.name] = better;
+        // The old release's own needs no longer count.
+        for (const peer of Object.keys(requirements)) requirements[peer] = requirements[peer].filter((w) => w.by !== lib.name);
+        addPeers(lib.name, manifest);
+        changed = true;
+      }
+      if (!changed) break;
+    }
+
     const { changes, conflicts } = await resolveShared({ project, registry, requirements, current, coupled });
     for (const c of conflicts) {
       blockers.push({
@@ -460,8 +489,22 @@ function render(plan) {
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
 
+const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--json]
+
+Works out how far an Angular app can upgrade today, and what is in the way. Changes nothing.
+  --project  the project folder (default: the current folder)
+  --to       the Angular major to aim for (default: the latest stable)
+  --json     print the plan as JSON
+Exit codes: 0 the target is reachable or there is nothing to do, 2 blocked before the target, 1 no plan could be made.`;
+
 async function main() {
-  const { values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, json: { type: 'boolean' } } });
+  let values;
+  try {
+    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
+  } catch (err) {
+    throw new PlanError(`${err.message.split('.')[0]}.\n${USAGE}`);
+  }
+  if (values.help) { console.log(USAGE); return; }
   const projectDir = resolve(values.project || '.');
   let to;
   if (values.to !== undefined) {

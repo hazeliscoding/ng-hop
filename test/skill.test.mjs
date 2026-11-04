@@ -66,6 +66,7 @@ test('the agent files are committed, because the global gitignore hides them', (
   const ignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
   assert.match(ignore, /^!AGENTS\.md$/m);
   assert.match(ignore, /^!CLAUDE\.md$/m);
+  assert.match(ignore, /^!\.claude-plugin\/$/m, 'without this the plugin cannot be installed from GitHub');
 });
 
 test('the vendored parser works and names its version', () => {
