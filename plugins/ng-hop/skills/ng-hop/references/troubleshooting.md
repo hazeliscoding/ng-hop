@@ -33,6 +33,16 @@ Something in the project needs an older Angular, and it isn't in the command.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
 
+## The plan rejects angular-eslint with "requires no Angular version"
+
+An older planner could report this despite a current, target-aligned builder release:
+
+```text
+@angular-eslint/builder: no stable release at or above 22.5.0 supports Angular 22; the latest, 22.6.0 (2026-10-11), requires no Angular version
+```
+
+Earlier builder releases declared an Angular CLI peer; later releases moved that coupling to their devkit dependencies. The known angular-eslint major-alignment rule must inspect the preferred eligible release, not let an older release's peer metadata disable it. This matters for `angular-eslint` too: choosing an older peer-bearing metapackage can select its older package group even while a newer builder is installed. Explicit peers on the preferred release still take precedence, and no release below the installed version is selected. Update ng-hop rather than downgrading the builder, removing the lint target or forcing the app upgrade to bypass this planner error.
+
 ## `npm ERESOLVE` during an install
 
 Read which two requirements conflict. Usually a shared package such as `marked` has to move in the same command as the library that needs it, so install them together. Don't use `--legacy-peer-deps`, which skips the check and records a lockfile that the next `npm ci` may reject.
