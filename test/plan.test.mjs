@@ -369,6 +369,20 @@ test('the lockfile wins over the declared range, so a resumed upgrade starts whe
   assert.deepEqual(r.plan.hops.map((h) => h.major), [22]);
 });
 
+test('on the target major but behind on patches, the plan offers them', async () => {
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.2.0': {} });
+  const r = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/core': '20.0.0', '@angular/cli': '20.0.0' } }), { to: 20 });
+  assert.equal(r.code, 0);
+  assert.equal(r.plan.status, 'already-there');
+  assert.equal(r.plan.patches.command, 'npx ng update @angular/core@20.2.0 @angular/cli@20.2.0');
+});
+
+test('fully up to date offers nothing', async () => {
+  const cli = pkg('@angular/cli', { '20.2.0': {} });
+  const r = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/cli': '20.2.0' } }), { to: 20 });
+  assert.equal(r.plan.patches, undefined);
+});
+
 test('node_modules is used when there is no lockfile, then the declared range', async () => {
   const fromModules = await plan(world(), app({ deps: base, files: { 'node_modules/@angular/core/package.json': '{"version":"20.2.0"}' } }), { to: 21 });
   assert.equal(fromModules.plan.project.angularSource, 'node_modules');

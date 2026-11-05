@@ -441,7 +441,21 @@ async function buildPlan({ projectDir, to }) {
   }
 
   if (blockedAt !== null) plan.status = 'blocked';
-  else if (target === currentMajor) plan.status = 'already-there';
+  else if (target === currentMajor) {
+    plan.status = 'already-there';
+    // Already on the major, but patch releases within it are still an upgrade someone asking for "latest" wants.
+    const behind = [];
+    for (const name of ['@angular/core', '@angular/cli']) {
+      const have = project.installed(name)?.version;
+      const doc = have ? await registry.get(name) : null;
+      const newest = doc ? semver.maxSatisfying(stableOnly(Object.keys(doc.versions)), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`) : null;
+      if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
+    }
+    if (behind.length) {
+      const runner = { npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx' }[project.packageManager] || 'npx';
+      plan.patches = { packages: behind, command: `${runner} ng update ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
+    }
+  }
   plan.blockedAt = blockedAt;
   return plan;
 }
@@ -459,7 +473,13 @@ function render(plan) {
   const lines = [];
   const p = plan.project;
   lines.push(`Angular ${p.angular} (from ${p.angularSource}), ${p.packageManager}, Node ${p.node}. Latest Angular: ${plan.latestAngular}.`);
-  if (plan.status === 'already-there') lines.push(`Already on Angular ${plan.target}. Nothing to upgrade.`);
+  if (plan.status === 'already-there') {
+    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? 'Only patch releases are available.' : 'Nothing to upgrade.'}`);
+    if (plan.patches) {
+      for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
+      lines.push(`  Run: ${plan.patches.command}`);
+    }
+  }
   else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.target} is reachable.`);
   else lines.push(plan.reachable === semver.major(p.angular)
     ? `Result: BLOCKED. Angular ${plan.blockedAt} isn't possible today, so this project stays on ${plan.reachable} until a blocker below is resolved.`

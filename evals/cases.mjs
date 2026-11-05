@@ -192,7 +192,7 @@ should I just use --force?`,
     name: 'already-latest', tier: 'plan', fixture: 'plain-22',
     prompt: 'upgrade this project to the latest angular please',
     assertions: [
-      check.skillFired(), check.noChanges(),
+      check.skillFired(), check.reachesMajor(22), check.noForcing(),
       check.says('Says it is already on the latest', /already|nothing to (do|upgrade)|up to date|no upgrade/i),
     ],
   },

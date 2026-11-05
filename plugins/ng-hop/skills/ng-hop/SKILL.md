@@ -39,6 +39,7 @@ It reads `package.json`, the lockfile and npm, and changes nothing. Exit 0 means
 Show the person the result in a few lines: where they can get to, what blocks anything further, and which libraries are unconfirmed.
 
 - **If they only asked a question** ("how far can I go?", "does PrimeNG support 22?", "is this upgrade safe?"), answer from the plan and stop. Change nothing.
+- **If it's already on the target major with patch releases available,** and they asked to upgrade, run the command it prints, check it as in step 4f, and commit. That's the whole job.
 - **If the plan is blocked,** carry on up to the highest reachable major, then stop as step 5 describes. Say that's what you're doing.
 - **`Node: too-old` on a major:** `ng` will refuse to run. Stop before that major and ask them to switch Node. Don't switch it yourself, since `nvm use` changes it for the whole machine on Windows. `unsupported` means Node is newer than Angular lists: mention it and carry on while the checks pass.
 - **An Nx workspace:** the plan says so. Use `nx migrate` for the framework packages, and the plan for the library facts.

@@ -24,6 +24,10 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **A library that already names the major stays put (2026-11-04).** *Why:* an upgrade shouldn't change what it doesn't have to. *Gave up:* newer patch releases come later, by choice.
 - **Parse the Update Guide as text, never by running it (2026-11-04).** *Why:* it's TypeScript from the network. *Gave up:* a small parser that fails loudly if the file's shape changes.
 - **Evals run in clean headless sessions, and the grader rebuilds every result (2026-11-04).** *Why:* an agent's account of its own work is what an eval can't trust, so the grader reinstalls, builds, tests and runs the app itself. `claude plugin eval` can't run a build after a case, and refuses to grant Bash on Windows. *Gave up:* evals are slow, and they run by hand instead of in CI.
+- **A library that could stay moves when a sibling needs it newer (2026-11-04).** *Why:* `@angular/cdk` 20 accepts Angular 21, so it stayed, but Nebular 17 on Angular 21 needs cdk ^21, and the plan wrongly reported the app as blocked. An OpenCode run on a free model found this. *Gave up:* a little of the "change as little as possible" rule, only where a peer requires it.
+- **When someone says an upgrade was interrupted and asks to finish, finish (2026-11-04).** Stash the leftovers and redo that major, without asking first. Changes nobody has explained still get a question. *Why:* the first version asked, and plain Claude did better by just finishing. Stashing keeps the leftovers recoverable. *Gave up:* a moment of extra caution, since the person already gave the answer.
+- **Offer patch releases when already on the target major (2026-11-04).** *Why:* someone asking for "the latest" means it, and plain Claude did this where the first version said there was nothing to do. *Gave up:* nothing.
+- **Audit the eval scores before believing them (2026-11-04).** The first run scored 100% against 67%, and much of that gap was the harness: it left out two tsconfig files, punished safe experiments in temp folders, and cut runs off at 10 minutes. Fixed, it was 100% against about 90%. *Why:* a benchmark that flatters the thing you built is worse than none. *Gave up:* the bigger number.
 - **Stay a plain Agent Skill, with the Claude Code plugin as one way to install it (2026-11-04).** *Why:* OpenCode and GitHub Copilot read the same `SKILL.md` format and both scan `.agents/skills/`, so nothing in the skill needs to know which agent runs it. The first OpenCode run also found a real plan bug, so other agents are worth testing on purpose. *Gave up:* no agent-specific features, such as a dialog for the final question.
 - **Library versions in eval cases come from the live registry (2026-11-04).** *Why:* an upgrade needs real packages. *Gave up:* cases expire when a library catches up, so they carry an as-of date, and `test/` holds the permanent versions on a fake registry.
 
@@ -51,8 +55,9 @@ Everything else gets ordinary care, but none of these three gets traded away for
 
 ### M3: Proof
 
-- [ ] Eval cases for questions, refusals and whole upgrades, each run with and without the skill.
-- [ ] Trigger evals, and a description tuned against a held-out set.
+- [x] Eval cases for questions and refusals, each run with and without the skill.
+- [ ] Whole-upgrade evals, each run with and without the skill and rebuilt by the grader. `resume-interrupted` has run. The other eight were stopped when the machine ran low on memory.
+- [x] Trigger evals, and a description tuned against a held-out set.
 - [ ] Scores in the README, with the cases where plain Claude does just as well.
 
 **Done when:** every case's result is in the benchmark, and the README reports it honestly.
