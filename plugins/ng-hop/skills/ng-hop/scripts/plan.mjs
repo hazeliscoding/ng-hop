@@ -186,9 +186,10 @@ function eligibleReleases(doc, floor) {
 
 function hasAngularPeersForHop(doc, floor, majorRange) {
   const line = eligibleReleases(doc, floor).filter((v) => semver.satisfies(v, majorRange));
-  // Old eslint releases declared Angular peers that the current line no longer has.
+  // The preferred current release may have dropped the peers an older release had.
+  // Inspect that candidate, not an older peer-bearing release in the same line.
   // With no eligible target line, retain the existing explicit-peer/history check.
-  return (line.length ? line : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
+  return (line.length ? [line[0]] : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
 }
 
 function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
