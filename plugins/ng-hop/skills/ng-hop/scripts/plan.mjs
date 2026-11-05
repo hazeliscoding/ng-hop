@@ -184,6 +184,13 @@ function eligibleReleases(doc, floor) {
   });
 }
 
+function hasAngularPeersForHop(doc, floor, majorRange) {
+  const line = eligibleReleases(doc, floor).filter((v) => semver.satisfies(v, majorRange));
+  // Old eslint releases declared Angular peers that the current line no longer has.
+  // With no eligible target line, retain the existing explicit-peer/history check.
+  return (line.length ? line : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
+}
+
 function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
   const verdictOf = (v) => judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased);
   // An installed release that already names this major stays put: the upgrade changes nothing it doesn't have to.
@@ -355,8 +362,8 @@ async function buildPlan({ projectDir, to }) {
     for (const name of coupledNames) {
       const doc = docs.get(name);
       const floor = current[name];
-      if (ALIGNED.test(name) && !Object.values(doc.versions).some((m) => angularPeers(m).length)) {
-        const version = semver.maxSatisfying(eligibleReleases(doc, null), majorRange);
+      if (ALIGNED.test(name) && !hasAngularPeersForHop(doc, floor, majorRange)) {
+        const version = semver.maxSatisfying(eligibleReleases(doc, floor), majorRange);
         if (version) {
           libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });
           current[name] = version;
