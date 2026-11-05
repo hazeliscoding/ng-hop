@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript } from './helpers/harness.mjs';
+import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
 const made = [];
 const app = (opts) => { const p = project(opts); made.push(p); return p; };
@@ -10,6 +10,7 @@ const base = { '@angular/core': '^20.0.0', '@angular/cli': '^20.0.0', typescript
 const lockBase = { '@angular/core': '20.2.0', typescript: '5.8.3', rxjs: '7.8.2' };
 const world = (...extra) => [...angular(), typescript(), pkg('rxjs', { '7.8.2': {} }), ...extra];
 const libIn = (result, major, name) => result.plan.hops.find((h) => h.major === major)?.libs.find((l) => l.name === name);
+const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
 
 // ---- Which release gets chosen ----------------------------------------------------------------------------------
 
@@ -209,6 +210,79 @@ test('eslint packages with no peers follow Angular by major', async () => {
   assert.equal(libIn(r, 22, '@angular-eslint/schematics').support, 'aligned');
 });
 
+test('aligned tooling: historical Angular peers do not reject the eligible current line', async () => {
+  const lib = pkg('@angular-eslint/builder', {
+    '22.1.0': { peers: { '@angular/cli': '>=22.0.0 <23.0.0' } },
+    '22.5.0': { peers: { eslint: '^9.0.0 || ^10.0.0', typescript: '*' } },
+    '22.6.0': { peers: { eslint: '^9.0.0 || ^10.0.0', typescript: '*' } },
+  });
+  for (const version of ['22.5.0', '22.6.0']) lib.versions[version].dependencies = { '@angular-devkit/core': '>=22.0.0 <23.0.0', '@angular-devkit/architect': '>=0.2200.0 <0.2300.0' };
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^22.5.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '22.5.0' } }), { to: 22 });
+  assert.equal(r.code, 0, JSON.stringify(r.plan.blockers));
+  assert.equal(r.plan.reachable, 22);
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').to, '22.6.0');
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').support, 'aligned');
+  assert.match(r.plan.hops[0].command, /@angular-eslint\/builder@22\.6\.0/);
+  assert.doesNotMatch(r.plan.hops[0].command, /--force|--allow-dirty/);
+});
+
+test('aligned tooling: obsolete peers do not select an older angular-eslint package group', async () => {
+  const group = ['angular-eslint', '@angular-eslint/builder'];
+  const eslint = pkg('angular-eslint', {
+    '21.4.0': { peers: { '@angular/cli': '>=21.0.0 <22.0.0' }, migrations: true },
+    '22.1.0': { peers: { '@angular/cli': '>=22.0.0 <23.0.0', typescript: '*' }, migrations: true },
+    '22.6.0': { peers: { typescript: '*' }, migrations: true },
+  });
+  for (const [version, manifest] of Object.entries(eslint.versions)) { manifest['ng-update'].packageGroup = group; manifest.dependencies = { '@angular-eslint/builder': version }; }
+  const builder = pkg('@angular-eslint/builder', { '22.1.0': { peers: { '@angular/cli': '>=22.0.0 <23.0.0' } }, '22.6.0': { peers: { typescript: '*' } } });
+  const r = await plan(world(eslint, builder), app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, devDeps: { 'angular-eslint': '^21.4.0', '@angular-eslint/builder': '^22.6.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', 'angular-eslint': '21.4.0', '@angular-eslint/builder': '22.6.0' } }), { to: 22 });
+  assert.equal(r.code, 0);
+  assert.equal(libIn(r, 22, 'angular-eslint').to, '22.6.0');
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').to, '22.6.0');
+  assert.match(r.plan.hops[0].command, /angular-eslint@22\.6\.0/);
+  assert.doesNotMatch(r.plan.hops[0].command, /angular-eslint@22\.1\.0|--force/);
+});
+
+test('aligned tooling: explicit peers on eligible releases still block an incompatible major', async () => {
+  const lib = pkg('@angular-eslint/builder', { '22.1.0': { peer: '^22.0.0' }, '22.5.0': { peer: '^21.0.0' }, '22.6.0': { peer: '^21.0.0' } });
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^22.5.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '22.5.0' } }), { to: 22 });
+  assert.equal(r.code, 2);
+  assert.equal(r.plan.blockers[0].name, '@angular-eslint/builder');
+  assert.equal(r.plan.hops.length, 0);
+});
+
+test('aligned tooling: a higher installed line is not downgraded to infer compatibility', async () => {
+  const lib = pkg('@angular-eslint/builder', { '22.1.0': { peer: '^22.0.0' }, '22.6.0': {}, '23.0.0': {} });
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^23.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '23.0.0' } }), { to: 22 });
+  assert.equal(r.code, 2);
+  assert.equal(r.plan.blockers[0].installed, '23.0.0');
+  assert.equal(r.plan.hops.length, 0);
+});
+
+test('aligned tooling: even a peerless history never selects a release below the installed floor', async () => {
+  const lib = pkg('@angular-eslint/builder', { '22.6.0': {}, '23.0.0': {} });
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^23.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '23.0.0' } }), { to: 22 });
+  assert.equal(libIn(r, 22, '@angular-eslint/builder'), undefined);
+  assert.ok(r.plan.unchecked.some((u) => u.name === '@angular-eslint/builder'));
+  assert.ok(r.plan.hops.every((h) => !h.command.includes('@angular-eslint/builder@22.6.0')));
+});
+
+test('aligned tooling: the rule does not infer support for an ordinary library that lost peers', async () => {
+  const lib = pkg('ngx-example-controls', { '21.0.0': { peer: '^21.0.0' }, '22.0.0': {} });
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0', 'ngx-example-controls': '^22.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', 'ngx-example-controls': '22.0.0' } }), { to: 22 });
+  assert.equal(r.code, 2);
+  assert.equal(r.plan.blockers[0].name, 'ngx-example-controls');
+});
+
+test('aligned tooling: explicit compatibility still works when there is no target-numbered line', async () => {
+  const lib = pkg('@angular-eslint/builder', { '21.0.0': { peer: '^21.0.0 || ^22.0.0' } });
+  const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '21.0.0' } }), { to: 22 });
+  assert.equal(r.code, 0);
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').to, '21.0.0');
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').support, 'declared');
+  assert.deepEqual(r.plan.unchecked, []);
+});
+
 // ---- Shared peers ------------------------------------------------------------------------------------------------------
 
 test('TypeScript moves the smallest step the major needs', async () => {
@@ -344,13 +418,31 @@ test('a library that ships migrations is flagged', async () => {
   assert.equal(libIn(r, 21, '@angular/material').migrations, true);
 });
 
-for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', 'pnpm exec', 'pnpm'], ['yarn.lock', 'yarn', 'yarn'], ['bun.lock', 'bunx --no-install', 'bun']]) {
+for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', 'yarn ng update', 'yarn'], ['bun.lock', 'bunx --no-install ng update', 'bun']]) {
   test(`${manager} projects get ${manager} commands`, async () => {
     const r = await plan(world(), app({ deps: base, files: { [lockfile]: '' } }), { to: 21 });
     assert.equal(r.plan.project.packageManager, manager);
-    assert.ok(r.plan.hops[0].command.startsWith(`${runner} ng update`));
+    assert.ok(r.plan.hops[0].command.startsWith(`${runner} @angular/core@21`));
   });
 }
+
+test('pnpm bootstrap: each hop uses the scoped target CLI runner with every moving library', async () => {
+  const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0' }, '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0' } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': 'packages:\n  - .\n', 'node_modules/@angular/cli/package.json': '{"version":"20.2.0"}' } }), { to: 22 });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.plan.hops.map(h => h.command), [
+    `pnpm exec node ${quotePath(UPDATE)} @angular/core@21 @angular/cli@21 ui-lib@21.0.0`,
+    `pnpm exec node ${quotePath(UPDATE)} @angular/core@22 @angular/cli@22 ui-lib@22.0.0`,
+  ]);
+  for (const hop of r.plan.hops) assert.doesNotMatch(hop.command, /pnpm exec ng update|--force|--allow-dirty|--legacy-peer-deps|NG_DISABLE_VERSION_CHECK/);
+});
+
+test('pnpm bootstrap: the printed Run command selects the target CLI, not the local binary', async () => {
+  const r = await plan(world(), app({ deps: base, files: { 'pnpm-lock.yaml': '' } }), { to: 21, text: true });
+  assert.equal(r.code, 0);
+  assert.ok(r.stdout.includes(`Run: pnpm exec node ${quotePath(UPDATE)} @angular/core@21 @angular/cli@21`));
+  assert.doesNotMatch(r.stdout, /Run: pnpm exec ng update/);
+});
 
 test('Node outside a major\'s range is reported on that major', async () => {
   const [core, compiler] = angular();

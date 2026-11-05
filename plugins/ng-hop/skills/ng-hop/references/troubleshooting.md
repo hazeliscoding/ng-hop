@@ -33,6 +33,16 @@ Something in the project needs an older Angular, and it isn't in the command.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
 
+## The plan rejects angular-eslint with "requires no Angular version"
+
+An older planner could report this despite a current, target-aligned builder release:
+
+```text
+@angular-eslint/builder: no stable release at or above 22.5.0 supports Angular 22; the latest, 22.6.0 (2026-10-11), requires no Angular version
+```
+
+Earlier builder releases declared an Angular CLI peer; later releases moved that coupling to their devkit dependencies. The known angular-eslint major-alignment rule must inspect the preferred eligible release, not let an older release's peer metadata disable it. This matters for `angular-eslint` too: choosing an older peer-bearing metapackage can select its older package group even while a newer builder is installed. Explicit peers on the preferred release still take precedence, and no release below the installed version is selected. Update ng-hop rather than downgrading the builder, removing the lint target or forcing the app upgrade to bypass this planner error.
+
 ## `npm ERESOLVE` during an install
 
 Read which two requirements conflict. Usually a shared package such as `marked` has to move in the same command as the library that needs it, so install them together. Don't use `--legacy-peer-deps`, which skips the check and records a lockfile that the next `npm ci` may reject.
@@ -40,6 +50,16 @@ Read which two requirements conflict. Usually a shared package such as `marked` 
 ## `Repository is not clean`
 
 Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above.
+
+If the repository was clean immediately before an older pnpm plan printed this sequence:
+
+```text
+The installed Angular CLI version is outdated.
+Installing a temporary Angular CLI versioned 22 to perform the update.
+Error: Repository is not clean. Please commit or stash any changes before updating.
+```
+
+The installed CLI may have put its temporary package inside `node_modules`, where pnpm treats it as another workspace importer and changes the shared lockfile. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
 
 ## The build and tests pass, but the dev server fails
 

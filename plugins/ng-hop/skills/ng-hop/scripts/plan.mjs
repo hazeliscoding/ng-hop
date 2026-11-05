@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const exec = promisify(execFile);
@@ -33,12 +34,15 @@ const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
 const stableOnly = (versions) => versions.filter((v) => semver.valid(v) && !semver.prerelease(v));
 const newestFirst = (versions) => [...versions].sort(semver.rcompare);
 const day = (iso) => (iso || '').slice(0, 10) || null;
+const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
 
 class PlanError extends Error {}
 
 // --no-install because npm has an unrelated package named `ng`: plain `npx ng` would download and run it whenever the
 // project's CLI isn't installed. pnpm exec and yarn only run what's installed already.
 const runnerFor = (project) => ({ npm: 'npx --no-install', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx --no-install' }[project.packageManager] || 'npx --no-install');
+// pnpm's runner keeps the selected CLI from redispatching to the app's old CLI and dirtying its lockfile.
+const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)))}` : `${runnerFor(project)} ng update`);
 
 // Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
 // read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.
@@ -186,6 +190,14 @@ function eligibleReleases(doc, floor) {
     if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest)) return false;
     return !floor || semver.gte(v, floor);
   });
+}
+
+function hasAngularPeersForHop(doc, floor, majorRange) {
+  const line = eligibleReleases(doc, floor).filter((v) => semver.satisfies(v, majorRange));
+  // The preferred current release may have dropped the peers an older release had.
+  // Inspect that candidate, not an older peer-bearing release in the same line.
+  // With no eligible target line, retain the existing explicit-peer/history check.
+  return (line.length ? [line[0]] : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
 }
 
 function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
@@ -359,8 +371,8 @@ async function buildPlan({ projectDir, to }) {
     for (const name of coupledNames) {
       const doc = docs.get(name);
       const floor = current[name];
-      if (ALIGNED.test(name) && !Object.values(doc.versions).some((m) => angularPeers(m).length)) {
-        const version = semver.maxSatisfying(eligibleReleases(doc, null), majorRange);
+      if (ALIGNED.test(name) && !hasAngularPeersForHop(doc, floor, majorRange)) {
+        const version = semver.maxSatisfying(eligibleReleases(doc, floor), majorRange);
         if (version) {
           libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });
           current[name] = version;
@@ -429,7 +441,7 @@ async function buildPlan({ projectDir, to }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    const command = [`${runnerFor(project)} ng update @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {
