@@ -111,3 +111,13 @@ export const FIXTURES = {
   'plain-20': { angular: 20, install: [], files: { ...config([], []), ...shell([], '') } },
   'plain-22': { angular: 22, install: [], files: {}, keepNgNewFiles: true },
 };
+
+// pnpm 11 and newer need install scripts decided, so a real project has this file. It's also what makes pnpm treat the
+// CLI's temporary folder as part of the project, which is how a clean tree turns dirty during `ng update`.
+const decidedScripts = "allowBuilds:\n  '@parcel/watcher': true\n  esbuild: true\n  lmdb: true\n  msgpackr-extract: true\n";
+const cleanPath = FIXTURES['clean-path'];
+FIXTURES['pnpm-clean'] = { ...cleanPath, packageManager: 'pnpm', files: { ...cleanPath.files, 'pnpm-workspace.yaml': decidedScripts } };
+// Nobody has decided about install scripts, so every install exits 1 until someone does.
+FIXTURES['pnpm-undecided'] = { ...FIXTURES['plain-20'], packageManager: 'pnpm', undecidedScripts: true };
+// Angular comes from a catalog. Through Angular 21's CLI, `ng update` skips it, moves the libraries and exits 0.
+FIXTURES['pnpm-catalog'] = { ...FIXTURES['pnpm-clean'], catalog: true };

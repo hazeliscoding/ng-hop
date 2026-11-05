@@ -3,7 +3,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PLUGIN, testCommand } from './common.mjs';
+import { installCommand, PLUGIN, testCommand } from './common.mjs';
 
 const SMOKE = join(PLUGIN, 'skills', 'ng-hop', 'scripts', 'smoke.mjs');
 const env = { ...process.env, NG_CLI_ANALYTICS: 'false', CHROME_BIN: process.env.CHROME_BIN || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '') };
@@ -23,7 +23,7 @@ function attempt(cmd, cwd, timeout = 600000) {
 function verifyResult(projectDir) {
   const result = {};
   rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
-  result.install = attempt('npm ci --no-audit --no-fund', projectDir);
+  result.install = attempt(installCommand(projectDir), projectDir);
   if (!result.install.ok) return { ...result, build: { ok: false, out: 'skipped: install failed' }, test: { ok: false, out: 'skipped: install failed' }, smoke: { ok: false, out: 'skipped: install failed' } };
   result.build = attempt('npx ng build', projectDir);
   result.test = attempt(testCommand(projectDir), projectDir);

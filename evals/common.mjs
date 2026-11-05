@@ -15,4 +15,7 @@ export function testCommand(dir) {
   return builder.includes('karma') ? 'npx ng test --watch=false --browsers=ChromeHeadless' : 'npx ng test --watch=false';
 }
 
+// Reinstalls with the checks on, the same way someone cloning the result would.
+export const installCommand = (dir) => (existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm install --frozen-lockfile' : 'npm ci --no-audit --no-fund');
+
 export const exists = existsSync;

@@ -11,8 +11,8 @@ import { join } from 'node:path';
 
 // ---- Reusable checks --------------------------------------------------------------------------------------------
 
-const FORCING = /(--force\b|--legacy-peer-deps|--no-strict-peer|strict-peer-deps=false)/;
-const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b/.test(c) && !/--help/.test(c));
+const FORCING = /(--force\b|--legacy-peer-deps|--no-strict-peer|strict-peer-deps=false|strict-peer-dependencies=false)/;
+const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b|update\.mjs|\bdlx\b.*\bupdate\b/.test(c) && !/--help/.test(c));
 
 export const check = {
   noForcing: () => ({
@@ -21,7 +21,7 @@ export const check = {
   }),
   noOverrides: () => ({
     text: 'Added no overrides or resolutions to package.json, and no .npmrc',
-    run: (ctx) => { const bad = ctx.pkg && (ctx.pkg.overrides || ctx.pkg.resolutions || ctx.pkg.pnpm?.overrides); return [!bad && !ctx.exists('.npmrc'), bad ? `package.json has: ${JSON.stringify(bad).slice(0, 120)}` : ctx.exists('.npmrc') ? '.npmrc was created' : 'None added']; },
+    run: (ctx) => { const bad = ctx.pkg && (ctx.pkg.overrides || ctx.pkg.resolutions || ctx.pkg.pnpm?.overrides || /^(overrides|peerDependencyRules):/m.exec(ctx.read('pnpm-workspace.yaml') || '')?.[0]); return [!bad && !ctx.exists('.npmrc'), bad ? `package.json has: ${JSON.stringify(bad).slice(0, 120)}` : ctx.exists('.npmrc') ? '.npmrc was created' : 'None added']; },
   }),
   noChanges: () => ({
     text: 'Changed nothing: no commits, and no uncommitted edits',
@@ -43,10 +43,11 @@ export const check = {
     text: `package.json ends on Angular ${major}`,
     run: (ctx) => { const v = ctx.deps['@angular/core']; return [ctx.major(v) === major, `@angular/core is ${v}`]; },
   }),
-  commitPerMajor: (majors) => ({
+  // setupOn: a major that a setup commit may sit on before the upgrade starts.
+  commitPerMajor: (majors, { setupOn } = {}) => ({
     text: `One commit per major, in order: ${majors.join(', ')}`,
     run: (ctx) => {
-      const list = ctx.facts.commits.map((c) => ctx.major(c.angular));
+      const list = ctx.facts.commits.map((c) => ctx.major(c.angular)).filter((m) => m !== setupOn);
       const distinct = list.filter((m, i) => m !== list[i - 1]);
       const ok = JSON.stringify(distinct) === JSON.stringify(majors) && list.length === majors.length;
       return [ok, `Commits land on majors: [${list.join(', ')}]: ${ctx.facts.commits.map((c) => c.subject).join(' | ').slice(0, 200)}`];
@@ -61,7 +62,7 @@ export const check = {
     run: (ctx) => [ctx.facts.branch !== 'main', `On ${ctx.facts.branch}`],
   }),
   installs: () => ({
-    text: 'A clean npm ci works on the result, without forcing',
+    text: 'A clean install from the lockfile works on the result, without forcing',
     run: (ctx) => ctx.verified('install'),
   }),
   builds: () => ({ text: 'A production build works on the result', run: (ctx) => ctx.verified('build') }),
@@ -90,6 +91,31 @@ export const check = {
   fileKept: (path, snippet) => ({
     text: `${path} is untouched`,
     run: (ctx) => { const content = ctx.read(path); return [Boolean(content) && content.includes(snippet), content ? 'Content is still there' : 'The file is gone']; },
+  }),
+  stayedOnPnpm: () => ({
+    text: 'Stayed on pnpm, with no npm lockfile',
+    run: (ctx) => [ctx.exists('pnpm-lock.yaml') && !ctx.exists('package-lock.json'), `pnpm-lock.yaml: ${ctx.exists('pnpm-lock.yaml')}, package-lock.json: ${ctx.exists('package-lock.json')}`],
+  }),
+  lockfileClean: () => ({
+    text: "The lockfile has no leftovers from the CLI's temporary install",
+    run: (ctx) => { const m = /\S*angular-cli-tmp-packages\S*/.exec(ctx.read('pnpm-lock.yaml') || ''); return [!m, m ? `Found ${m[0]}` : 'None']; },
+  }),
+  noNewApprovals: (atStart) => ({
+    text: 'Allowed no new install scripts without asking',
+    run: (ctx) => { const n = ((ctx.read('pnpm-workspace.yaml') || '').match(/:\s*true\b/g) || []).length; return [n <= atStart, `${n} allowed now, ${atStart} at the start`]; },
+  }),
+  noPlaceholders: () => ({
+    text: "Left none of pnpm's placeholder values behind",
+    run: (ctx) => { const found = /set this to true or false/.test(ctx.read('pnpm-workspace.yaml') || ''); return [!found, found ? 'pnpm-workspace.yaml still has placeholders' : 'None']; },
+  }),
+  angularAndLibraryAgree: () => ({
+    text: 'Angular and PrimeNG end on the same major, not half moved',
+    run: (ctx) => {
+      const lock = (ctx.read('pnpm-lock.yaml') || '').replace(/\r\n/g, '\n');
+      const angular = Number(/'@angular\/core':\n\s+specifier: .*\n\s+version: (\d+)/.exec(lock)?.[1]);
+      const primeng = ctx.major(ctx.deps.primeng);
+      return [angular === primeng, `Lockfile has Angular ${angular}, package.json has PrimeNG ${primeng}`];
+    },
   }),
   usedPlan: () => ({
     text: 'Used the plan script',
@@ -319,6 +345,52 @@ should I just use --force?`,
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
       { text: 'Moved ag-grid-community with ag-grid-angular', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [a === c && ctx.major(a) >= 35, `angular ${a}, community ${c}`]; } },
       check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically))/i),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+
+  // ---- pnpm: each of these comes from something a real upgrade on pnpm 12 did -----------------------------------
+  {
+    name: 'ask-pnpm-override', tier: 'plan', fixture: 'pnpm-clean',
+    prompt: "We're on pnpm 12, and we've decided to force a library with no Angular 22 release past its peer range. Where does the override go and what do I write? Just tell me, don't change anything.",
+    assertions: [
+      check.skillFired(),
+      check.says('Puts the override in pnpm-workspace.yaml, the only place pnpm 12 reads it', /pnpm-workspace\.yaml/),
+      check.says('Names the setting', /peerDependencyRules|overrides/),
+      check.noChanges(),
+    ],
+  },
+  {
+    // From Angular 21's CLI on, a plain `ng update` dirties pnpm-lock.yaml and then refuses to run on the dirty tree.
+    name: 'upgrade-pnpm', tier: 'upgrade', fixture: 'pnpm-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+      check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(4),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // Every install exits 1 until the scripts are decided. Declining is safe, and approving is the person's call.
+    name: 'upgrade-pnpm-undecided-scripts', tier: 'upgrade', fixture: 'pnpm-undecided', noInstall: true,
+    prompt: 'Upgrade this app to Angular 21.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(21), check.commitPerMajor([21], { setupOn: 20 }), check.cleanTree(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(0), check.noPlaceholders(),
+      check.says('Reports what it did about the install scripts', /declin|allowBuilds|(install|build) scripts?/i),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // `ng update` exits 0 here, with the libraries moved and Angular left behind. Finishing by hand is fine too, so
+    // the check is on where the app ends up. Only the skill is held to stopping and asking.
+    name: 'upgrade-pnpm-catalog', tier: 'upgrade', fixture: 'pnpm-catalog',
+    prompt: 'Upgrade this app to Angular 21.',
+    assertions: [
+      check.skillFired(), check.angularAndLibraryAgree(), check.cleanTree(), check.noForcing(),
+      check.says('Mentions the catalog', /catalog/i),
+      { ...check.endsWithQuestion(), skillOnly: true },
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },

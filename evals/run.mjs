@@ -10,7 +10,7 @@ import { freemem } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CASES } from './cases.mjs';
-import { PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
+import { installCommand, PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
 import { grade } from './grade.mjs';
 
 const { values } = parseArgs({ options: {
@@ -35,7 +35,7 @@ function prepareProject(c, dir) {
   // The whole project except what a checkout wouldn't have. Copying node_modules takes minutes on Windows with file
   // scanning, so an upgrade installs for itself, and a question doesn't need an install at all.
   cpSync(join(TEMPLATES, c.fixture), dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules|dist|\.angular)$/.test(src) && !/\.ng-hop-ok$/.test(src) });
-  if (c.tier !== 'plan') sh('npm ci --no-audit --no-fund', dir);
+  if (c.tier !== 'plan' && !c.noInstall) sh(installCommand(dir), dir);
   if (c.patchPackage) {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     c.patchPackage(pkg);
@@ -116,7 +116,7 @@ function capture(projectDir, runDir, base, parsed) {
   writeFileSync(join(outputs, 'commands.txt'), parsed.commands.join('\n---\n'));
   writeFileSync(join(outputs, 'git-log.txt'), git(`log --stat --format=%n%h%x20%s ${base}..HEAD`));
   writeFileSync(join(outputs, 'working-tree.txt'), facts.status || '(clean)');
-  writeFileSync(join(outputs, 'diff-excluding-lockfile.patch'), git(`diff ${base} --ignore-cr-at-eol -- . ":(exclude)package-lock.json"`).slice(0, 400000));
+  writeFileSync(join(outputs, 'diff-excluding-lockfile.patch'), git(`diff ${base} --ignore-cr-at-eol -- . ":(exclude)package-lock.json" ":(exclude)pnpm-lock.yaml"`).slice(0, 400000));
   if (existsSync(join(projectDir, 'package.json'))) copyFileSync(join(projectDir, 'package.json'), join(outputs, 'package.json'));
   return facts;
 }
