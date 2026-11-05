@@ -4,10 +4,11 @@ description: >-
   Upgrade an Angular app across one or more major versions, together with its UI libraries and other dependencies,
   one tested commit per major. Finds the highest version the whole app can reach today, and stops there to ask when a
   library blocks the next one. Use this whenever someone wants to upgrade, update or migrate Angular, go from Angular
-  X to Y, get on the latest Angular, or run `ng update`. Also use it when they ask how far they can upgrade, whether a
-  library such as Angular Material, PrimeNG, ng-bootstrap, NgRx or AG Grid supports a newer Angular, or when they paste
-  an `ng update` or peer dependency error from an upgrade, even if they don't say "upgrade". Not for AngularJS (1.x)
-  migrations, or for adopting signals, standalone or new control flow without changing the Angular version.
+  X to Y, get on the latest Angular, or run `ng update`. Also use it when they ask how far they can upgrade, or whether
+  any library (Angular Material, PrimeNG, ng-zorro, NgRx, AG Grid, or any other) supports a newer Angular, since library
+  version numbers and old open-ended peer ranges mislead a quick lookup. Use it too when they paste an `ng update` or
+  peer dependency error, even if they don't say "upgrade". Not for AngularJS (1.x) migrations, or for adopting signals,
+  standalone or new control flow without changing the Angular version.
 ---
 
 # ng-hop
