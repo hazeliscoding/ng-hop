@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const exec = promisify(execFile);
@@ -33,6 +34,7 @@ const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
 const stableOnly = (versions) => versions.filter((v) => semver.valid(v) && !semver.prerelease(v));
 const newestFirst = (versions) => [...versions].sort(semver.rcompare);
 const day = (iso) => (iso || '').slice(0, 10) || null;
+const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
 
 class PlanError extends Error {}
 
@@ -433,8 +435,9 @@ async function buildPlan({ projectDir, to }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    const runner = { npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx' }[project.packageManager] || 'npx';
-    const command = [`${runner} ng update @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    // pnpm's runner keeps the selected CLI from redispatching to the app's old CLI and dirtying its lockfile.
+    const runner = { npm: 'npx ng update', pnpm: `pnpm exec node ${quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)))}`, yarn: 'yarn ng update', bun: 'bunx ng update' }[project.packageManager] || 'npx ng update';
+    const command = [`${runner} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {

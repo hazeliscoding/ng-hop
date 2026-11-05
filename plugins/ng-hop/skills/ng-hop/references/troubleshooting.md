@@ -50,6 +50,16 @@ Read which two requirements conflict. Usually a shared package such as `marked` 
 
 Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above.
 
+If the repository was clean immediately before an older pnpm plan printed this sequence:
+
+```text
+The installed Angular CLI version is outdated.
+Installing a temporary Angular CLI versioned 22 to perform the update.
+Error: Repository is not clean. Please commit or stash any changes before updating.
+```
+
+The installed CLI may have put its temporary package inside `node_modules`, where pnpm treats it as another workspace importer and changes the shared lockfile. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
+
 ## The build and tests pass, but the dev server fails
 
 `smoke.mjs` exists for this. Read its `server error` lines.

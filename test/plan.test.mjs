@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript } from './helpers/harness.mjs';
+import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
 const made = [];
 const app = (opts) => { const p = project(opts); made.push(p); return p; };
@@ -10,6 +10,7 @@ const base = { '@angular/core': '^20.0.0', '@angular/cli': '^20.0.0', typescript
 const lockBase = { '@angular/core': '20.2.0', typescript: '5.8.3', rxjs: '7.8.2' };
 const world = (...extra) => [...angular(), typescript(), pkg('rxjs', { '7.8.2': {} }), ...extra];
 const libIn = (result, major, name) => result.plan.hops.find((h) => h.major === major)?.libs.find((l) => l.name === name);
+const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
 
 // ---- Which release gets chosen ----------------------------------------------------------------------------------
 
@@ -417,13 +418,31 @@ test('a library that ships migrations is flagged', async () => {
   assert.equal(libIn(r, 21, '@angular/material').migrations, true);
 });
 
-for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', 'pnpm exec', 'pnpm'], ['yarn.lock', 'yarn', 'yarn'], ['bun.lock', 'bunx', 'bun']]) {
+for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', 'yarn ng', 'yarn'], ['bun.lock', 'bunx ng', 'bun']]) {
   test(`${manager} projects get ${manager} commands`, async () => {
     const r = await plan(world(), app({ deps: base, files: { [lockfile]: '' } }), { to: 21 });
     assert.equal(r.plan.project.packageManager, manager);
-    assert.ok(r.plan.hops[0].command.startsWith(`${runner} ng update`));
+    assert.ok(r.plan.hops[0].command.startsWith(manager === 'pnpm' ? `${runner} @angular/core@21` : `${runner} update`));
   });
 }
+
+test('pnpm bootstrap: each hop uses the scoped target CLI runner with every moving library', async () => {
+  const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0' }, '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0' } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': 'packages:\n  - .\n', 'node_modules/@angular/cli/package.json': '{"version":"20.2.0"}' } }), { to: 22 });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.plan.hops.map(h => h.command), [
+    `pnpm exec node ${quotePath(UPDATE)} @angular/core@21 @angular/cli@21 ui-lib@21.0.0`,
+    `pnpm exec node ${quotePath(UPDATE)} @angular/core@22 @angular/cli@22 ui-lib@22.0.0`,
+  ]);
+  for (const hop of r.plan.hops) assert.doesNotMatch(hop.command, /pnpm exec ng update|--force|--allow-dirty|--legacy-peer-deps|NG_DISABLE_VERSION_CHECK/);
+});
+
+test('pnpm bootstrap: the printed Run command selects the target CLI, not the local binary', async () => {
+  const r = await plan(world(), app({ deps: base, files: { 'pnpm-lock.yaml': '' } }), { to: 21, text: true });
+  assert.equal(r.code, 0);
+  assert.ok(r.stdout.includes(`Run: pnpm exec node ${quotePath(UPDATE)} @angular/core@21 @angular/cli@21`));
+  assert.doesNotMatch(r.stdout, /Run: pnpm exec ng update/);
+});
 
 test('Node outside a major\'s range is reported on that major', async () => {
   const [core, compiler] = angular();

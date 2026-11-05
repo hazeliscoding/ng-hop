@@ -10,6 +10,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugi
 export const PLAN = join(SCRIPTS, 'plan.mjs');
 export const GUIDE = join(SCRIPTS, 'guide.mjs');
 export const SMOKE = join(SCRIPTS, 'smoke.mjs');
+export const UPDATE = join(SCRIPTS, 'update.mjs');
 
 // releases: { '21.0.0': { peer: '^21.0.0', at: '2026-01-01', deprecated, peers: {...}, migrations: true } }
 export function pkg(name, releases, tags = {}) {
