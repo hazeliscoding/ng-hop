@@ -225,6 +225,23 @@ test('aligned tooling: historical Angular peers do not reject the eligible curre
   assert.doesNotMatch(r.plan.hops[0].command, /--force|--allow-dirty/);
 });
 
+test('aligned tooling: obsolete peers do not select an older angular-eslint package group', async () => {
+  const group = ['angular-eslint', '@angular-eslint/builder'];
+  const eslint = pkg('angular-eslint', {
+    '21.4.0': { peers: { '@angular/cli': '>=21.0.0 <22.0.0' }, migrations: true },
+    '22.1.0': { peers: { '@angular/cli': '>=22.0.0 <23.0.0', typescript: '*' }, migrations: true },
+    '22.6.0': { peers: { typescript: '*' }, migrations: true },
+  });
+  for (const [version, manifest] of Object.entries(eslint.versions)) { manifest['ng-update'].packageGroup = group; manifest.dependencies = { '@angular-eslint/builder': version }; }
+  const builder = pkg('@angular-eslint/builder', { '22.1.0': { peers: { '@angular/cli': '>=22.0.0 <23.0.0' } }, '22.6.0': { peers: { typescript: '*' } } });
+  const r = await plan(world(eslint, builder), app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, devDeps: { 'angular-eslint': '^21.4.0', '@angular-eslint/builder': '^22.6.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', 'angular-eslint': '21.4.0', '@angular-eslint/builder': '22.6.0' } }), { to: 22 });
+  assert.equal(r.code, 0);
+  assert.equal(libIn(r, 22, 'angular-eslint').to, '22.6.0');
+  assert.equal(libIn(r, 22, '@angular-eslint/builder').to, '22.6.0');
+  assert.match(r.plan.hops[0].command, /angular-eslint@22\.6\.0/);
+  assert.doesNotMatch(r.plan.hops[0].command, /angular-eslint@22\.1\.0|--force/);
+});
+
 test('aligned tooling: explicit peers on eligible releases still block an incompatible major', async () => {
   const lib = pkg('@angular-eslint/builder', { '22.1.0': { peer: '^22.0.0' }, '22.5.0': { peer: '^21.0.0' }, '22.6.0': { peer: '^21.0.0' } });
   const r = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0' }, devDeps: { '@angular-eslint/builder': '^22.5.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/builder': '22.5.0' } }), { to: 22 });
