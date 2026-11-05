@@ -46,7 +46,7 @@ Show the person the result in a few lines: where they can get to, what blocks an
 
 ## 3. Record the starting point
 
-Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`), then record, before changing anything:
+Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. Then record, before changing anything:
 
 ```sh
 npx --no-install ng build
@@ -114,4 +114,5 @@ An upgrade diff is already hard to review, and changes nobody asked for are the 
 - **No optional migrations** (`ng update --name ...`) and no moving to signals, standalone or new control flow, unless the major can't build without it. List them in the report instead.
 - **Tests stay as they are** unless the upgrade itself broke them. Never delete a test or loosen an assertion to get to green. If you do change a spec because an API changed, say so under hand fixes.
 - **No unrelated bumps or cleanups:** no `npm audit fix`, no newer versions of libraries the plan leaves alone, no reformatting.
-- **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
+- **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions`, `peerDependencyRules` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
+- **No approving a package's install script** without the person's approval. It runs that package's code on every install.

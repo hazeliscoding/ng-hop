@@ -64,6 +64,21 @@ test('nothing tells an agent to run plain npx ng, which can download an unrelate
   assert.doesNotMatch(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /['"`]npx['"`]\s*[,}]/);
 });
 
+test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {
+  // pnpm says so itself: The "pnpm" field in package.json is no longer read by pnpm.
+  const blocked = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8');
+  assert.match(blocked, /`peerDependencyRules\.allowedVersions` in `pnpm-workspace\.yaml`/);
+});
+
+test('undecided pnpm install scripts are declined, and approving one is left to the person', () => {
+  // Approving runs third-party code on every install. Declining is pnpm's own default and is easy to reverse.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  assert.match(trouble, /ERR_PNPM_IGNORED_BUILDS/);
+  assert.match(trouble, /Unable to install packages/);
+  assert.match(trouble, /Don't approve/);
+  assert.doesNotMatch(`${skill}\n${trouble}`, /run `pnpm approve-builds/i);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

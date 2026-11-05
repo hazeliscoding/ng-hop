@@ -28,7 +28,7 @@ Package "ngx-markdown" has an incompatible peer dependency to "@angular/common" 
 Something in the project needs an older Angular, and it isn't in the command.
 
 - Re-run `plan.mjs`. If it names `x` with a version, you ran an out-of-date command, so run the new one.
-- If `x` isn't a direct dependency, it's pulled in by one. Find the parent with `npm ls x` and treat the parent as the library to move.
+- If `x` isn't a direct dependency, it's pulled in by one. Find the parent with `npm ls x` (`pnpm why x` on pnpm) and treat the parent as the library to move.
 - If no release of `x` supports this major, it's a blocker: go to `blocked.md`.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
@@ -51,7 +51,7 @@ Read which two requirements conflict. Usually a shared package such as `marked` 
 
 Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above.
 
-If the repository was clean immediately before an older pnpm plan printed this sequence:
+If the repository was clean immediately before pnpm printed this sequence from a plain `pnpm exec ng update`:
 
 ```text
 The installed Angular CLI version is outdated.
@@ -59,7 +59,47 @@ Installing a temporary Angular CLI versioned 22 to perform the update.
 Error: Repository is not clean. Please commit or stash any changes before updating.
 ```
 
-The installed CLI may have put its temporary package inside `node_modules`, where pnpm treats it as another workspace importer and changes the shared lockfile. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
+The installed CLI put its temporary package inside the project (`node_modules`, or `.angular/cache/angular-cli-tmp-packages-*`), where pnpm treats it as another workspace importer and changes the lockfile. It happens from Angular 21's CLI onward, in any project with a `pnpm-workspace.yaml`, and a `packages` list in that file doesn't prevent it. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
+
+## `ERR_PNPM_IGNORED_BUILDS`, or `Unable to install packages` on pnpm
+
+```
+Error: ERR_PNPM_IGNORED_BUILDS
+  × installing dependencies
+  ╰─▶ Ignored build scripts: @parcel/watcher@2.6.0, esbuild@0.28.1,
+      lmdb@3.4.2, msgpackr-extract@3.0.6
+```
+
+pnpm 11 and newer won't run a dependency's install script until the project has decided about it, and every install exits 1 until each one is decided. Inside `ng update` this only shows as `✖ Installing packages [FAILED: Unable to install packages]`, with no migrations run, so run `pnpm install` yourself to see the reason. pnpm also writes `set this to true or false` placeholders into `pnpm-workspace.yaml`, which dirties the tree and must never be committed.
+
+1. Put the tree back: `git restore .`, and delete `pnpm-workspace.yaml` if `git status` shows it as untracked, since pnpm just made it.
+2. Decline each package the error names, by adding it to `pnpm-workspace.yaml` as `false` and keeping any entries already there:
+   ```yaml
+   allowBuilds:
+     esbuild: false
+   ```
+   That's what pnpm was already doing, so no new code runs, and it's easy to reverse. A real Angular 20 app installed, built, tested and ran with all four packages above declined.
+3. Don't approve a script yourself. `true` lets that package's code run on every install, so it's the person's decision.
+4. Run `pnpm install --frozen-lockfile`, commit the decision by itself, and carry on from where you were. If this interrupted `ng update`, re-run the plan and do that major again.
+5. If the build, tests or app then fail because a script didn't run, stop and ask. Name the package and what pulls it in (`pnpm why <package>`), and ask whether to allow it.
+
+In your report, list what you declined and say that `pnpm approve-builds <package>` reverses it.
+
+## `Package @angular/core was not found on the registry. Skipping.`
+
+Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps. The plan refuses to start on either. If you see this line anyway, put the tree back with `git restore .`.
+
+A catalog is shared across the workspace, so report it and ask. There are two ways forward: give the Angular packages plain versions in this app's `package.json` and plan again, or update the catalog by hand, run `pnpm install`, then run `pnpm exec ng update <package> --migrate-only --from <old version>` for each package.
+
+## `Found 0 dependencies` and `Package '@angular/core' is not a dependency`
+
+```
+Collecting installed dependencies...
+Found 0 dependencies.
+Package '@angular/core' is not a dependency.
+```
+
+This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versions `pnpm list` also returns the workspace root, listed first, and Angular's CLI ends up looking at the root's empty dependencies instead of the app's. Nothing has changed at this point. Check `pnpm --version`: pnpm 12.7 and newer are fine, and a real app went from Angular 20 to 22 inside a workspace on 12.16.1. Updating pnpm changes the person's tool, or their `packageManager` pin, so ask first.
 
 ## The build and tests pass, but the dev server fails
 
