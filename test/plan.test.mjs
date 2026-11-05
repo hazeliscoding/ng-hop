@@ -334,7 +334,7 @@ test('sibling libraries that agree pass', async () => {
 test('the command names Angular and every library that moves, and never forces', async () => {
   const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21 });
-  assert.equal(r.plan.hops[0].command, 'npx ng update @angular/core@21 @angular/cli@21 ui-lib@21.0.0');
+  assert.equal(r.plan.hops[0].command, 'npx --no-install ng update @angular/core@21 @angular/cli@21 ui-lib@21.0.0');
   assert.doesNotMatch(r.stdout, /--force/);
 });
 
@@ -344,7 +344,7 @@ test('a library that ships migrations is flagged', async () => {
   assert.equal(libIn(r, 21, '@angular/material').migrations, true);
 });
 
-for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', 'pnpm exec', 'pnpm'], ['yarn.lock', 'yarn', 'yarn'], ['bun.lock', 'bunx', 'bun']]) {
+for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', 'pnpm exec', 'pnpm'], ['yarn.lock', 'yarn', 'yarn'], ['bun.lock', 'bunx --no-install', 'bun']]) {
   test(`${manager} projects get ${manager} commands`, async () => {
     const r = await plan(world(), app({ deps: base, files: { [lockfile]: '' } }), { to: 21 });
     assert.equal(r.plan.project.packageManager, manager);
@@ -374,7 +374,29 @@ test('on the target major but behind on patches, the plan offers them', async ()
   const r = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/core': '20.0.0', '@angular/cli': '20.0.0' } }), { to: 20 });
   assert.equal(r.code, 0);
   assert.equal(r.plan.status, 'already-there');
-  assert.equal(r.plan.patches.command, 'npx ng update @angular/core@20.2.0 @angular/cli@20.2.0');
+  assert.equal(r.plan.patches.command, 'npx --no-install ng update @angular/core@20.2.0 @angular/cli@20.2.0');
+});
+
+test('a deprecated patch is never offered, the same as anywhere else in the plan', async () => {
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.1.0': {}, '20.2.0': { deprecated: 'broken release' } }, { latest: '20.1.0' });
+  const r = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/core': '20.2.0', '@angular/cli': '20.0.0' } }), { to: 20 });
+  assert.deepEqual(r.plan.patches.packages.map((p) => [p.name, p.to]), [['@angular/cli', '20.1.0']]);
+});
+
+test('a patch above the latest tag is never offered', async () => {
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.1.0': {}, '20.9.0': {} }, { latest: '20.1.0' });
+  const r = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/core': '20.2.0', '@angular/cli': '20.0.0' } }), { to: 20 });
+  assert.equal(r.plan.patches.packages[0].to, '20.1.0');
+});
+
+test('no printed command can download an unrelated package named ng', async () => {
+  // npm has a package called `ng` that has nothing to do with Angular, and plain `npx ng` runs it when no CLI is installed.
+  const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' } });
+  const hop = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21 });
+  assert.match(hop.plan.hops[0].command, /^npx --no-install ng update /);
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.2.0': {} });
+  const patch = await plan(world(cli), app({ deps: base, lock: { ...lockBase, '@angular/core': '20.0.0', '@angular/cli': '20.0.0' } }), { to: 20 });
+  assert.match(patch.plan.patches.command, /^npx --no-install ng update /);
 });
 
 test('fully up to date offers nothing', async () => {
@@ -491,7 +513,7 @@ test('the text report leads with the result and names the blocker', async () => 
   assert.equal(r.code, 2);
   assert.match(r.stdout, /Result: BLOCKED at Angular 22\. Angular 21 is the highest version everything supports today\./);
   assert.match(r.stdout, /@nebular\/theme: no stable release/);
-  assert.match(r.stdout, /Run: npx ng update @angular\/core@21 @angular\/cli@21 @nebular\/theme@17\.0\.0/);
+  assert.match(r.stdout, /Run: npx --no-install ng update @angular\/core@21 @angular\/cli@21 @nebular\/theme@17\.0\.0/);
 });
 
 test('the text report calls out unconfirmed libraries', async () => {

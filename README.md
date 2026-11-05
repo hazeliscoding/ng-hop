@@ -22,7 +22,7 @@ Angular 21 (21.2.26)
   @nebular/theme: 16.0.0 -> 17.0.0; supports it (^21.0.0)
   primeng: 20.0.0 -> 21.1.10; supports it (^21.0.0)
   ag-grid-angular: 34.0.0 -> 36.3.0; UNCONFIRMED: open-ended range, check the running app (>= 20.0.0)
-  Run: npx ng update @angular/core@21 @angular/cli@21 @nebular/theme@17.0.0 ag-grid-angular@36.3.0 primeng@21.1.10
+  Run: npx --no-install ng update @angular/core@21 @angular/cli@21 @nebular/theme@17.0.0 ag-grid-angular@36.3.0 primeng@21.1.10
 
 Blockers
   Angular 22: @nebular/theme: no stable release at or above 17.0.0 supports Angular 22;

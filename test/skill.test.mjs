@@ -57,6 +57,13 @@ test('the skill only ever mentions forcing as something the person must approve'
   for (const line of lines) assert.match(line, /unnecessary|without the person's approval|Don't try/, line);
 });
 
+test('nothing tells an agent to run plain npx ng, which can download an unrelated package', () => {
+  const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
+  assert.ok(docs.some((d) => /npx --no-install ng /.test(d)), 'positive control: the safe form is in use');
+  for (const doc of docs) assert.doesNotMatch(doc, /npx ng\b/);
+  assert.doesNotMatch(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /['"`]npx['"`]\s*[,}]/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

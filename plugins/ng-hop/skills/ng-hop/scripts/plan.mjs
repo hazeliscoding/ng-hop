@@ -36,6 +36,10 @@ const day = (iso) => (iso || '').slice(0, 10) || null;
 
 class PlanError extends Error {}
 
+// --no-install because npm has an unrelated package named `ng`: plain `npx ng` would download and run it whenever the
+// project's CLI isn't installed. pnpm exec and yarn only run what's installed already.
+const runnerFor = (project) => ({ npm: 'npx --no-install', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx --no-install' }[project.packageManager] || 'npx --no-install');
+
 // Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
 // read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.
 function runNpm(args, options) {
@@ -425,8 +429,7 @@ async function buildPlan({ projectDir, to }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    const runner = { npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx' }[project.packageManager] || 'npx';
-    const command = [`${runner} ng update @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    const command = [`${runnerFor(project)} ng update @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {
@@ -448,12 +451,11 @@ async function buildPlan({ projectDir, to }) {
     for (const name of ['@angular/core', '@angular/cli']) {
       const have = project.installed(name)?.version;
       const doc = have ? await registry.get(name) : null;
-      const newest = doc ? semver.maxSatisfying(stableOnly(Object.keys(doc.versions)), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`) : null;
+      const newest = doc ? semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`) : null;
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
     if (behind.length) {
-      const runner = { npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx' }[project.packageManager] || 'npx';
-      plan.patches = { packages: behind, command: `${runner} ng update ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
+      plan.patches = { packages: behind, command: `${runnerFor(project)} ng update ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
     }
   }
   plan.blockedAt = blockedAt;
