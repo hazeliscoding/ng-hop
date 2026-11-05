@@ -710,3 +710,15 @@ test('pnpm: a catalog that holds nothing the upgrade moves does not stop the pla
   assert.equal(r.code, 0, r.stderr);
   assert.ok(r.plan.unchecked.some((u) => u.name === 'date-fns'));
 });
+
+test('pnpm: a patch that moves the CLI goes through the runner, because the old CLI would dirty the lockfile', async () => {
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.2.0': {} });
+  const r = await plan(world(cli), app({ deps: base, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '20.0.0', cli: '20.0.0' })) } }), { to: 20 });
+  assert.equal(r.plan.patches.command, `pnpm exec node ${quotePath(UPDATE)} @angular/core@20.2.0 @angular/cli@20.2.0`);
+});
+
+test('pnpm: a patch that leaves the CLI alone runs the installed one, since nothing has to bootstrap', async () => {
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '20.2.0': {} });
+  const r = await plan(world(cli), app({ deps: base, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '20.0.0', cli: '20.2.0' })) } }), { to: 20 });
+  assert.equal(r.plan.patches.command, 'pnpm exec ng update @angular/core@20.2.0');
+});

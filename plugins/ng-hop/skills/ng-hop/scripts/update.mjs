@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
-const USAGE = 'Usage: update.mjs [--project <dir>] [--json] @angular/core@<major> @angular/cli@<major> [library@version ...]\nRuns the planned pnpm hop once. No force flags, retries, resets, commits or manager provisioning.';
+const USAGE = 'Usage: update.mjs [--project <dir>] [--json] @angular/core@<version> @angular/cli@<version> [library@version ...]\nRuns the planned pnpm hop or patch once. No force flags, retries, resets, commits or manager provisioning.';
 
 // Node cannot exec a Windows .cmd file without a shell. Read only the standard shim's literal script path instead.
 function pnpmCommand(cwd) {
@@ -48,9 +48,11 @@ function main() {
     if (at < 1 || !VALID_NAME.test(name) || !semver.validRange(version) || names.has(name)) throw new Error('Invalid or duplicate package specifier. Use the exact packages from the plan.');
     names.add(name);
   }
-  const cli = /^@angular\/cli@(\d+)$/.exec(positionals.find(spec => spec.startsWith('@angular/cli@')) || '');
+  // A hop names majors for both. A patch names exact versions, and may only move the CLI.
+  const cli = /^@angular\/cli@(\d+)(?:\.\d+\.\d+)?$/.exec(positionals.find(spec => spec.startsWith('@angular/cli@')) || '');
+  const core = positionals.find(spec => spec.startsWith('@angular/core@'));
   const major = Number(cli?.[1]);
-  if (!Number.isSafeInteger(major) || major < 2 || !positionals.includes(`@angular/core@${major}`)) throw new Error('The framework requests must name the same target major for @angular/core and @angular/cli.');
+  if (!Number.isSafeInteger(major) || major < 2 || (core && semver.coerce(core.slice('@angular/core@'.length))?.major !== major)) throw new Error('The framework requests must name the same target major for @angular/core and @angular/cli.');
   const cwd = resolve(values.project || '.');
   const pnpm = pnpmCommand(cwd);
   const status = spawnSync('git', ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all'], { cwd, encoding: 'utf8', windowsHide: true });
@@ -61,7 +63,7 @@ function main() {
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
   // Angular's own temporary runner uses this same child-only dispatch control. It does not bypass Git or peers.
-  const args = ['dlx', `@angular/cli@${major}`, 'update', ...positionals];
+  const args = ['dlx', cli[0], 'update', ...positionals];
   const result = spawnSync(pnpm.file, [...pnpm.prefix, ...args], { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 });
   const exitCode = result.status ?? 1;
   if (values.json) console.log(JSON.stringify({ exitCode, targetMajor: major, command: ['pnpm', ...args], stdout: redact(result.stdout), stderr: redact(result.stderr), error: result.error ? 'The update process did not finish. Inspect its outcome before another attempt.' : null }, null, 2));

@@ -509,7 +509,9 @@ async function buildPlan({ projectDir, to }) {
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
     if (behind.length) {
-      plan.patches = { packages: behind, command: `${runnerFor(project)} ng update ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
+      // Only a CLI that has to move bootstraps a temporary copy of itself.
+      const update = behind.some((b) => b.name === '@angular/cli') ? updateCommand(project) : `${runnerFor(project)} ng update`;
+      plan.patches = { packages: behind, command: `${update} ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
     }
   }
   plan.blockedAt = blockedAt;

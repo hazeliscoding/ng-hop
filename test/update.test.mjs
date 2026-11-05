@@ -81,6 +81,29 @@ test('pnpm updater: invalid package names are rejected before reaching a process
   assert.equal(existsSync(f.capture), false);
 });
 
+test('pnpm updater: a patch release runs that exact target CLI', async () => {
+  const f = fixture();
+  const specs = ['@angular/core@21.2.26', '@angular/cli@21.2.29'];
+  const r = await runScript(UPDATE, ['--json', ...specs], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.read().args, ['dlx', '@angular/cli@21.2.29', 'update', ...specs]);
+});
+
+test('pnpm updater: a patch that only moves the CLI is allowed', async () => {
+  const f = fixture();
+  const r = await runScript(UPDATE, ['--json', '@angular/cli@21.2.29'], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.read().args, ['dlx', '@angular/cli@21.2.29', 'update', '@angular/cli@21.2.29']);
+});
+
+test('pnpm updater: exact versions on different majors are still refused', async () => {
+  const f = fixture();
+  const r = await runScript(UPDATE, ['--json', '@angular/core@21.2.26', '@angular/cli@22.0.0'], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 1);
+  assert.match(JSON.parse(r.stdout).error, /same target major/);
+  assert.equal(existsSync(f.capture), false);
+});
+
 test('pnpm updater: framework requests must name the same single target major', async () => {
   const f = fixture();
   const r = await runScript(UPDATE, ['--json', '@angular/core@21', '@angular/cli@22'], { cwd: f.project, env: f.env });
