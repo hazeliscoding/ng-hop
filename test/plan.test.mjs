@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
@@ -612,4 +613,100 @@ test('the text report calls out unconfirmed libraries', async () => {
   const lib = pkg('ag-grid-angular', { '36.0.0': { peer: '>=20.0.0', at: '2026-08-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^36.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '36.0.0' } }), { text: true, to: 22 });
   assert.match(r.stdout, /UNCONFIRMED/);
+});
+
+// ---- pnpm -------------------------------------------------------------------------------------------------------
+
+// The shape pnpm 12 writes, including the peer suffix on a resolved version.
+const pnpmImporter = (name, versions = {}) => {
+  const v = { core: '20.2.0', cli: '20.2.0', lib: '20.1.0', ...versions };
+  return `  ${name}:
+    dependencies:
+      '@angular/core':
+        specifier: ^20.0.0
+        version: ${v.core}(@angular/compiler@${v.core})(rxjs@7.8.2)
+      rxjs:
+        specifier: ~7.8.0
+        version: 7.8.2
+      ui-lib:
+        specifier: ^20.0.0
+        version: ${v.lib}(@angular/core@${v.core}(rxjs@7.8.2))
+    devDependencies:
+      '@angular/cli':
+        specifier: ^20.0.0
+        version: ${v.cli}
+      typescript:
+        specifier: ~5.8.0
+        version: 5.8.3
+`;
+};
+const pnpmLock = (...importers) => `lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n\nimporters:\n\n${importers.join('\n')}\npackages:\n\n  '@angular/core@19.0.0':\n    resolution: {integrity: sha512-x}\n    version: 19.0.0\n`;
+const uiLib = () => pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' } });
+
+test('pnpm: the lockfile gives the installed versions when nothing is installed yet', async () => {
+  const r = await plan(world(uiLib()), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.project.angular, '20.2.0');
+  assert.equal(r.plan.project.angularSource, 'lockfile');
+  assert.equal(libIn(r, 21, 'ui-lib').from, '20.1.0');
+});
+
+test('pnpm: the lockfile beats a stale node_modules, so a resume after a stash reads the right major', async () => {
+  const r = await plan(world(), app({ deps: base, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'node_modules/@angular/core/package.json': '{"version":"21.0.0"}' } }), { to: 21 });
+  assert.equal(r.plan.project.angular, '20.2.0');
+});
+
+test('pnpm: a lockfile it cannot read falls back to node_modules, with no guess', async () => {
+  const r = await plan(world(), app({ deps: base, files: { 'pnpm-lock.yaml': 'lockfileVersion: 5.4\nspecifiers:\n  x: 1\n', 'node_modules/@angular/core/package.json': '{"version":"20.1.0"}' } }), { to: 21 });
+  assert.equal(r.plan.project.angular, '20.1.0');
+  assert.equal(r.plan.project.angularSource, 'node_modules');
+});
+
+test('pnpm: an app inside a workspace gets pnpm commands and its own entry in the root lockfile', async () => {
+  const p = app({
+    deps: {},
+    files: {
+      'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n",
+      'pnpm-lock.yaml': pnpmLock('  .: {}\n', pnpmImporter('apps/other', { core: '19.0.0', cli: '19.0.0' }), pnpmImporter('apps/web')),
+      'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.0.0', rxjs: '~7.8.0' }, devDependencies: { '@angular/cli': '^20.0.0', typescript: '~5.8.0' } }),
+    },
+  });
+  const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.project.packageManager, 'pnpm');
+  assert.equal(r.plan.project.angular, '20.2.0');
+  assert.equal(r.plan.project.angularSource, 'lockfile');
+  assert.ok(r.plan.hops[0].command.startsWith(`pnpm exec node ${quotePath(UPDATE)}`));
+});
+
+test('pnpm: a lockfile in a parent folder with no workspace file has nothing to do with the app', async () => {
+  const p = app({ deps: {}, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('apps/web')), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.0.0' } }) } });
+  const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 21 });
+  assert.equal(r.plan.project.packageManager, 'npm');
+  assert.equal(r.plan.project.angularSource, 'package.json range');
+});
+
+test('pnpm: an npm lockfile beside the app beats a pnpm workspace above it', async () => {
+  const p = app({ deps: {}, files: { 'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n", 'pnpm-lock.yaml': pnpmLock(pnpmImporter('apps/web')), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.0.0' } }), 'apps/web/package-lock.json': JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/@angular/core': { version: '20.0.0' } } }) } });
+  const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 21 });
+  assert.equal(r.plan.project.packageManager, 'npm');
+  assert.equal(r.plan.project.angular, '20.0.0');
+});
+
+// `ng update` prints "Package @angular/core was not found on the registry. Skipping." for these and exits 0.
+for (const [name, spec] of [['@angular/core', 'catalog:'], ['@angular/router', 'catalog:angular'], ['typescript', 'catalog:']]) {
+  test(`pnpm: ${name} from a catalog (${spec}) stops the plan, because ng update would skip it and still exit 0`, async () => {
+    const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21 });
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /catalog/);
+    assert.ok(r.stderr.includes(name));
+    assert.match(r.stderr, /ng update/);
+    assert.equal(r.stdout, '');
+  });
+}
+
+test('pnpm: a catalog that holds nothing the upgrade moves does not stop the plan', async () => {
+  const r = await plan(world(pkg('date-fns', { '4.0.0': {} })), app({ deps: { ...base, 'date-fns': 'catalog:' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.plan.unchecked.some((u) => u.name === 'date-fns'));
 });

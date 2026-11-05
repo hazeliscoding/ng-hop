@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -121,6 +121,39 @@ function readJson(path) {
   }
 }
 
+// A pnpm workspace keeps one lockfile at its root, usually above the app.
+function findPnpmRoot(dir) {
+  if (existsSync(join(dir, 'pnpm-lock.yaml'))) return dir;
+  for (let d = dirname(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'pnpm-workspace.yaml')) && existsSync(join(d, 'pnpm-lock.yaml'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+// One app's resolved versions from pnpm-lock.yaml. It's a fixed text shape, and YAML isn't worth a dependency. A shape
+// it doesn't recognise (older lockfiles) gives nothing, and the plan falls back to node_modules.
+function readPnpmLock(root, dir) {
+  const importer = relative(root, dir).replace(/\\/g, '/') || '.';
+  const unquote = (text) => text.replace(/^['"]|['"]$/g, '');
+  const versions = {};
+  let inImporters = false;
+  let inApp = false;
+  let name = null;
+  for (const line of readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8').split(/\r?\n/)) {
+    if (/^\S/.test(line)) { inImporters = line === 'importers:'; inApp = false; continue; }
+    if (!inImporters) continue;
+    const key = /^ {2}(\S.*?):( \{\})?$/.exec(line);
+    if (key) { inApp = unquote(key[1]) === importer; continue; }
+    if (!inApp) continue;
+    const dep = /^ {6}(\S.*?):$/.exec(line);
+    if (dep) { name = unquote(dep[1]); continue; }
+    const version = /^ {8}version: (\S+)/.exec(line);
+    // The suffix records peers, as in 20.3.35(rxjs@7.8.2).
+    if (version && name) versions[name] = unquote(version[1]).split('(')[0];
+  }
+  return versions;
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -131,14 +164,16 @@ function readProject(dir) {
   }
   const lockPath = join(dir, 'package-lock.json');
   const lock = existsSync(lockPath) ? readJson(lockPath) : null;
+  const pnpmRoot = lock ? null : findPnpmRoot(dir);
+  const pnpmLock = pnpmRoot ? readPnpmLock(pnpmRoot, dir) : {};
   const packageManager = lock ? 'npm'
-    : existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm'
+    : pnpmRoot ? 'pnpm'
     : existsSync(join(dir, 'yarn.lock')) ? 'yarn'
     : existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bun.lock')) ? 'bun'
     : (pkg.packageManager || 'npm').split('@')[0];
 
   const installed = (name) => {
-    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version;
+    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name];
     if (fromLock && semver.valid(fromLock)) return { version: fromLock, source: 'lockfile' };
     const modPath = join(dir, 'node_modules', name, 'package.json');
     if (existsSync(modPath)) {
@@ -295,6 +330,13 @@ async function buildPlan({ projectDir, to }) {
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const registry = registryClient(JSON.parse(configText), projectDir);
+
+  // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
+  // still exits 0. Angular 22's stops with an error instead.
+  const catalogued = Object.keys(project.deps).filter((n) => String(project.deps[n]).startsWith('catalog:') && (isFramework(n) || n === 'typescript'));
+  if (catalogued.length) {
+    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Give these packages plain versions in package.json, commit that, and plan again. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
+  }
 
   const currentCore = project.installed('@angular/core');
   if (!currentCore) throw new PlanError(`Could not work out the installed @angular/core version from "${project.deps['@angular/core']}".`);
