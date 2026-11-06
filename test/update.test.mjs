@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -37,7 +37,8 @@ test('pnpm updater: selected target CLI gets scoped version dispatch, not a Git 
   assert.equal(r.code, 0, r.stderr || r.stdout);
   const called = f.read();
   assert.deepEqual(called.args, ['dlx', '@angular/cli@22', 'update', ...packages]);
-  assert.equal(called.cwd, f.project);
+  // macOS's temp folder is a symlink, and a process reports the real path.
+  assert.equal(realpathSync(called.cwd), realpathSync(f.project));
   assert.equal(called.dispatch, 'true');
   assert.deepEqual(called.controls, ['NG_DISABLE_VERSION_CHECK']);
   assert.equal(called.analytics, 'false');
