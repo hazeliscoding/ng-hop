@@ -32,7 +32,8 @@ export const FIXTURES = {
   // Nebular has no release for Angular 22, so this app can reach 21 and no further.
   'nebular-blocked': {
     angular: 20,
-    install: ['@angular/cdk@20', '@angular/animations@20', '@nebular/theme@16.0.0', '@nebular/eva-icons@16.0.0', 'eva-icons@1.1.3'],
+    // Not `@angular/animations@20`: it's deprecated from 20.2 on, so npm would pick 20.1.8, which pins Angular to 20.1.8.
+    install: ['@angular/cdk@20', '@angular/animations@^20.3.0', '@nebular/theme@16.0.0', '@nebular/eva-icons@16.0.0', 'eva-icons@1.1.3'],
     files: {
       ...config(["import { importProvidersFrom } from '@angular/core';", "import { provideAnimations } from '@angular/platform-browser/animations';", "import { NbThemeModule, NbLayoutModule } from '@nebular/theme';"], ['provideAnimations()', "importProvidersFrom(NbThemeModule.forRoot({ name: 'default' }), NbLayoutModule)"]),
       ...shell(["import { NbButtonModule, NbCardModule, NbLayoutModule } from '@nebular/theme';"], `<nb-layout><nb-layout-column><nb-card><nb-card-body><button nbButton>Save</button></nb-card-body></nb-card></nb-layout-column></nb-layout>`, { componentImports: 'NbButtonModule, NbCardModule, NbLayoutModule' }),

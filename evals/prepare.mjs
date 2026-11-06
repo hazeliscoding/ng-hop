@@ -77,7 +77,7 @@ for (const name of names) {
     const core = JSON.parse(readFileSync(join(dir, 'node_modules/@angular/core/package.json'), 'utf8')).version;
     console.log(`${name}: ok on Angular ${core}, tests ${testsPass ? 'pass' : 'fail as intended'}, ${Math.round((Date.now() - started) / 1000)}s`);
   } catch (err) {
-    console.log(`${name}: FAILED: ${String(err.stderr || err.stdout || err.message).split('\n').filter((l) => /error|ERR!|failed|Cannot|TS\d+/i.test(l)).slice(0, 8).join(' | ').slice(0, 900) || err.message.slice(0, 400)}`);
+    console.log(`${name}: FAILED: ${String(err.stderr || err.stdout || err.message).split('\n').filter((l) => /error|ERR!|failed|Cannot|TS\d+/i.test(l)).slice(0, 14).join(' | ').slice(0, 1400) || err.message.slice(0, 400)}`);
     process.exitCode = 1;
   }
 }
