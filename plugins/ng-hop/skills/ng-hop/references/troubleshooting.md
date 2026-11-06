@@ -108,6 +108,14 @@ This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versi
 - **`Could not resolve "marked-katex-extension"` (or `mermaid`, `katex`, `clipboard`):** `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
 - **Anything else:** check whether the same error appears in the `smoke.mjs` result from before this major. If it does, it isn't from this upgrade.
 
+## `No matching export in "node_modules/@angular/cdk/fesm2022/collections.mjs" for import "_VIEW_REPEATER_STRATEGY"`
+
+A peer range says which versions a library accepts, not that it works with them. Nebular 17 accepts `@angular/cdk` `^21.0.0`, but it imports a private CDK name that CDK removed in 21.1.0, so the plan's newest CDK breaks the build.
+
+1. Find the newest release in the same major that still exports the name, by unpacking releases with `npm pack` in a temporary folder.
+2. Install that exact version, with no override, and run the checks again.
+3. Under hand fixes, say which package is held, why, and that it won't get fixes until the library catches up. That also counts toward replacing the library.
+
 ## The app shows a license banner after a major (`Invalid PrimeUI License`)
 
 A library's new major can change its license, and the build, tests and `smoke.mjs` all still pass. PrimeNG 21 is MIT, while PrimeNG 22 is the commercial PrimeUI license with a required key and a free tier for small organizations, and it shows a red badge without a key, in production builds too. No PrimeNG 21 release accepts Angular 22. npm can't warn about this: its `license` field says `SEE LICENSE IN LICENSE.md` on both.
