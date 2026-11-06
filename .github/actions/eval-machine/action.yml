@@ -1,0 +1,43 @@
+name: Eval machine
+description: Node, pnpm, Claude Code, and the user with no sudo that everything untrusted runs as.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+
+    - name: Set up the tools and the evals user
+      shell: bash
+      run: |
+        # Pinned so a batch's cases all ran on the same tools. Bump them only with a rerun of every case.
+        npm install -g pnpm@12.16.1 @anthropic-ai/claude-code@2.1.319
+
+        # Ubuntu 24.04 blocks the user namespaces that Chrome's sandbox needs.
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        # A process may not read the memory of one that isn't its descendant, the agent's included.
+        sudo sysctl -w kernel.yama.ptrace_scope=1
+
+        # The runner's own user has sudo and docker, either of which could read the secret out of the runner's memory.
+        sudo useradd --create-home evals
+        sudo chmod 700 "$HOME"
+        sudo mkdir /home/evals/ws
+        sudo cp -r "$GITHUB_WORKSPACE" /home/evals/ng-hop
+        sudo chown -R evals: /home/evals
+        sudo -u evals -H env -C /home/evals git config --global user.name Fixture
+        sudo -u evals -H env -C /home/evals git config --global user.email fixture@example.invalid
+
+        sudo tee /usr/local/bin/as-evals > /dev/null <<'EOF'
+        #!/bin/bash
+        # An empty environment, so nothing of the runner's reaches an agent or an install script. No CI flag either:
+        # pnpm refuses to change a lockfile when it sees one, which isn't what happens on someone's machine.
+        # The scrub is off because it forces the permission mode to default, so these runs would stop matching local
+        # ones. It has nothing to do here: the login reaches Claude Code over a descriptor, in no environment at all.
+        exec sudo -u evals -H env -i -C /home/evals/ng-hop \
+          PATH="$PATH" HOME=/home/evals USER=evals LANG=C.UTF-8 \
+          CHROME_BIN=/usr/bin/google-chrome NG_HOP_WORKSPACE=/home/evals/ws NG_CLI_ANALYTICS=false \
+          DISABLE_AUTOUPDATER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 \
+          "$@"
+        EOF
+        sudo chmod 755 /usr/local/bin/as-evals
