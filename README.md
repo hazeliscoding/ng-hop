@@ -48,6 +48,8 @@ claude plugin install ng-hop@ng-hop
 
 It needs Node 18 or newer, and nothing else.
 
+Real upgrades have run on npm and on pnpm 12, including an app inside a pnpm workspace. The plan refuses an app whose Angular comes from a pnpm catalog, because `ng update` can't move those packages. yarn and bun get the right commands, but no real upgrade has run on them yet.
+
 ### Other agents
 
 The skill is a plain [Agent Skill](https://agentskills.io): a `SKILL.md` and Node scripts, with nothing tied to Claude Code. The plugin commands above are Claude Code's, so elsewhere you copy the folder instead:

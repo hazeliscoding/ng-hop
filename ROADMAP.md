@@ -37,6 +37,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **Decline undecided pnpm install scripts, and leave approving them to the person (2026-11-05).** pnpm 11 and newer exit 1 on every install until each script is decided. *Why:* declining is what pnpm already does, so no new code runs and the upgrade can carry on, and a real Angular 20 app installed, built, tested and ran with all four declined. Approving runs third-party code on every install, which is the person's call. *Gave up:* a small commit nobody asked for, and a stop if a check then fails because a script didn't run.
 - **Refuse a pnpm catalog that holds Angular or TypeScript (2026-11-05).** *Why:* through Angular 21's CLI, `ng update` prints `Package @angular/core was not found on the registry. Skipping.` and exits 0, having moved the libraries and left Angular behind with no migrations run. Angular 22's CLI stops with an error. A plan that can't be carried out isn't one to trust. *Gave up:* catalog projects have to move those packages to plain versions first. Library entries in a catalog are only reported as unchecked.
 - **Read `pnpm-lock.yaml` as text, and look above the app for a workspace root (2026-11-05).** *Why:* an app inside a pnpm workspace was reported as npm and given npm commands, and with nothing installed its versions came from the bottom of each range. The skill's promise that the plan reads the lockfile also wasn't true on pnpm. *Gave up:* lockfiles older than pnpm 9's format can fall back to `node_modules`.
+- **Keep `peerDependencyRules` in the pnpm force recipe, though pnpm's docs deprecate it (2026-11-05).** A plain agent in the baseline pointed out the deprecation. *Why:* the documented replacement, `overrides` with `:peer`, fails with `ERR_PNPM_INVALID_SELECTOR` on pnpm 12.4.2 and 12.16.1, while `peerDependencyRules` works on both. *Gave up:* the recipe needs revisiting once a released pnpm accepts the new form.
 
 ## Milestones
 
@@ -81,6 +82,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 ## Later
 
 - Run the skill in GitHub Copilot for real, and take a whole upgrade through OpenCode. So far Copilot is checked from its docs and OpenCode on one question.
+- Warn when a library's new major changes its license. npm can't show it: `primeng` says `SEE LICENSE IN LICENSE.md` on 21, which is MIT, and on 22, which is commercial. The running app showed it, and agents with and without the skill both noticed and reported it.
 - Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
 - Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`.
 - Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result.
