@@ -89,6 +89,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
 - Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`.
 - Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result.
+- Tell people when a framework package they use is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`. The plan leaves it to `ng update` and doesn't mention it.
 - A `--next` mode for upgrading to a prerelease Angular.
 - Use the DevTools protocol in `smoke.mjs`, so it sees every console error.
 

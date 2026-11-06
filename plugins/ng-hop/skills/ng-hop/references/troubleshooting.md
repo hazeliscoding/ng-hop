@@ -47,6 +47,8 @@ Earlier builder releases declared an Angular CLI peer; later releases moved that
 
 Read which two requirements conflict. Usually a shared package such as `marked` has to move in the same command as the library that needs it, so install them together. Don't use `--legacy-peer-deps`, which skips the check and records a lockfile that the next `npm ci` may reject.
 
+**`peer @angular/common@"20.1.8" from @angular/animations@20.1.8`:** `@angular/animations` is deprecated from 20.2 on, and npm avoids deprecated releases when a range has another, so `npm install @angular/animations@20` lands on 20.1.8 and asks for the rest of Angular at exactly that version. Name the version `@angular/core` is on instead, such as `@angular/animations@20.3.35`.
+
 ## `Repository is not clean`
 
 Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above.
