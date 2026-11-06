@@ -108,6 +108,12 @@ This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versi
 - **`Could not resolve "marked-katex-extension"` (or `mermaid`, `katex`, `clipboard`):** `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
 - **Anything else:** check whether the same error appears in the `smoke.mjs` result from before this major. If it does, it isn't from this upgrade.
 
+## The app shows a license banner after a major (`Invalid PrimeUI License`)
+
+A library's new major can change its license, and the build, tests and `smoke.mjs` all still pass. PrimeNG 21 is MIT, while PrimeNG 22 is the commercial PrimeUI license with a required key and a free tier for small organizations, and it shows a red badge without a key, in production builds too. No PrimeNG 21 release accepts Angular 22. npm can't warn about this: its `license` field says `SEE LICENSE IN LICENSE.md` on both.
+
+This can cost the person money, so put it first in your report and ask whether to keep the major, stay on the one before, or replace the library. Quote the library's own `LICENSE.md` instead of summarizing from memory, and don't add a key or look for a way around the check.
+
 ## A file named in `angular.json` no longer exists
 
 Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js`, which apps often list under `scripts`. Before removing the entry, search the code for anything using what it provided (a global `marked`, for instance). If nothing does, remove it and say so under hand fixes. If something does, switch that code to an import.

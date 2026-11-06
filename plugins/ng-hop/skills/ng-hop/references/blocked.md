@@ -33,7 +33,7 @@ Do it as its own commit, so it's easy to revert and easy to see in review.
 
 1. Add the override, narrowly, for this library's Angular peers only:
    - **npm:** `overrides` in `package.json`, such as `{ "@nebular/theme": { "@angular/core": "$@angular/core" } }`, with one entry for each Angular package it names as a peer.
-   - **pnpm 11 or newer:** `peerDependencyRules.allowedVersions` in `pnpm-workspace.yaml`. These versions ignore the `pnpm` field in `package.json`.
+   - **pnpm 11 or newer:** `peerDependencyRules.allowedVersions` in `pnpm-workspace.yaml`, with one entry for each Angular package it names as a peer, such as `'@nebular/theme>@angular/core': '22'`. These versions ignore the `pnpm` field in `package.json`. pnpm's docs call this setting deprecated in favour of `overrides` with `:peer`, but on pnpm 12.16.1 that form fails with `ERR_PNPM_INVALID_SELECTOR`, so try it first only on a newer pnpm.
    - **pnpm 10 or older:** `pnpm.peerDependencyRules.allowedVersions` in `package.json`.
    - **yarn:** `resolutions`, which is less precise, so name exact versions.
 2. Run the `ng update` for the major with `--force`, since the peer check would otherwise stop it. Passing `--force` is what they just approved.
