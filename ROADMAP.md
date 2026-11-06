@@ -76,8 +76,8 @@ Everything else gets ordinary care, but none of these three gets traded away for
 
 ### M4: 0.1.0
 
-- [ ] `CONTRIBUTING.md`, `SECURITY.md` and a changelog.
-- [ ] Install from the marketplace on a clean machine.
+- [x] `CONTRIBUTING.md`, `SECURITY.md` and a changelog.
+- [x] Install from the marketplace on a clean machine. CI does this on every push, and runs a real plan from the installed copy.
 - [ ] Tag `v0.1.0`.
 
 **Done when:** someone can install it from the README's commands and run it on their app.
