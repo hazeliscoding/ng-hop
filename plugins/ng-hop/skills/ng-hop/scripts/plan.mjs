@@ -380,10 +380,27 @@ async function buildPlan({ projectDir, to }) {
   });
   const coupledNames = screened.filter(Boolean).sort();
   const coupled = new Set(coupledNames);
-  const docs = new Map(await mapLimited(coupledNames, async (name) => [name, await registry.get(name, true)]));
+
+  // A library with no Angular peer can still be tied to one that moves. @nebular/eva-icons 16 peers on @nebular/theme
+  // at exactly 16.0.0, and `ng update` refuses the hop unless both are in the command.
+  const peersOnCoupled = (manifest) => Object.entries(manifest?.peerDependencies || {}).filter(([peer, range]) => coupled.has(peer) && !manifest.peerDependenciesMeta?.[peer]?.optional && semver.validRange(range));
+  const followerNames = [];
+  for (let found = true; found;) {
+    found = false;
+    for (const name of lookups) {
+      if (coupled.has(name)) continue;
+      const doc = await registry.get(name);
+      if (!doc || !Object.values(doc.versions).some((m) => peersOnCoupled(m).length > 0)) continue;
+      coupled.add(name);
+      followerNames.push(name);
+      found = true;
+    }
+  }
+
+  const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
 
   const current = {};
-  for (const name of coupledNames) current[name] = project.installed(name)?.version || null;
+  for (const name of [...coupledNames, ...followerNames]) current[name] = project.installed(name)?.version || null;
 
   let blockedAt = null;
   for (let major = currentMajor + 1; major <= target; major++) {
@@ -467,6 +484,40 @@ async function buildPlan({ projectDir, to }) {
       if (!changed) break;
     }
 
+    // A follower only moves when the release in place stops accepting what its peers just moved to.
+    for (let pass = 0; pass < followerNames.length + 1; pass++) {
+      let changed = false;
+      for (const name of followerNames) {
+        const doc = docs.get(name);
+        const have = current[name];
+        if (!have || !doc?.versions[have]) continue;
+        const rejected = (v) => peersOnCoupled(doc.versions[v]).filter(([peer, range]) => current[peer] && !semver.satisfies(current[peer], range, { includePrerelease: true }));
+        if (rejected(have).length === 0) continue;
+        const to = eligibleReleases(doc, have).find((v) => rejected(v).length === 0);
+        if (!to) {
+          if (blockers.some((b) => b.name === name)) continue;
+          const wants = rejected(have).map(([peer, range]) => ({ by: name, peer, range }));
+          blockers.push({
+            name, major, kind: 'peer-conflict', installed: have, wants,
+            reason: `no stable release at or above ${have} accepts ${wants.map((w) => `${w.peer} ${current[w.peer]}`).join(', ')}, which Angular ${major} needs, and ${have} requires ${wants.map((w) => w.range).join(', ')}`,
+          });
+          continue;
+        }
+        const manifest = doc.versions[to];
+        libs.push({
+          name, from: have, to, support: 'follows',
+          peer: peersOnCoupled(manifest).map(([peer]) => `${peer} ${current[peer]}`).join(', '),
+          migrations: Boolean(manifest['ng-update']?.migrations),
+          deprecated: null,
+          lastPublished: day(doc.time?.[doc['dist-tags']?.latest]),
+        });
+        current[name] = to;
+        addPeers(name, manifest);
+        changed = true;
+      }
+      if (!changed) break;
+    }
+
     const { changes, conflicts } = await resolveShared({ project, registry, requirements, current, coupled });
     for (const c of conflicts) {
       blockers.push({
@@ -523,6 +574,7 @@ async function buildPlan({ projectDir, to }) {
 const SUPPORT = {
   declared: 'supports it',
   aligned: 'follows Angular\'s major',
+  follows: 'moves with its peer',
   open: 'UNCONFIRMED: open-ended range, check the running app',
   stale: 'UNCONFIRMED: this release is older than the Angular major and only accepts it through an open-ended range, check the running app',
 };

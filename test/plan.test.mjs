@@ -722,3 +722,77 @@ test('pnpm: a patch that leaves the CLI alone runs the installed one, since noth
   const r = await plan(world(cli), app({ deps: base, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '20.0.0', cli: '20.2.0' })) } }), { to: 20 });
   assert.equal(r.plan.patches.command, 'pnpm exec ng update @angular/core@20.2.0');
 });
+
+// ---- Libraries tied to a moving library by a peer, with no Angular peer of their own --------------------------------
+
+// A real upgrade stopped here: `Package "@nebular/eva-icons" has an incompatible peer dependency to "@nebular/theme"
+// (requires "16.0.0", would install "17.0.0").`
+const nebularDeps = { ...base, '@nebular/theme': '16.0.0', '@nebular/eva-icons': '16.0.0', 'eva-icons': '1.1.3' };
+const nebularLock = { ...lockBase, '@nebular/theme': '16.0.0', '@nebular/eva-icons': '16.0.0', 'eva-icons': '1.1.3' };
+const nebularWith = (icons) => [
+  pkg('@nebular/theme', { '16.0.0': { peer: '^20.0.0', at: '2025-07-01' }, '17.0.0': { peer: '^21.0.0', at: '2026-01-15' } }),
+  pkg('@nebular/eva-icons', icons),
+  pkg('eva-icons', { '1.1.3': {} }),
+];
+const evaIcons = (version, theme) => ({ [version]: { peers: { '@nebular/theme': theme, 'eva-icons': '^1.1.3' } } });
+
+test('a library pinned to one that moves goes in the same command, though it has no Angular peer', async () => {
+  const r = await plan(world(...nebularWith({ ...evaIcons('16.0.0', '16.0.0'), ...evaIcons('17.0.0', '17.0.0') })), app({ deps: nebularDeps, lock: nebularLock }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  const lib = libIn(r, 21, '@nebular/eva-icons');
+  assert.equal(lib.from, '16.0.0');
+  assert.equal(lib.to, '17.0.0');
+  assert.equal(lib.support, 'follows');
+  assert.ok(r.plan.hops[0].command.includes('@nebular/eva-icons@17.0.0'));
+  assert.ok(r.plan.hops[0].command.includes('@nebular/theme@17.0.0'));
+});
+
+test('the printed plan says why a follower moves', async () => {
+  const r = await plan(world(...nebularWith({ ...evaIcons('16.0.0', '16.0.0'), ...evaIcons('17.0.0', '17.0.0') })), app({ deps: nebularDeps, lock: nebularLock }), { to: 21, text: true });
+  assert.match(r.stdout, /@nebular\/eva-icons: 16\.0\.0 -> 17\.0\.0; moves with its peer \(@nebular\/theme 17\.0\.0\)/);
+});
+
+test('a follower whose range still accepts the new version stays put', async () => {
+  const r = await plan(world(...nebularWith(evaIcons('16.0.0', '>=16.0.0'))), app({ deps: nebularDeps, lock: nebularLock }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(libIn(r, 21, '@nebular/eva-icons'), undefined);
+  assert.ok(!r.plan.hops[0].command.includes('eva-icons'));
+});
+
+test('a follower with no release for the new version is a blocker, not a command ng update would refuse', async () => {
+  const r = await plan(world(...nebularWith(evaIcons('16.0.0', '16.0.0'))), app({ deps: nebularDeps, lock: nebularLock }), { to: 21 });
+  assert.equal(r.code, 2);
+  assert.equal(r.plan.reachable, 20);
+  const blocker = r.plan.blockers.find((b) => b.name === '@nebular/eva-icons');
+  assert.equal(blocker.major, 21);
+  assert.match(blocker.reason, /@nebular\/theme 17\.0\.0/);
+  assert.match(blocker.reason, /requires 16\.0\.0/);
+});
+
+test('a follower never moves backwards to find a range that fits', async () => {
+  const icons = { ...evaIcons('15.0.0', '>=16.0.0'), ...evaIcons('16.0.0', '16.0.0') };
+  const r = await plan(world(...nebularWith(icons)), app({ deps: nebularDeps, lock: nebularLock }), { to: 21 });
+  assert.equal(r.code, 2);
+  assert.ok(r.plan.blockers.some((b) => b.name === '@nebular/eva-icons'));
+});
+
+test('a deprecated release is not a way out for a follower', async () => {
+  const icons = { ...evaIcons('16.0.0', '16.0.0'), '17.0.0': { peers: { '@nebular/theme': '17.0.0' }, deprecated: 'do not use' } };
+  const r = await plan(world(...nebularWith(icons)), app({ deps: nebularDeps, lock: nebularLock }), { to: 21 });
+  assert.equal(r.code, 2);
+  assert.ok(r.plan.blockers.some((b) => b.name === '@nebular/eva-icons'));
+});
+
+test('a follower of a follower moves too', async () => {
+  const extra = pkg('eva-extras', { '1.0.0': { peers: { '@nebular/eva-icons': '16.0.0' } }, '2.0.0': { peers: { '@nebular/eva-icons': '17.0.0' } } });
+  const r = await plan(world(...nebularWith({ ...evaIcons('16.0.0', '16.0.0'), ...evaIcons('17.0.0', '17.0.0') }), extra), app({ deps: { ...nebularDeps, 'eva-extras': '1.0.0' }, lock: { ...nebularLock, 'eva-extras': '1.0.0' } }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(libIn(r, 21, 'eva-extras').to, '2.0.0');
+  assert.ok(r.plan.hops[0].command.includes('eva-extras@2.0.0'));
+});
+
+test('a plain dependency with no tie to a moving library is left out', async () => {
+  const r = await plan(world(...nebularWith({ ...evaIcons('16.0.0', '16.0.0'), ...evaIcons('17.0.0', '17.0.0') }), pkg('lodash', { '4.17.21': {}, '5.0.0': {} })), app({ deps: { ...nebularDeps, lodash: '4.17.21' }, lock: { ...nebularLock, lodash: '4.17.21' } }), { to: 21 });
+  assert.equal(libIn(r, 21, 'lodash'), undefined);
+  assert.ok(!r.plan.hops[0].command.includes('lodash'));
+});
