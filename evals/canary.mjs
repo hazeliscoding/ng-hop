@@ -56,7 +56,9 @@ for (const where of ['the harness', 'the agent', 'after the agent']) {
 
 if (problems.length) {
   console.log(`Stopping before any eval runs:\n  ${problems.join('\n  ')}`);
-  if (!existsSync(report('the agent'))) console.log(`The login: ${describeLogin()}.\nThe agent exited ${agent.code}:\n${`${agent.stdout}\n${agent.stderr}`.trim().slice(-1500)}`);
+  // This log is public, so what the agent printed doesn't get into it unredacted, whatever GitHub would mask.
+  const said = `${agent.stdout}\n${agent.stderr}`.trim().replace(/sk-ant-[\w-]+/g, '[a login]').slice(-1500);
+  if (!existsSync(report('the agent'))) console.log(`The login: ${describeLogin()}.\nThe agent exited ${agent.code}:\n${said}`);
   process.exit(1);
 }
 console.log('The login works, and no install script could get it or redirect the agent.');
