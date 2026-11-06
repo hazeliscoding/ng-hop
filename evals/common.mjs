@@ -13,6 +13,11 @@ const loginOnStdin = process.env.NG_HOP_LOGIN_ON_STDIN ? readFileSync(0, 'utf8')
 delete process.env.NG_HOP_LOGIN_ON_STDIN;
 if (loginOnStdin === '') throw new Error('No login on stdin. Add a CLAUDE_CODE_OAUTH_TOKEN repository secret, made with `claude setup-token`.');
 
+// Safe to print, and enough to spot a token that got cut off or broken across lines when it was pasted in.
+export const describeLogin = () => (loginOnStdin === null
+  ? 'not passed on stdin'
+  : `${loginOnStdin.length} characters, ${/\s/.test(loginOnStdin) ? 'with whitespace inside it' : 'no whitespace'}, ${loginOnStdin.startsWith('sk-ant-oat') ? 'starts like a setup token' : 'does not start like a setup token'}`);
+
 // Starts Claude Code with the login. From stdin it goes over a descriptor, which Claude Code reads and closes, so it
 // never sits in an environment for an install script to find.
 export function spawnAgent(args, { env, stdio, ...options }) {

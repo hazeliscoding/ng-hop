@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { spawnAgent } from './common.mjs';
+import { describeLogin, spawnAgent } from './common.mjs';
 
 const { values } = parseArgs({ options: { model: { type: 'string', default: 'claude-opus-5-5' } } });
 const PROBE = fileURLToPath(new URL('./probe.mjs', import.meta.url));
@@ -56,7 +56,7 @@ for (const where of ['the harness', 'the agent', 'after the agent']) {
 
 if (problems.length) {
   console.log(`Stopping before any eval runs:\n  ${problems.join('\n  ')}`);
-  if (!existsSync(report('the agent'))) console.log(`The agent exited ${agent.code}:\n${`${agent.stdout}\n${agent.stderr}`.trim().slice(-1500)}`);
+  if (!existsSync(report('the agent'))) console.log(`The login: ${describeLogin()}.\nThe agent exited ${agent.code}:\n${`${agent.stdout}\n${agent.stderr}`.trim().slice(-1500)}`);
   process.exit(1);
 }
 console.log('The login works, and no install script could get it or redirect the agent.');

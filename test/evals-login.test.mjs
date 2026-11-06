@@ -169,7 +169,10 @@ test('the canary fails when a login in the environment is visible to an install 
 test('the canary fails when the agent never ran the install, instead of calling that clean', { skip: process.platform === 'win32' }, () => {
   const result = canary(cleanEnv({ NG_HOP_LOGIN_ON_STDIN: '1', PATH: fakeClaude('') }), TOKEN);
   assert.equal(result.status, 1);
-  assert.match(result.stdout + result.stderr, /the agent: the install script never ran/);
+  const output = result.stdout + result.stderr;
+  assert.match(output, /the agent: the install script never ran/);
+  assert.match(output, new RegExp(`The login: ${TOKEN.length} characters, no whitespace, starts like a setup token`));
+  assert.ok(!output.includes(TOKEN), 'describing the login must never print it');
 });
 
 test('the canary finds no login when it comes in on stdin', { skip: process.platform === 'win32' }, () => {
