@@ -19,9 +19,11 @@ claude plugin validate plugins/ng-hop      # the plugin manifest
 node evals/prepare.mjs                     # builds the fixture apps into ../ng-hop-workspace, slow the first time
 node evals/run.mjs --iteration 1 --tier plan           # questions and refusals, with and without the skill
 node evals/run.mjs --iteration 1 --case upgrade-blocked   # one whole upgrade, rebuilt by the grader
+
+gh workflow run evals.yml --ref <branch> -f cases=ask-how-far   # the same cases on GitHub's machines, leaving this one free
 ```
 
-Evals spend real money and take real time, so run them only when a change could move a result. They run one session at a time because each real build can hold gigabytes.
+Evals spend real money and take real time, so run them only when a change could move a result. Locally they run one session at a time because each real build can hold gigabytes.
 
 Keep commands cross-platform, because the owner develops on Windows. Node scripts, not bash.
 
@@ -36,6 +38,7 @@ Each of these protects one of the three things in `ROADMAP.md`.
 - **The scripts have no install step and no dependencies** beyond the vendored `semver`. Don't edit `scripts/vendor/` by hand: `VENDORED.md` has the commands.
 - **Any check for an absence needs a positive control.** `smoke.test.mjs` has apps that must fail, and they caught a bug that let crashing apps pass. Prove a new check by showing it fail on the thing it exists to catch.
 - **An eval's grader rebuilds the result itself.** Never grade on what the agent's final message claims happened, except for assertions about what the message says.
+- **The agent's login reaches only the agent.** Evals install real npm packages, and a `claude setup-token` token lasts a year with no documented way to revoke it. Start the agent only through `spawnAgent`. In CI the login stays out of every environment, and everything runs as a user with no sudo. `evals/canary.mjs` proves it before a batch spends anything. Never weaken it to get a run through.
 
 ## Skill conventions
 
