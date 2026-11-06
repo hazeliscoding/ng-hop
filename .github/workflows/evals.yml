@@ -90,6 +90,7 @@ jobs:
         run: |
           sudo pkill -KILL -u evals || true
           sudo find /home/evals/ws/templates -type d \( -name node_modules -o -name dist -o -name .angular -o -name .git \) -prune -exec rm -rf {} +
+          sudo find /home/evals/ws/templates -not -type f -not -type d -delete
           sudo cp -r /home/evals/ws/templates "$RUNNER_TEMP/templates"
           sudo chown -R "$USER": "$RUNNER_TEMP/templates"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -133,7 +134,10 @@ jobs:
           args=()
           [ "$CONFIG" = both ] || args=(--config "$CONFIG")
           printf '%s' "$LOGIN" | as-evals env NG_HOP_LOGIN_ON_STDIN=1 node evals/run.mjs --iteration ci --case "$CASE" --model "$MODEL" "${args[@]}"
-      # An artifact isn't masked the way a log is, and anyone can download it from a public repo.
+      # Everything in these folders may have been written by an install script, and this step has sudo and the login, so
+      # it only reads them. No .git: its config can run commands in whatever runs git there, on this machine or the one
+      # the results get downloaded to. Nothing but plain files: the upload would follow a link out of the folder. An
+      # artifact isn't masked the way a log is, and anyone can download it from a public repo.
       - name: Collect the results, and refuse to publish any that hold the login
         id: collect
         if: always()
@@ -143,13 +147,11 @@ jobs:
           sudo pkill -KILL -u evals || true
           results="$RUNNER_TEMP/results"
           mkdir -p "$results"
-          sudo find /home/evals/ws/iteration-ci -type d \( -name node_modules -o -name dist -o -name .angular \) -prune -exec rm -rf {} +
+          sudo find /home/evals/ws/iteration-ci -type d \( -name node_modules -o -name dist -o -name .angular -o -name .git \) -prune -exec rm -rf {} +
+          sudo find /home/evals/ws/iteration-ci -not -type f -not -type d -delete
           sudo cp -r /home/evals/ws/iteration-ci "$results/"
           sudo chown -R "$USER": "$results"
-          everything="$RUNNER_TEMP/everything-to-publish"
-          find "$results" -type f -not -path '*/.git/*' -exec cat {} + > "$everything"
-          find "$results" -type d -name .git -exec git --git-dir={} log -p --all \; >> "$everything" 2> /dev/null
-          if grep -qaF -f <(printf '%s\n' "$LOGIN") "$everything" || grep -qaE 'sk-ant-[A-Za-z0-9_-]{8,}' "$everything"; then
+          if grep -rqaF -f <(printf '%s\n' "$LOGIN") "$results" || grep -rqaE 'sk-ant-[A-Za-z0-9_-]{8,}' "$results"; then
             echo "::error::A result holds the login, so nothing from this run gets published."
             exit 1
           fi
