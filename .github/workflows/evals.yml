@@ -1,0 +1,190 @@
+name: Evals
+run-name: "Evals: ${{ inputs.cases || 'every case' }} on ${{ inputs.model }}"
+
+# Runs the eval cases on a batch of GitHub's machines instead of one person's. Evals cost usage, so this never runs on
+# its own. They also install real npm packages, so the login reaches only Claude Code: see .github/actions/eval-machine
+# for the user they run as, and evals/canary.mjs for the proof that runs before anything is spent.
+#
+# Once:   claude setup-token
+#         gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo hazeliscoding/ng-hop
+# A run:  gh workflow run evals.yml --ref <branch> -f cases=ask-how-far
+# After:  gh run download <run id> --dir ../ng-hop-workspace/ci
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: Case names, comma separated (empty runs every case)
+        required: false
+        default: ''
+      config:
+        description: With the skill, without it, or both
+        required: false
+        default: both
+        type: choice
+        options: [both, with_skill, without_skill]
+      model:
+        description: Model the agent runs on
+        required: false
+        default: claude-opus-5-5
+      parallel:
+        description: Cases at once
+        required: false
+        default: '4'
+        type: choice
+        options: ['1', '2', '4', '8']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals
+
+jobs:
+  canary:
+    name: Check the login is out of reach
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/eval-machine
+      - name: Try to reach the login from an install script
+        env:
+          LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MODEL: ${{ inputs.model }}
+        run: printf '%s' "$LOGIN" | as-evals env NG_HOP_LOGIN_ON_STDIN=1 node evals/canary.mjs --model "$MODEL"
+
+  # This job installs third-party packages with no secret anywhere on its machine.
+  prepare:
+    name: Build the fixture apps
+    needs: canary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      cases: ${{ steps.pick.outputs.cases }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/eval-machine
+      - name: Pick the cases and the apps they need
+        id: pick
+        env:
+          CASES: ${{ inputs.cases }}
+        run: |
+          node --input-type=module -e "
+            import { CASES } from './evals/cases.mjs';
+            const wanted = process.env.CASES.split(',').map((name) => name.trim()).filter(Boolean);
+            for (const name of wanted) if (!CASES.some((c) => c.name === name)) throw new Error('No case named ' + name);
+            const cases = CASES.filter((c) => !wanted.length || wanted.includes(c.name));
+            console.log('cases=' + JSON.stringify(cases.map((c) => c.name)));
+            console.log('fixtures=' + [...new Set(cases.map((c) => c.fixture))].join(' '));
+          " >> "$GITHUB_OUTPUT"
+      - name: Build the apps
+        env:
+          FIXTURES: ${{ steps.pick.outputs.fixtures }}
+        run: as-evals bash -c 'printf "%s\n" $1 | xargs -n 1 -P 4 node evals/prepare.mjs' -- "$FIXTURES"
+      - name: Keep the apps, without what a checkout wouldn't have
+        run: |
+          sudo pkill -KILL -u evals || true
+          sudo find /home/evals/ws/templates -type d \( -name node_modules -o -name dist -o -name .angular -o -name .git \) -prune -exec rm -rf {} +
+          sudo cp -r /home/evals/ws/templates "$RUNNER_TEMP/templates"
+          sudo chown -R "$USER": "$RUNNER_TEMP/templates"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: templates
+          path: ${{ runner.temp }}/templates
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  run:
+    name: ${{ matrix.case }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      matrix:
+        case: ${{ fromJSON(needs.prepare.outputs.cases) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/eval-machine
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: templates
+          path: ${{ runner.temp }}/templates
+      - name: Hand the apps to the evals user
+        run: |
+          sudo cp -r "$RUNNER_TEMP/templates" /home/evals/ws/templates
+          sudo chown -R evals: /home/evals/ws
+      - name: Run the case
+        env:
+          LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CASE: ${{ matrix.case }}
+          CONFIG: ${{ inputs.config }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          args=()
+          [ "$CONFIG" = both ] || args=(--config "$CONFIG")
+          printf '%s' "$LOGIN" | as-evals env NG_HOP_LOGIN_ON_STDIN=1 node evals/run.mjs --iteration ci --case "$CASE" --model "$MODEL" "${args[@]}"
+      # An artifact isn't masked the way a log is, and anyone can download it from a public repo.
+      - name: Collect the results, and refuse to publish any that hold the login
+        id: collect
+        if: always()
+        env:
+          LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          sudo pkill -KILL -u evals || true
+          results="$RUNNER_TEMP/results"
+          mkdir -p "$results"
+          sudo find /home/evals/ws/iteration-ci -type d \( -name node_modules -o -name dist -o -name .angular \) -prune -exec rm -rf {} +
+          sudo cp -r /home/evals/ws/iteration-ci "$results/"
+          sudo chown -R "$USER": "$results"
+          everything="$RUNNER_TEMP/everything-to-publish"
+          find "$results" -type f -not -path '*/.git/*' -exec cat {} + > "$everything"
+          find "$results" -type d -name .git -exec git --git-dir={} log -p --all \; >> "$everything" 2> /dev/null
+          if grep -qaF -f <(printf '%s\n' "$LOGIN") "$everything" || grep -qaE 'sk-ant-[A-Za-z0-9_-]{8,}' "$everything"; then
+            echo "::error::A result holds the login, so nothing from this run gets published."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.collect.outcome == 'success'
+        with:
+          name: results-${{ matrix.case }}
+          path: ${{ runner.temp }}/results
+          include-hidden-files: true
+          retention-days: 14
+
+  report:
+    name: Report the scores
+    needs: run
+    if: always() && needs.run.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: results-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/ws
+      - name: Write the summary
+        env:
+          NG_HOP_WORKSPACE: ${{ runner.temp }}/ws
+        run: |
+          {
+            echo '```'
+            node evals/summary.mjs --iteration ci
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
