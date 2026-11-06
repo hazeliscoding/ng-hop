@@ -11,6 +11,10 @@ An Angular upgrade fails on your dependencies, not on Angular. Library version n
 
 **Status:** in development. See [ROADMAP.md](ROADMAP.md).
 
+![Claude Code loads ng-hop, plans the upgrade, moves an Angular 20 app to 21, gets past a build break without forcing anything, commits, and stops to ask what to do about Nebular, which blocks Angular 22](docs/demo/upgrade.gif)
+
+A real upgrade of an Angular 20 app that uses Nebular, with Claude Opus 5.5, sped up 6× with the last frame held. The agent took 4 minutes 17 seconds. Afterwards, a fresh clone of its branch installed, built, passed its test and ran.
+
 ## What it does
 
 This is the plan for a real Angular 20 app that uses Nebular, on 2026-11-05:
@@ -33,6 +37,8 @@ Blockers
 ```
 
 The skill then upgrades to 21, commits that with the build, tests and running app checked, and stops to ask whether to wait for Nebular, replace it or force it.
+
+In the recording, the plan's newest `@angular/cdk` breaks the build, because Nebular 17 imports a private name that CDK removed in 21.1. No peer range shows that, which is why the app gets built at every major. The agent finds the last release that still has the name, pins it with no override, and lists it as a hand fix for review.
 
 - **Finds the ceiling first,** in seconds, from npm's own data, before anything changes.
 - **Follows peer ranges, not version numbers.** For Angular 22, `@clr/angular` is 18.5.0 and `ag-grid-angular` is 36.3.0.
