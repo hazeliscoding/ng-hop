@@ -48,7 +48,8 @@ function prepareProject(c, dir) {
 }
 
 function runClaude(c, config, projectDir, runDir) {
-  const args = ['-p', c.prompt, '--model', values.model, '--setting-sources', 'project', '--strict-mcp-config',
+  // No setting sources, because an install script can write a settings file that sends the agent's login elsewhere.
+  const args = ['-p', c.prompt, '--model', values.model, '--setting-sources', '', '--strict-mcp-config',
     '--no-session-persistence', '--permission-mode', 'auto', '--max-budget-usd', String(c.budget ?? (c.tier === 'plan' ? 2 : 12)),
     '--disallowedTools', 'Bash(git push*)', 'Bash(gh *)', 'Bash(nvm *)', 'Bash(npm install -g*)', 'Bash(npm i -g*)',
     'PowerShell(git push*)', 'PowerShell(gh *)', 'PowerShell(nvm *)', 'PowerShell(npm install -g*)', 'PowerShell(npm i -g*)',
@@ -103,6 +104,7 @@ function capture(projectDir, runDir, base, parsed) {
     commits: git(`log --reverse --format=%H%x09%s ${base}..HEAD`).trim().split('\n').filter(Boolean).map((l) => { const [sha, ...rest] = l.split('\t'); return { sha, subject: rest.join('\t') }; }),
     status: git('status --short').trim(),
     branch: git('rev-parse --abbrev-ref HEAD').trim(),
+    changedFiles: git(`diff ${base} --name-only --ignore-cr-at-eol`).trim().split('\n').filter(Boolean),
   };
   for (const commit of facts.commits) {
     try {
@@ -133,7 +135,9 @@ for (const c of cases) {
       if (values.regrade) {
         if (!existsSync(join(runDir, 'transcript.jsonl'))) continue;
         const parsed = parseTranscript(runDir);
-        const facts = capture(projectDir, runDir, JSON.parse(readFileSync(join(runDir, 'facts.json'), 'utf8')).baseCommit, parsed);
+        // Results from CI come without .git: an install script could have written its config, and git would run that.
+        const saved = JSON.parse(readFileSync(join(runDir, 'facts.json'), 'utf8'));
+        const facts = existsSync(join(projectDir, '.git')) ? capture(projectDir, runDir, saved.baseCommit, parsed) : saved;
         const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: false });
         console.log(`${c.name} ${config}: regraded ${g.summary.passed}/${g.summary.total}`);
         continue;

@@ -70,7 +70,7 @@ export const check = {
   appRuns: () => ({ text: 'The app starts and renders on the result, checked independently', run: (ctx) => ctx.verified('smoke') }),
   specsUntouched: () => ({
     text: 'Left every test file as it was',
-    run: (ctx) => { const d = ctx.gitDiffNames('*.spec.ts'); return [!d, d ? `Changed: ${d.slice(0, 160)}` : 'No spec changed']; },
+    run: (ctx) => { const d = ctx.changedFiles('.spec.ts'); return [!d, d ? `Changed: ${d.slice(0, 160)}` : 'No spec changed']; },
   }),
   noOptionalMigrations: () => ({
     text: 'Ran no optional migrations',

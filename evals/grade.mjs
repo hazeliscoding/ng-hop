@@ -47,7 +47,7 @@ export async function grade(c, { config, facts, parsed, projectDir, runDir, veri
     read: (p) => { const f = join(projectDir, p); return existsSync(f) ? readFileSync(f, 'utf8') : null; },
     major: (v) => { const m = /(\d+)/.exec(String(v ?? '')); return m ? Number(m[1]) : null; },
     around: (m) => m.input.slice(Math.max(0, m.index - 30), m.index + Math.min(m[0].length, 140) + 30).replace(/\s+/g, ' ').trim(),
-    gitDiffNames: (glob) => { try { return execSync(`git diff ${facts.baseCommit} --name-only --ignore-cr-at-eol -- "${glob}"`, { cwd: projectDir, encoding: 'utf8', stdio: 'pipe' }).trim(); } catch (err) { return String(err.message); } },
+    changedFiles: (suffix) => (facts.changedFiles || []).filter((f) => f.endsWith(suffix)).join('\n'),
     verified: (step) => {
       const v = verification?.[step];
       if (!v) return [false, 'Not verified'];

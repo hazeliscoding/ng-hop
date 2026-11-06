@@ -28,7 +28,7 @@ if (!existsSync(project)) {
 const queries = TRIGGER_QUERIES.filter((q) => values.split === 'all' || q.split === values.split);
 
 function runOnce(query) {
-  const args = ['-p', query, '--model', values.model, '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence',
+  const args = ['-p', query, '--model', values.model, '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence',
     '--permission-mode', 'auto', '--plugin-dir', PLUGIN, '--max-budget-usd', '1', '--disallowedTools', 'Edit', 'Write', 'Bash(git push*)', 'Bash(npm install*)', 'Bash(npm i *)', 'Bash(npx --no-install ng update*)', 'Bash(npx ng update*)',
     '--output-format', 'stream-json', '--verbose'];
   const env = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };

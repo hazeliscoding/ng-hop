@@ -83,12 +83,20 @@ test('an empty login on stdin stops the harness and says which secret to add', (
   assert.match(result.stderr, /CLAUDE_CODE_OAUTH_TOKEN repository secret/);
 });
 
-test('every harness script starts the agent through the one place that handles the login', () => {
+test('every harness script starts the agent through the one place that handles the login, with no settings it could be redirected by', () => {
   for (const script of ['run.mjs', 'trigger.mjs', 'canary.mjs']) {
     const source = readFileSync(join(EVALS, script), 'utf8');
     assert.match(source, /spawnAgent\(/, script);
     assert.doesNotMatch(source, /spawn\('claude'/, script);
+    assert.match(source, /'--setting-sources', ''/, script);
   }
+});
+
+test('a login on stdin leaves out any login in the environment too', { skip: process.platform === 'win32' }, () => {
+  const result = runAgent(cleanEnv({ NG_HOP_LOGIN_ON_STDIN: '1', ANTHROPIC_API_KEY: TOKEN, CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-another-fake-token', PATH: fakeClaude('') }), TOKEN);
+  const seen = JSON.parse(result.stdout);
+  assert.equal(seen.viaDescriptor, TOKEN, result.stderr);
+  assert.equal(seen.inEnvironment, null);
 });
 
 test('the probe finds a login in its own environment, and names it without printing it', () => {
@@ -113,6 +121,25 @@ test('the probe finds a token left in the agent\'s settings', () => {
   const result = probe(cleanEnv({ HOME: home, USERPROFILE: home }));
   assert.match(result.stdout, /state\.json/);
   assert.ok(!result.stdout.includes(TOKEN));
+});
+
+test('the probe really does try to redirect the agent, so a clean canary means something', () => {
+  const dir = tempDir();
+  const url = 'http://127.0.0.1:9/';
+  const home = tempDir();
+  const report = join(dir, 'report.json');
+  spawnSync(process.execPath, [PROBE, report, url], { cwd: dir, env: cleanEnv({ HOME: home, USERPROFILE: home }) });
+  for (const file of [join(dir, '.claude', 'settings.json'), join(dir, '.claude', 'settings.local.json'), join(dir, '.env'), join(home, '.claude.json'), join(home, '.claude', 'settings.json')]) {
+    assert.ok(readFileSync(file, 'utf8').includes(url), file);
+  }
+  assert.ok(Array.isArray(JSON.parse(readFileSync(report, 'utf8')).found));
+});
+
+test('the probe says when the agent\'s config or the harness can be changed', { skip: process.platform !== 'linux' }, () => {
+  const home = tempDir();
+  const { stdout } = probe(cleanEnv({ HOME: home }));
+  assert.match(stdout, /\.claude\.json can be changed/);
+  assert.match(stdout, /the harness can be changed/);
 });
 
 test('the probe finds a login in another process\'s environment, the hole a deleted variable leaves', { skip: process.platform !== 'linux' }, async () => {
@@ -175,10 +202,27 @@ test('the workflow never puts the login in the environment of anything it starts
   for (const file of [WORKFLOW, MACHINE]) assert.doesNotMatch(file, /uses: [^./][^@\n]*@(?![0-9a-f]{40})/, 'a job holding the login pins its actions by commit');
 });
 
+test('nothing with sudo or the login runs git on results, follows a link out of them, or publishes a .git', () => {
+  const collect = /name: Collect the results[\s\S]*?(?=\n      - uses:)/.exec(WORKFLOW)[0];
+  assert.doesNotMatch(collect, /(^|[\s;|(])git /m, 'a .git an install script wrote can run commands in whatever runs git on it');
+  assert.match(collect, /-name \.git/);
+  assert.match(collect, /-not -type f -not -type d -delete/);
+  const removeLinks = collect.indexOf('-not -type f -not -type d -delete');
+  assert.ok(removeLinks < collect.indexOf('sudo cp -r'), 'links go before anything copies or uploads');
+});
+
+test('grading needs no live repository', () => {
+  const grader = readFileSync(join(EVALS, 'grade.mjs'), 'utf8');
+  assert.doesNotMatch(grader, /git diff/);
+});
+
 test('agents run as a user with no sudo, in an environment with nothing of the runner\'s', () => {
   assert.match(MACHINE, /useradd --create-home evals/);
   assert.match(MACHINE, /exec sudo -u evals -H env -i /);
   assert.doesNotMatch(MACHINE, /usermod|gpasswd|sudoers/, 'the evals user gets no extra rights');
+  assert.match(MACHINE, /chown -R root: \/opt\/ng-hop/, 'an install script must not be able to change the harness or the skill');
+  assert.doesNotMatch(MACHINE, /\/home\/evals\/ng-hop/, 'the owner of a folder can rename what is in it, whoever owns that');
+  assert.match(MACHINE, /chattr \+i \/home\/evals\/\.claude\.json/, 'an env block in this file redirects the agent');
   // The scrub forces the permission mode to default, so these runs would stop matching local ones.
   assert.match(MACHINE, /CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0/);
   // pnpm refuses to change a lockfile when it sees CI, which is not what happens on someone's machine.
