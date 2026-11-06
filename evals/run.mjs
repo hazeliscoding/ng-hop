@@ -4,13 +4,13 @@
 // A run already finished is skipped, so an interrupted batch picks up where it stopped.
 // Usage: node evals/run.mjs --iteration 1 [--case name[,name]] [--tier plan|upgrade] [--config with_skill|without_skill]
 //        [--runs 1] [--model id] [--max-seconds 560]
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { freemem } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CASES } from './cases.mjs';
-import { installCommand, PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
+import { installCommand, PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
 import { grade } from './grade.mjs';
 
 const { values } = parseArgs({ options: {
@@ -55,11 +55,10 @@ function runClaude(c, config, projectDir, runDir) {
     'PushNotification', 'RemoteTrigger', 'CronCreate', 'ScheduleWakeup',
     '--output-format', 'stream-json', '--verbose'];
   if (config === 'with_skill') args.push('--plugin-dir', PLUGIN);
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', NG_CLI_ANALYTICS: 'false' };
-  delete env.CLAUDECODE;
+  const env = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', NG_CLI_ANALYTICS: 'false' };
   return new Promise((resolve) => {
     const out = [];
-    const child = spawn('claude', args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnAgent(args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => { stderr += d; });

@@ -3,11 +3,11 @@
 // an Angular project, and stops as soon as the skill loads or the agent settles on doing something else.
 // This does skill-creator's trigger check. Its own script calls select() on pipes, which doesn't work on Windows.
 // Usage: node evals/trigger.mjs --iteration 1 [--split all|train|test] [--runs 2] [--model id] [--concurrency 2]
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
+import { PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
 import { TRIGGER_QUERIES } from './trigger-queries.mjs';
 
 const { values } = parseArgs({ options: {
@@ -31,10 +31,9 @@ function runOnce(query) {
   const args = ['-p', query, '--model', values.model, '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence',
     '--permission-mode', 'auto', '--plugin-dir', PLUGIN, '--max-budget-usd', '1', '--disallowedTools', 'Edit', 'Write', 'Bash(git push*)', 'Bash(npm install*)', 'Bash(npm i *)', 'Bash(npx --no-install ng update*)', 'Bash(npx ng update*)',
     '--output-format', 'stream-json', '--verbose'];
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
-  delete env.CLAUDECODE;
+  const env = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
   return new Promise((resolve) => {
-    const child = spawn('claude', args, { cwd: project, env, stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawnAgent(args, { cwd: project, env, stdio: ['ignore', 'pipe', 'ignore'] });
     let buffer = '';
     let triggered = false;
     let toolsSeen = 0;
