@@ -25,7 +25,8 @@ Angular 21 (21.2.26)
   Node: ok (needs ^20.19.0 || ^22.12.0 || >=24.0.0)
   @angular/cdk: 20.2.14 -> 21.2.14; supports it (^21.0.0 || ^22.0.0); ships migrations
   @nebular/theme: 16.0.0 -> 17.0.0; supports it (^21.0.0)
-  Run: npx --no-install ng update @angular/core@21 @angular/cli@21 @angular/cdk@21.2.14 @nebular/theme@17.0.0
+  @nebular/eva-icons: 16.0.0 -> 17.0.0; moves with its peer (@nebular/theme 17.0.0)
+  Run: npx --no-install ng update @angular/core@21 @angular/cli@21 @angular/cdk@21.2.14 @nebular/theme@17.0.0 @nebular/eva-icons@17.0.0
 
 Blockers
   Angular 22: @nebular/theme: no stable release at or above 17.0.0 supports Angular 22; the latest, 17.0.0 (2026-01-15), requires ^21.0.0.
