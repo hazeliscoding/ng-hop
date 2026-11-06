@@ -42,6 +42,30 @@ jobs:
           claude plugin validate .
           claude plugin validate plugins/ng-hop
 
+  install:
+    name: Install on a clean machine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Install the plugin the way the README says, from this commit
+        run: |
+          claude plugin marketplace add "$GITHUB_WORKSPACE"
+          claude plugin install ng-hop@ng-hop
+      # A file the plugin forgot to ship only shows up when the installed copy runs.
+      - name: Run a real plan from the installed copy
+        run: |
+          plan="$(find "$HOME/.claude/plugins/cache" -name plan.mjs -path '*ng-hop*' | head -1)"
+          test -n "$plan"
+          app="$(mktemp -d)"
+          echo '{"name":"app","dependencies":{"@angular/core":"20.3.0","@angular/common":"20.3.0"},"devDependencies":{"@angular/cli":"20.3.0"}}' > "$app/package.json"
+          node "$plan" --project "$app" --to 21 | tee "$app/plan.txt"
+          grep -q 'Angular 21 is reachable' "$app/plan.txt"
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
