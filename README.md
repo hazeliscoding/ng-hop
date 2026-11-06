@@ -13,23 +13,25 @@ An Angular upgrade fails on your dependencies, not on Angular. Library version n
 
 ## What it does
 
+This is the plan for a real Angular 20 app that uses Nebular, on 2026-11-05:
+
 ```text
 > Upgrade this app to Angular 22.
 
+Angular 20.3.35 (from lockfile), npm, Node 24.20.0. Latest Angular: 22.2.4.
 Result: BLOCKED at Angular 22. Angular 21 is the highest version everything supports today.
 
 Angular 21 (21.2.26)
+  Node: ok (needs ^20.19.0 || ^22.12.0 || >=24.0.0)
+  @angular/cdk: 20.2.14 -> 21.2.14; supports it (^21.0.0 || ^22.0.0); ships migrations
   @nebular/theme: 16.0.0 -> 17.0.0; supports it (^21.0.0)
-  primeng: 20.0.0 -> 21.1.10; supports it (^21.0.0)
-  ag-grid-angular: 34.0.0 -> 36.3.0; UNCONFIRMED: open-ended range, check the running app (>= 20.0.0)
-  Run: npx --no-install ng update @angular/core@21 @angular/cli@21 @nebular/theme@17.0.0 ag-grid-angular@36.3.0 primeng@21.1.10
+  Run: npx --no-install ng update @angular/core@21 @angular/cli@21 @angular/cdk@21.2.14 @nebular/theme@17.0.0
 
 Blockers
-  Angular 22: @nebular/theme: no stable release at or above 17.0.0 supports Angular 22;
-  the latest, 17.0.0 (2026-01-15), requires ^21.0.0.
+  Angular 22: @nebular/theme: no stable release at or above 17.0.0 supports Angular 22; the latest, 17.0.0 (2026-01-15), requires ^21.0.0.
 ```
 
-It upgrades to 21, commits it with the build, tests and running app checked, then stops: *14 files import Nebular, and it's had a release for every Angular major so far. I'd wait. Do you want to wait, replace it, or try forcing it?*
+The skill then upgrades to 21, commits that with the build, tests and running app checked, and stops to ask whether to wait for Nebular, replace it or force it.
 
 - **Finds the ceiling first,** in seconds, from npm's own data, before anything changes.
 - **Follows peer ranges, not version numbers.** For Angular 22, `@clr/angular` is 18.5.0 and `ag-grid-angular` is 36.3.0.
