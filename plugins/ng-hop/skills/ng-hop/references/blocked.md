@@ -8,7 +8,7 @@ For each blocker, from the plan and a quick search:
 
 - **What it requires, and how old it is:** the plan prints the latest release, its Angular range and its publish date. A release from last month means support may be coming. One from two years ago probably isn't.
 - **How much the app uses it:** count the files that import it (for example `git grep -l "<package>" -- src`). Three files and three hundred are different decisions.
-- **Whether it's used at all.** If nothing imports it, removing it clears the blocker, and that's your recommendation.
+- **Whether it's used at all.** If nothing imports it, removing it clears the blocker, and that's your recommendation. Search for its imports and selectors across `src` instead of reading a few files, because a template can sit inside a component's `.ts` file.
 - **Any sign of support on the way:** a prerelease in the plan's output, or an open issue or pull request on its repository. Say what you found, and say so if you didn't look.
 
 ## The choices

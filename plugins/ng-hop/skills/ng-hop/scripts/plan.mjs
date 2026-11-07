@@ -246,6 +246,10 @@ function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
   const declared = candidates.find((v) => verdictOf(v) === 'declared');
   if (declared) return { version: declared, support: 'declared' };
   const open = candidates.find((v) => verdictOf(v) === 'open');
+  // Nothing names this major, so a move would only swap one open-ended promise for another, and bring the library's own
+  // breaking changes along. AG Grid 34 to 36 was that: its own table says 28 and up work on Angular 22.
+  const installed = floor && doc.versions[floor] && !doc.versions[floor].deprecated ? verdictOf(floor) : null;
+  if (installed === 'open' || installed === 'stale') return { version: floor, support: installed, newer: open && open !== floor ? open : null };
   if (open) return { version: open, support: 'open' };
   // Already installed and accepted by a range older than this major: moving it isn't possible, and npm won't
   // object, so the upgrade can proceed, but only the running app can say whether it works.
@@ -377,7 +381,7 @@ async function buildPlan({ projectDir, to }) {
   // still exits 0. Angular 22's stops with an error instead.
   const catalogued = Object.keys(project.deps).filter((n) => String(project.deps[n]).startsWith('catalog:') && (isFramework(n) || n === 'typescript'));
   if (catalogued.length) {
-    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Give these packages plain versions in package.json, commit that, and plan again. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
+    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Either give these packages plain versions in package.json, commit that, and plan again, or update the catalog by hand, run pnpm install, then run ng update <package> --migrate-only --from <old version> for each package. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
   }
 
   const currentCore = project.installed('@angular/core');
@@ -487,7 +491,7 @@ async function buildPlan({ projectDir, to }) {
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
       const manifest = doc.versions[choice.version];
       libs.push({
-        name, from: floor, to: choice.version, support: choice.support,
+        name, from: floor, to: choice.version, support: choice.support, ...(choice.newer ? { newer: choice.newer } : {}),
         peer: angularPeers(manifest).map(([, r]) => r)[0] || null,
         migrations: Boolean(manifest['ng-update']?.migrations),
         deprecated: manifest.deprecated || doc.versions[doc['dist-tags']?.latest]?.deprecated || null,
@@ -576,6 +580,12 @@ async function buildPlan({ projectDir, to }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
+    // npm and pnpm install a required peer on their own, so nothing else says the app gained one.
+    for (const lib of moved) {
+      const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+      const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
+      if (lib.from && added.length) lib.newPeers = added;
+    }
     const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
@@ -650,7 +660,7 @@ function render(plan) {
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.join(', ')}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}; needed by ${s.neededBy.join(', ')}`);
     lines.push(`  Run: ${hop.command}`);

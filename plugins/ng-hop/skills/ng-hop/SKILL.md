@@ -41,7 +41,7 @@ Show the person the result in a few lines: where they can get to, what blocks an
 - **If they only asked a question** ("how far can I go?", "does PrimeNG support 22?", "is this upgrade safe?"), answer from the plan and stop. Change nothing.
 - **If it's already on the target major with patch releases available,** and they asked to upgrade, install dependencies as in step 3, run the command it prints, check it as in step 4f, and commit. That's the whole job.
 - **If the plan is blocked,** carry on up to the highest reachable major, then stop as step 5 describes. Say that's what you're doing.
-- **A note that a library's license changes on a major:** the build, tests and app check all pass after a change like this, so the plan is the only warning they'll get, and it can cost them money. Read both license files (`npm pack <package>@<version>` in a temporary folder, then unpack it with `tar`). If only names or dates differ, say so and carry on. If the terms differ, go as far as the major before it and stop, even if they asked for the later one, because they can't have agreed to a license they haven't seen. Quote the new license's own words, and ask whether to accept it, stay where they are, or replace the library. If they accept, carry on with that major. Don't add a key or look for a way around the license's check. If they only asked a question, tell them in your answer.
+- **A note that a library's license changes on a major:** the build, tests and app check all pass after a change like this, so the plan is the only warning they'll get, and it can cost them money. Read both license files (`npm pack <package>@<version>` in a temporary folder, then unpack it with `tar`). If only names or dates differ, say so and carry on. If the terms differ, go as far as the major before it and stop, even if they asked for the later one, because they can't have agreed to a license they haven't seen. Quote the new license's own words, and ask whether to accept it, stay where they are, or replace the library. If they accept, carry on with that major. Don't add a key or look for a way around the license's check. Check the library's companion packages too, such as `@primeuix/themes` with PrimeNG, because the plan only compares what it moves. If they only asked a question, tell them in your answer.
 - **`Node: too-old` on a major:** `ng` will refuse to run. Stop before that major and ask them to switch Node. Don't switch it yourself, since `nvm use` changes it for the whole machine on Windows. `unsupported` means Node is newer than Angular lists: mention it and carry on while the checks pass.
 - **An Nx workspace:** the plan says so. Use `nx migrate` for the framework packages, and the plan for the library facts.
 
@@ -80,9 +80,10 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`. This 
 **e. Finish the major:**
 - Install anything the plan lists under the major that `ng update` didn't move (check `package.json`). TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't.
 - Do the guide's remaining steps that apply.
+- Read what each library's new major changed, from its changelog or README in `node_modules/<package>`, even if nothing broke. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report.
 - Fix what the upgrade broke. When a library's own major change breaks your code, read that library's changelog or migration guide instead of guessing at its API.
 
-**f. Check it against the starting point:** the same build, tests and `smoke.mjs` as step 3. Only new failures count. A build and tests can pass while the app won't start, so don't skip `smoke.mjs`. For a library the plan marks UNCONFIRMED, the running app is the only evidence you'll get: say what you checked. If `smoke.mjs` reports no browser, say that the page was fetched but never rendered.
+**f. Check it against the starting point:** the same build, tests and `smoke.mjs` as step 3. Only new failures count. A build and tests can pass while the app won't start, so don't skip `smoke.mjs`. For a library the plan marks UNCONFIRMED, npm can't vouch for it, so look for the library's own compatibility table and check the running app, and say what you found. Staying on an installed version that passes is right: only move it, to the newer version the plan names, if it fails, and say that a move wasn't required. If `smoke.mjs` reports no browser, say that the page was fetched but never rendered.
 
 If a failure won't yield to a reasonable effort, stop and ask. Say what you tried, and don't commit a broken major, since every commit in this history has to be safe to stop on.
 
@@ -103,6 +104,8 @@ Keep it short and lead with the result:
 - **Result:** the Angular version reached, and the target if it fell short.
 - **Commits:** one line per major.
 - **Hand fixes:** what you changed yourself and why. This is what needs a reviewer.
+- **Library changes:** what a library's new major changed that touches this app, and any peer it newly requires.
+- **Node:** the range the new Angular needs, if it's stricter than before. Their CI and deployment images need it too, even if this machine is fine.
 - **Unconfirmed:** libraries npm couldn't vouch for, and what you checked instead.
 - **Already failing:** anything from step 3, left as it was.
 - **Available but not done:** optional migrations `ng update` offered, and deprecations to plan for.

@@ -67,12 +67,56 @@ test('a stable release above the latest tag is not chosen', async () => {
 
 // ---- Open-ended ranges ------------------------------------------------------------------------------------------
 
-test('an open-ended range from after the major shipped is allowed and flagged as unconfirmed', async () => {
+test('an installed open-ended release stays, flagged, with the newer one named, because moving proves nothing more', async () => {
+  // AG Grid: moving 34 to 36 swapped one open-ended range for another and brought two majors of its own changes.
   const lib = pkg('ag-grid-angular', { '35.0.0': { peer: '>=20.0.0', at: '2025-06-01' }, '36.0.0': { peer: '>=20.0.0', at: '2026-08-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^35.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '35.0.0' } }));
   assert.equal(r.plan.status, 'ok');
+  assert.equal(libIn(r, 22, 'ag-grid-angular').to, '35.0.0');
+  assert.equal(libIn(r, 22, 'ag-grid-angular').support, 'stale');
+  assert.equal(libIn(r, 22, 'ag-grid-angular').newer, '36.0.0');
+  assert.ok(!r.plan.hops[1].command.includes('ag-grid-angular'), 'it stays out of the command');
+  const text = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^35.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '35.0.0' } }), { text: true });
+  assert.match(text.stdout, /ag-grid-angular: 35\.0\.0, no change; UNCONFIRMED.*36\.0\.0 is newer/);
+});
+
+test('an installed release that shipped after the major and accepts it stays put too', async () => {
+  const lib = pkg('ag-grid-angular', { '36.0.0': { peer: '>=20.0.0', at: '2026-08-01' }, '36.3.0': { peer: '>=20.0.0', at: '2026-10-01' } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^36.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '36.0.0' } }));
   assert.equal(libIn(r, 22, 'ag-grid-angular').to, '36.0.0');
   assert.equal(libIn(r, 22, 'ag-grid-angular').support, 'open');
+});
+
+test('an installed release that rejects the major moves to an open-ended one, flagged', async () => {
+  const lib = pkg('ag-grid-angular', { '35.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '36.0.0': { peer: '>=20.0.0', at: '2026-08-01' } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^35.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '35.0.0' } }));
+  assert.equal(libIn(r, 22, 'ag-grid-angular').to, '36.0.0');
+  assert.equal(libIn(r, 22, 'ag-grid-angular').support, 'open');
+});
+
+test('a deprecated installed release moves to an open-ended one instead of staying', async () => {
+  const lib = pkg('ag-grid-angular', { '35.0.0': { peer: '>=20.0.0', at: '2025-06-01', deprecated: 'use 36' }, '36.0.0': { peer: '>=20.0.0', at: '2026-08-01' } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ag-grid-angular': '^35.0.0' }, lock: { ...lockBase, 'ag-grid-angular': '35.0.0' } }));
+  assert.equal(libIn(r, 22, 'ag-grid-angular').to, '36.0.0');
+});
+
+test('a peer a library newly requires is named, because npm and pnpm add it without a word', async () => {
+  // ng-select 24 started requiring @angular/cdk, and moved its dropdown onto it.
+  const releases = {
+    '23.0.0': { peer: '^20.0.0', at: '2025-06-01' },
+    '24.0.0': { peers: { '@angular/core': '^21.0.0', '@angular/cdk': '^21.0.0', 'optional-thing': '^1.0.0' }, at: '2025-12-01' },
+  };
+  const lib = pkg('@ng-select/ng-select', releases);
+  lib.versions['24.0.0'].peerDependenciesMeta = { 'optional-thing': { optional: true } };
+  const options = { deps: { ...base, '@ng-select/ng-select': '^23.0.0' }, lock: { ...lockBase, '@ng-select/ng-select': '23.0.0' } };
+  const r = await plan(world(lib), app(options), { to: 21 });
+  assert.deepEqual(libIn(r, 21, '@ng-select/ng-select').newPeers, ['@angular/cdk']);
+  const text = await plan(world(lib), app(options), { to: 21, text: true });
+  assert.match(text.stdout, /newly needs @angular\/cdk, not in package\.json/);
+
+  const cdk = pkg('@angular/cdk', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' } });
+  const listed = await plan(world(lib, cdk), app({ deps: { ...options.deps, '@angular/cdk': '^20.0.0' }, lock: { ...options.lock, '@angular/cdk': '20.0.0' } }), { to: 21 });
+  assert.equal(libIn(listed, 21, '@ng-select/ng-select').newPeers, undefined, 'the app already lists it');
 });
 
 test('a floor that names the major counts as declared, not as open-ended', async () => {
@@ -699,6 +743,8 @@ for (const [name, spec] of [['@angular/core', 'catalog:'], ['@angular/router', '
     const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21 });
     assert.equal(r.code, 1);
     assert.match(r.stderr, /catalog/);
+    assert.match(r.stderr, /plain versions/);
+    assert.match(r.stderr, /--migrate-only/, 'both ways forward, so the person gets a real choice');
     assert.ok(r.stderr.includes(name));
     assert.match(r.stderr, /ng update/);
     assert.equal(r.stdout, '');
