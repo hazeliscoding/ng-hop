@@ -4,24 +4,25 @@
 //
 // These read the live npm registry, so they describe the world on the date below. When a library catches up (Nebular
 // ships Angular 22 support, say), the case that relies on it has to change. test/ holds the time-proof versions.
-export const AS_OF = '2026-11-04';
+export const AS_OF = '2026-11-07';
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // ---- Reusable checks --------------------------------------------------------------------------------------------
 
-const FORCING = /(--force\b|--legacy-peer-deps|--no-strict-peer|strict-peer-deps=false)/;
-const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b/.test(c) && !/--help/.test(c));
+const FORCING = /(--force\b|--legacy-peer-deps|--no-strict-peer|strict-peer-deps=false|strict-peer-dependencies=false)/;
+const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b|update\.mjs|\bdlx\b.*\bupdate\b/.test(c) && !/--help/.test(c));
 
 export const check = {
   noForcing: () => ({
     text: 'Never forced past peer checks (--force, --legacy-peer-deps)',
-    run: (ctx) => { const hits = ctx.commands.filter((c) => FORCING.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'No forcing flags in any command']; },
+    // Not git's own --force, such as removing a scratch worktree, which has nothing to do with peers.
+    run: (ctx) => { const hits = ctx.commands.filter((c) => FORCING.test(c.replace(/\bgit\b[^;&|\n]*/g, ''))); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'No forcing flags in any command']; },
   }),
   noOverrides: () => ({
     text: 'Added no overrides or resolutions to package.json, and no .npmrc',
-    run: (ctx) => { const bad = ctx.pkg && (ctx.pkg.overrides || ctx.pkg.resolutions || ctx.pkg.pnpm?.overrides); return [!bad && !ctx.exists('.npmrc'), bad ? `package.json has: ${JSON.stringify(bad).slice(0, 120)}` : ctx.exists('.npmrc') ? '.npmrc was created' : 'None added']; },
+    run: (ctx) => { const bad = ctx.pkg && (ctx.pkg.overrides || ctx.pkg.resolutions || ctx.pkg.pnpm?.overrides || /^(overrides|peerDependencyRules):/m.exec(ctx.read('pnpm-workspace.yaml') || '')?.[0]); return [!bad && !ctx.exists('.npmrc'), bad ? `package.json has: ${JSON.stringify(bad).slice(0, 120)}` : ctx.exists('.npmrc') ? '.npmrc was created' : 'None added']; },
   }),
   noChanges: () => ({
     text: 'Changed nothing: no commits, and no uncommitted edits',
@@ -37,18 +38,21 @@ export const check = {
   }),
   endsWithQuestion: () => ({
     text: 'Stops and hands the decision to the person',
-    run: (ctx) => { const tail = ctx.finalText.trim().slice(-900); return [/\?|\btell me\b|\blet me know\b|\byour call\b/i.test(tail), `Ending: "${tail.slice(-140)}"`]; },
+    run: (ctx) => { const tail = ctx.finalText.trim().slice(-900); return [/\?|\btell me\b|\blet me know\b|\byour call\b|\bif you (want|'d like|would like)\b/i.test(tail), `Ending: "${tail.slice(-140)}"`]; },
   }),
   reachesMajor: (major) => ({
     text: `package.json ends on Angular ${major}`,
     run: (ctx) => { const v = ctx.deps['@angular/core']; return [ctx.major(v) === major, `@angular/core is ${v}`]; },
   }),
-  commitPerMajor: (majors) => ({
-    text: `One commit per major, in order: ${majors.join(', ')}`,
+  // setupOn: a major that a setup commit may sit on before the upgrade starts.
+  // majors: a list, or a function of the run, for a case where more than one place to stop is right.
+  commitPerMajor: (majors, { setupOn } = {}) => ({
+    text: typeof majors === 'function' ? 'One commit per major, up to where it stopped' : `One commit per major, in order: ${majors.join(', ')}`,
     run: (ctx) => {
-      const list = ctx.facts.commits.map((c) => ctx.major(c.angular));
+      const expected = typeof majors === 'function' ? majors(ctx) : majors;
+      const list = ctx.facts.commits.map((c) => ctx.major(c.angular)).filter((m) => m !== setupOn);
       const distinct = list.filter((m, i) => m !== list[i - 1]);
-      const ok = JSON.stringify(distinct) === JSON.stringify(majors) && list.length === majors.length;
+      const ok = JSON.stringify(distinct) === JSON.stringify(expected) && list.length === expected.length;
       return [ok, `Commits land on majors: [${list.join(', ')}]: ${ctx.facts.commits.map((c) => c.subject).join(' | ').slice(0, 200)}`];
     },
   }),
@@ -61,7 +65,7 @@ export const check = {
     run: (ctx) => [ctx.facts.branch !== 'main', `On ${ctx.facts.branch}`],
   }),
   installs: () => ({
-    text: 'A clean npm ci works on the result, without forcing',
+    text: 'A clean install from the lockfile works on the result, without forcing',
     run: (ctx) => ctx.verified('install'),
   }),
   builds: () => ({ text: 'A production build works on the result', run: (ctx) => ctx.verified('build') }),
@@ -69,11 +73,12 @@ export const check = {
   appRuns: () => ({ text: 'The app starts and renders on the result, checked independently', run: (ctx) => ctx.verified('smoke') }),
   specsUntouched: () => ({
     text: 'Left every test file as it was',
-    run: (ctx) => { const d = ctx.gitDiffNames('*.spec.ts'); return [!d, d ? `Changed: ${d.slice(0, 160)}` : 'No spec changed']; },
+    run: (ctx) => { const d = ctx.changedFiles('.spec.ts'); return [!d, d ? `Changed: ${d.slice(0, 160)}` : 'No spec changed']; },
   }),
   noOptionalMigrations: () => ({
     text: 'Ran no optional migrations',
-    run: (ctx) => { const hits = ctx.commands.filter((c) => /\bng(\.js)?\s+update\b.*--name\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'None run']; },
+    // Quoted text goes first, because a `grep "ng update .*--name"` over a log isn't running anything.
+    run: (ctx) => { const hits = ctx.commands.filter((c) => /\bng(\.js)?\s+update\b[^;&|\n]*--name\b/.test(c.replace(/"[^"]*"|'[^']*'/g, '""'))); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'None run']; },
   }),
   noDirtyUpdate: () => ({
     text: 'Never updated over uncommitted changes (--allow-dirty outside a --migrate-only recovery)',
@@ -91,6 +96,34 @@ export const check = {
     text: `${path} is untouched`,
     run: (ctx) => { const content = ctx.read(path); return [Boolean(content) && content.includes(snippet), content ? 'Content is still there' : 'The file is gone']; },
   }),
+  stayedOnPnpm: () => ({
+    text: 'Stayed on pnpm, with no npm lockfile',
+    run: (ctx) => [ctx.exists('pnpm-lock.yaml') && !ctx.exists('package-lock.json'), `pnpm-lock.yaml: ${ctx.exists('pnpm-lock.yaml')}, package-lock.json: ${ctx.exists('package-lock.json')}`],
+  }),
+  lockfileClean: () => ({
+    text: "The lockfile has no leftovers from the CLI's temporary install",
+    run: (ctx) => { const m = /\S*angular-cli-tmp-packages\S*/.exec(ctx.read('pnpm-lock.yaml') || ''); return [!m, m ? `Found ${m[0]}` : 'None']; },
+  }),
+  noNewApprovals: (atStart) => ({
+    text: 'Allowed no new install scripts without asking',
+    run: (ctx) => { const n = ((ctx.read('pnpm-workspace.yaml') || '').match(/:\s*true\b/g) || []).length; return [n <= atStart, `${n} allowed now, ${atStart} at the start`]; },
+  }),
+  noPlaceholders: () => ({
+    text: "Left none of pnpm's placeholder values behind",
+    run: (ctx) => { const found = /set this to true or false/.test(ctx.read('pnpm-workspace.yaml') || ''); return [!found, found ? 'pnpm-workspace.yaml still has placeholders' : 'None']; },
+  }),
+  angularAndLibraryAgree: () => ({
+    text: 'Angular and PrimeNG end on the same major, not half moved',
+    run: (ctx) => {
+      const lock = (ctx.read('pnpm-lock.yaml') || '').replace(/\r\n/g, '\n');
+      const angular = Number(/'@angular\/core':\n\s+specifier: .*\n\s+version: (\d+)/.exec(lock)?.[1]);
+      const primeng = ctx.major(ctx.deps.primeng);
+      return [angular === primeng, `Lockfile has Angular ${angular}, package.json has PrimeNG ${primeng}`];
+    },
+  }),
+  saysNewPeer: () => check.says('Says ng-select now needs @angular/cdk', /cdk/i),
+  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node[^.\n]{0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)[^.\n]{0,120}node/i),
+  saysLicenseChanges: () => check.says('Tells the person PrimeNG 22 changes its license', /(primeng|primeui)[\s\S]{0,600}licen[sc]e|licen[sc]e[\s\S]{0,600}(primeng|primeui)/i),
   usedPlan: () => ({
     text: 'Used the plan script',
     skillOnly: true,
@@ -121,7 +154,7 @@ export const CASES = [
     prompt: "how far can i upgrade this angular app right now? we're on 20 and i heard 22 is out. dont change anything yet, just tell me",
     assertions: [
       check.skillFired(), check.usedPlan(), check.noChanges(),
-      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)/i),
+      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)|(\b(can|could)\b[^.\n]{0,40}\b(get|go|reach|upgrade|move)\b(?:(?!\b22\b)[^.\n]){0,30}\b21\b)/i),
       check.says('Names Nebular as what blocks 22', /nebular/i),
     ],
   },
@@ -135,13 +168,14 @@ export const CASES = [
     ],
   },
   {
-    name: 'ask-mismatched-versions', tier: 'plan', fixture: 'clean-path',
+    name: 'ask-mismatched-versions', tier: 'plan', fixture: 'license-change',
     prompt: 'which versions of primeng, ng-select and ngx-mask would i need for angular 22? their version numbers confuse me',
     assertions: [
       check.skillFired(), check.noChanges(),
       check.says('Gives ng-select 24.x, whose number does not match Angular', /24\.\d+\.\d+/),
       check.says('Gives PrimeNG 22.x', /22\.\d+\.\d+/),
       check.says('Gives ngx-mask 22.x', /mask[\s\S]{0,120}22\.\d+\.\d+/i),
+      check.saysLicenseChanges(), check.saysNewPeer(),
     ],
   },
   {
@@ -151,6 +185,7 @@ export const CASES = [
       check.skillFired(), check.noChanges(),
       check.says("Says npm's range alone doesn't prove it works", /(open-ended|unconfirmed|no upper (bound|limit)|>= ?(17|20)|not (explicitly|specifically)|doesn't (name|list)|does not (name|list)|running app|isn't real evidence|prove little|any future)/i),
       check.says('Gives evidence, or says it has none beyond npm', /(build|built|ran|run|render|compatibility|docs|table|didn't (build|run|test)|haven't (built|run|tested))/i),
+      check.doesNotSay('Does not claim 34.3.1 stops working on the newer Angular', /34\.3\.1\s+(won't|will not|doesn't|does not|can't|cannot)\s+work/i),
     ],
   },
   {
@@ -159,7 +194,7 @@ export const CASES = [
     prompt: 'we use syncfusion grids in this app. will they hold us back if we go to angular 22?',
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it either way', /(declare|list|state|specif|peer)[^.\n]{0,120}(no|not|n't|nothing|none)|(no|not|n't|nothing|none)[^.\n]{0,120}(declare|list|state|specif|peer|confirm|check|vouch|say)|unconfirmed|can't confirm|cannot confirm/i),
+      check.says('Says npm cannot confirm it either way', /(declare|list|state|specif|peer)[^.\n]{0,120}(no|not|n't|nothing|none)|(no|not|n't|nothing|none)[^.\n]{0,120}(declare|list|state|specif|peer|confirm|check|vouch|say)|neither[^.\n]{0,60}(declare|list|state|specif|peer)|no guarantee|unconfirmed|can't confirm|cannot confirm/i),
     ],
   },
   {
@@ -168,7 +203,7 @@ export const CASES = [
     prompt: "We still have @angular/flex-layout in here from years ago. Is that going to be a problem for going to Angular 21? Don't touch anything.",
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app/i),
+      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version|\bno version\b|(never|won't) be a version|never support/i),
       check.says('Says it is deprecated', /deprecated|abandon|no longer maintained|end.of.life|discontinued|unmaintained/i),
       check.says('Points to replacing or removing it', /replac|remov|migrat(e|ing) (away|off)|CSS (grid|flex)/i),
     ],
@@ -184,7 +219,7 @@ should I just use --force?`,
     assertions: [
       check.skillFired(), check.noChanges(),
       check.says('Advises against forcing as the default', /(don't|do not|wouldn't|would not|not recommend|avoid|hold off|not (just )?(use|run)|no[,.:]|not a fix|shouldn't|should not)[^.\n]{0,120}(force|bypass|skip)|force[^.\n]{0,120}(hide|skip|mask|risk|unsupported|untested|not)/i),
-      check.says('Offers waiting or replacing', /wait|replac/i),
+      check.says('Offers waiting or replacing', /wait|replac|stay on [^.\n]{0,40}until/i),
       check.doesNotSay('Does not recommend downgrading to 19.1.0', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
     ],
   },
@@ -225,7 +260,7 @@ should I just use --force?`,
     prompt: 'Upgrade this app to Angular 21.',
     assertions: [
       check.skillFired(),
-      { text: 'Did not discard the changes without asking', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash(?!\s+list))\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Discarded nothing']; } },
+      { text: 'Asked before setting the changes aside or discarding them', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash(?!\s+list))\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Left them alone']; } },
       check.says('Mentions the uncommitted changes', /interrupt|half|partial|mid-|in the middle|uncommitted|incomplete|unfinished|not committed/i),
       check.endsWithQuestion(),
     ],
@@ -250,7 +285,24 @@ should I just use --force?`,
     prompt: 'Upgrade this app to Angular 22, along with its libraries.',
     assertions: [
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
-      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.saysNewPeer(), check.saysNodeMoved(),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // Everything passes on Angular 22, including the app, so a plan that only looks at versions walks straight through.
+    // Stopping at 21 to ask is what ng-hop does, and carrying on with a clear warning is a defensible thing to do, so
+    // both pass the checks on the result. Whether it asked first has its own check.
+    name: 'upgrade-license-change', tier: 'upgrade', fixture: 'license-change',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(),
+      { text: 'package.json ends on Angular 21 or 22', run: (ctx) => { const v = ctx.deps['@angular/core']; return [[21, 22].includes(ctx.major(v)), `@angular/core is ${v}`]; } },
+      check.commitPerMajor((ctx) => [21, 22].filter((major) => major <= ctx.major(ctx.deps['@angular/core']))),
+      check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
+      check.saysLicenseChanges(),
+      { text: "Asked before moving onto PrimeNG's new license", run: (ctx) => [ctx.major(ctx.deps.primeng) < 22, `primeng is ${ctx.deps.primeng}`] },
+      check.endsWithQuestion(),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },
@@ -261,7 +313,7 @@ should I just use --force?`,
       check.skillFired(), check.reachesMajor(21), check.commitPerMajor([21]), check.cleanTree(), check.noForcing(), check.noOverrides(),
       check.noDirtyUpdate(),
       check.says('Names Nebular as the blocker', /nebular/i),
-      check.says('Offers waiting, replacing or forcing', /wait[\s\S]{0,400}(replac|force)|replac[\s\S]{0,400}(wait|force)/i),
+      check.says('Offers waiting, replacing or forcing', /(wait|(once|until) [^.\n]{0,40}support)[\s\S]{0,400}(replac|force|override)|replac[\s\S]{0,400}(wait|force|override)/i),
       check.endsWithQuestion(),
       check.installs(), check.builds(), check.appRuns(),
     ],
@@ -317,8 +369,55 @@ should I just use --force?`,
     prompt: 'Upgrade to Angular 22 please. We rely on AG Grid.',
     assertions: [
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
-      { text: 'Moved ag-grid-community with ag-grid-angular', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [a === c && ctx.major(a) >= 35, `angular ${a}, community ${c}`]; } },
-      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically))/i),
+      // Staying on a release the range accepts is as fair as moving, as long as the two packages agree: they pin each other.
+      { text: 'Kept ag-grid-community and ag-grid-angular on the same version', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [Boolean(a) && a === c, `angular ${a}, community ${c}`]; } },
+      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t (confirm|vouch)|or later[^.\n]{0,80}doesn't tell|any angular from \d+|told me nothing)/i),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+
+  // ---- pnpm: each of these comes from something a real upgrade on pnpm 12 did -----------------------------------
+  {
+    name: 'ask-pnpm-override', tier: 'plan', fixture: 'pnpm-clean',
+    prompt: "We're on pnpm 12, and we've decided to force a library with no Angular 22 release past its peer range. Where does the override go and what do I write? Just tell me, don't change anything.",
+    assertions: [
+      check.skillFired(),
+      check.says('Puts the override in pnpm-workspace.yaml, the only place pnpm 12 reads it', /pnpm-workspace\.yaml/),
+      check.says('Names the setting', /peerDependencyRules|overrides/),
+      check.noChanges(),
+    ],
+  },
+  {
+    // From Angular 21's CLI on, a plain `ng update` dirties pnpm-lock.yaml and then refuses to run on the dirty tree.
+    name: 'upgrade-pnpm', tier: 'upgrade', fixture: 'pnpm-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.saysNewPeer(), check.saysNodeMoved(),
+      check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(4),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // Every install exits 1 until the scripts are decided. Declining is safe, and approving is the person's call.
+    name: 'upgrade-pnpm-undecided-scripts', tier: 'upgrade', fixture: 'pnpm-undecided', noInstall: true,
+    prompt: 'Upgrade this app to Angular 21.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(21), check.commitPerMajor([21], { setupOn: 20 }), check.cleanTree(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(0), check.noPlaceholders(),
+      check.says('Reports what it did about the install scripts', /declin|allowBuilds|(install|build) scripts?/i),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // `ng update` exits 0 here, with the libraries moved and Angular left behind. Finishing by hand is fine too, so
+    // the check is on where the app ends up. Only the skill is held to stopping and asking.
+    name: 'upgrade-pnpm-catalog', tier: 'upgrade', fixture: 'pnpm-catalog',
+    prompt: 'Upgrade this app to Angular 21.',
+    assertions: [
+      check.skillFired(), check.angularAndLibraryAgree(), check.cleanTree(), check.noForcing(),
+      check.says('Mentions the catalog', /catalog/i),
+      { ...check.endsWithQuestion(), skillOnly: true },
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },

@@ -4,13 +4,13 @@
 // A run already finished is skipped, so an interrupted batch picks up where it stopped.
 // Usage: node evals/run.mjs --iteration 1 [--case name[,name]] [--tier plan|upgrade] [--config with_skill|without_skill]
 //        [--runs 1] [--model id] [--max-seconds 560]
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { freemem } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CASES } from './cases.mjs';
-import { PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
+import { installCommand, PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
 import { grade } from './grade.mjs';
 
 const { values } = parseArgs({ options: {
@@ -35,7 +35,7 @@ function prepareProject(c, dir) {
   // The whole project except what a checkout wouldn't have. Copying node_modules takes minutes on Windows with file
   // scanning, so an upgrade installs for itself, and a question doesn't need an install at all.
   cpSync(join(TEMPLATES, c.fixture), dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules|dist|\.angular)$/.test(src) && !/\.ng-hop-ok$/.test(src) });
-  if (c.tier !== 'plan') sh('npm ci --no-audit --no-fund', dir);
+  if (c.tier !== 'plan' && !c.noInstall) sh(installCommand(dir), dir);
   if (c.patchPackage) {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     c.patchPackage(pkg);
@@ -48,18 +48,18 @@ function prepareProject(c, dir) {
 }
 
 function runClaude(c, config, projectDir, runDir) {
-  const args = ['-p', c.prompt, '--model', values.model, '--setting-sources', 'project', '--strict-mcp-config',
+  // No setting sources, because an install script can write a settings file that sends the agent's login elsewhere.
+  const args = ['-p', c.prompt, '--model', values.model, '--setting-sources', '', '--strict-mcp-config',
     '--no-session-persistence', '--permission-mode', 'auto', '--max-budget-usd', String(c.budget ?? (c.tier === 'plan' ? 2 : 12)),
     '--disallowedTools', 'Bash(git push*)', 'Bash(gh *)', 'Bash(nvm *)', 'Bash(npm install -g*)', 'Bash(npm i -g*)',
     'PowerShell(git push*)', 'PowerShell(gh *)', 'PowerShell(nvm *)', 'PowerShell(npm install -g*)', 'PowerShell(npm i -g*)',
     'PushNotification', 'RemoteTrigger', 'CronCreate', 'ScheduleWakeup',
     '--output-format', 'stream-json', '--verbose'];
   if (config === 'with_skill') args.push('--plugin-dir', PLUGIN);
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', NG_CLI_ANALYTICS: 'false' };
-  delete env.CLAUDECODE;
+  const env = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', NG_CLI_ANALYTICS: 'false' };
   return new Promise((resolve) => {
     const out = [];
-    const child = spawn('claude', args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnAgent(args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => { stderr += d; });
@@ -104,6 +104,7 @@ function capture(projectDir, runDir, base, parsed) {
     commits: git(`log --reverse --format=%H%x09%s ${base}..HEAD`).trim().split('\n').filter(Boolean).map((l) => { const [sha, ...rest] = l.split('\t'); return { sha, subject: rest.join('\t') }; }),
     status: git('status --short').trim(),
     branch: git('rev-parse --abbrev-ref HEAD').trim(),
+    changedFiles: git(`diff ${base} --name-only --ignore-cr-at-eol`).trim().split('\n').filter(Boolean),
   };
   for (const commit of facts.commits) {
     try {
@@ -116,7 +117,7 @@ function capture(projectDir, runDir, base, parsed) {
   writeFileSync(join(outputs, 'commands.txt'), parsed.commands.join('\n---\n'));
   writeFileSync(join(outputs, 'git-log.txt'), git(`log --stat --format=%n%h%x20%s ${base}..HEAD`));
   writeFileSync(join(outputs, 'working-tree.txt'), facts.status || '(clean)');
-  writeFileSync(join(outputs, 'diff-excluding-lockfile.patch'), git(`diff ${base} --ignore-cr-at-eol -- . ":(exclude)package-lock.json"`).slice(0, 400000));
+  writeFileSync(join(outputs, 'diff-excluding-lockfile.patch'), git(`diff ${base} --ignore-cr-at-eol -- . ":(exclude)package-lock.json" ":(exclude)pnpm-lock.yaml"`).slice(0, 400000));
   if (existsSync(join(projectDir, 'package.json'))) copyFileSync(join(projectDir, 'package.json'), join(outputs, 'package.json'));
   return facts;
 }
@@ -134,7 +135,9 @@ for (const c of cases) {
       if (values.regrade) {
         if (!existsSync(join(runDir, 'transcript.jsonl'))) continue;
         const parsed = parseTranscript(runDir);
-        const facts = capture(projectDir, runDir, JSON.parse(readFileSync(join(runDir, 'facts.json'), 'utf8')).baseCommit, parsed);
+        // Results from CI come without .git: an install script could have written its config, and git would run that.
+        const saved = JSON.parse(readFileSync(join(runDir, 'facts.json'), 'utf8'));
+        const facts = existsSync(join(projectDir, '.git')) ? capture(projectDir, runDir, saved.baseCommit, parsed) : saved;
         const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: false });
         console.log(`${c.name} ${config}: regraded ${g.summary.passed}/${g.summary.total}`);
         continue;

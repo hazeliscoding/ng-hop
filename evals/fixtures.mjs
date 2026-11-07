@@ -18,7 +18,22 @@ export const FIXTURES = {
   // Every library has a release for each major, and the numbers don't line up with Angular's.
   'clean-path': {
     angular: 20,
-    install: ['primeng@20.4.0', '@primeuix/themes@1.2.5', '@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
+    install: ['@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
+    files: {
+      ...config(["import { provideNgxMask } from 'ngx-mask';"], ['provideNgxMask()']),
+      ...shell(
+        ["import { NgSelectModule } from '@ng-select/ng-select';", "import { NgxMaskDirective } from 'ngx-mask';"],
+        `<ng-select [items]="items" /><input mask="000-000" />`,
+        { componentImports: 'NgSelectModule, NgxMaskDirective', body: "\n  items = ['a', 'b'];\n" },
+      ),
+    },
+  },
+
+  // The same, plus PrimeNG, whose only release for Angular 22 moves it from MIT to a commercial license. Nothing fails.
+  'license-change': {
+    angular: 20,
+    // PrimeNG peers on @angular/animations, so without naming it npm picks 20.1.8 itself, as in nebular-blocked below.
+    install: ['@angular/animations@^20.3.0', 'primeng@20.4.0', '@primeuix/themes@1.2.5', '@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
     files: {
       ...config(["import { providePrimeNG } from 'primeng/config';", "import Aura from '@primeuix/themes/aura';", "import { provideNgxMask } from 'ngx-mask';"], ['providePrimeNG({ theme: { preset: Aura } })', 'provideNgxMask()']),
       ...shell(
@@ -32,7 +47,8 @@ export const FIXTURES = {
   // Nebular has no release for Angular 22, so this app can reach 21 and no further.
   'nebular-blocked': {
     angular: 20,
-    install: ['@angular/cdk@20', '@angular/animations@20', '@nebular/theme@16.0.0', '@nebular/eva-icons@16.0.0', 'eva-icons@1.1.3'],
+    // Not `@angular/animations@20`: it's deprecated from 20.2 on, so npm would pick 20.1.8, which pins Angular to 20.1.8.
+    install: ['@angular/cdk@20', '@angular/animations@^20.3.0', '@nebular/theme@16.0.0', '@nebular/eva-icons@16.0.0', 'eva-icons@1.1.3'],
     files: {
       ...config(["import { importProvidersFrom } from '@angular/core';", "import { provideAnimations } from '@angular/platform-browser/animations';", "import { NbThemeModule, NbLayoutModule } from '@nebular/theme';"], ['provideAnimations()', "importProvidersFrom(NbThemeModule.forRoot({ name: 'default' }), NbLayoutModule)"]),
       ...shell(["import { NbButtonModule, NbCardModule, NbLayoutModule } from '@nebular/theme';"], `<nb-layout><nb-layout-column><nb-card><nb-card-body><button nbButton>Save</button></nb-card-body></nb-card></nb-layout-column></nb-layout>`, { componentImports: 'NbButtonModule, NbCardModule, NbLayoutModule' }),
@@ -111,3 +127,14 @@ export const FIXTURES = {
   'plain-20': { angular: 20, install: [], files: { ...config([], []), ...shell([], '') } },
   'plain-22': { angular: 22, install: [], files: {}, keepNgNewFiles: true },
 };
+
+// pnpm 11 and newer need install scripts decided, so a real project has this file. It's also what makes pnpm treat the
+// CLI's temporary folder as part of the project, which is how a clean tree turns dirty during `ng update`.
+const decidedScripts = "allowBuilds:\n  '@parcel/watcher': true\n  esbuild: true\n  lmdb: true\n  msgpackr-extract: true\n";
+const cleanPath = FIXTURES['clean-path'];
+FIXTURES['pnpm-clean'] = { ...cleanPath, packageManager: 'pnpm', files: { ...cleanPath.files, 'pnpm-workspace.yaml': decidedScripts } };
+// Nobody has decided about install scripts, so every install exits 1 until someone does.
+FIXTURES['pnpm-undecided'] = { ...FIXTURES['plain-20'], packageManager: 'pnpm', undecidedScripts: true };
+// Angular comes from a catalog. Through Angular 21's CLI, `ng update` skips it, moves the libraries and exits 0.
+const withPrimeng = FIXTURES['license-change'];
+FIXTURES['pnpm-catalog'] = { ...withPrimeng, packageManager: 'pnpm', catalog: true, files: { ...withPrimeng.files, 'pnpm-workspace.yaml': decidedScripts } };

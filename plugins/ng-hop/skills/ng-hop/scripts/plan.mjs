@@ -5,8 +5,10 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const exec = promisify(execFile);
@@ -33,12 +35,15 @@ const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
 const stableOnly = (versions) => versions.filter((v) => semver.valid(v) && !semver.prerelease(v));
 const newestFirst = (versions) => [...versions].sort(semver.rcompare);
 const day = (iso) => (iso || '').slice(0, 10) || null;
+const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
 
 class PlanError extends Error {}
 
 // --no-install because npm has an unrelated package named `ng`: plain `npx ng` would download and run it whenever the
 // project's CLI isn't installed. pnpm exec and yarn only run what's installed already.
 const runnerFor = (project) => ({ npm: 'npx --no-install', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx --no-install' }[project.packageManager] || 'npx --no-install');
+// pnpm's runner keeps the selected CLI from redispatching to the app's old CLI and dirtying its lockfile.
+const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)))}` : `${runnerFor(project)} ng update`);
 
 // Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
 // read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.
@@ -117,6 +122,39 @@ function readJson(path) {
   }
 }
 
+// A pnpm workspace keeps one lockfile at its root, usually above the app.
+function findPnpmRoot(dir) {
+  if (existsSync(join(dir, 'pnpm-lock.yaml'))) return dir;
+  for (let d = dirname(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'pnpm-workspace.yaml')) && existsSync(join(d, 'pnpm-lock.yaml'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+// One app's resolved versions from pnpm-lock.yaml. It's a fixed text shape, and YAML isn't worth a dependency. A shape
+// it doesn't recognise (older lockfiles) gives nothing, and the plan falls back to node_modules.
+function readPnpmLock(root, dir) {
+  const importer = relative(root, dir).replace(/\\/g, '/') || '.';
+  const unquote = (text) => text.replace(/^['"]|['"]$/g, '');
+  const versions = {};
+  let inImporters = false;
+  let inApp = false;
+  let name = null;
+  for (const line of readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8').split(/\r?\n/)) {
+    if (/^\S/.test(line)) { inImporters = line === 'importers:'; inApp = false; continue; }
+    if (!inImporters) continue;
+    const key = /^ {2}(\S.*?):( \{\})?$/.exec(line);
+    if (key) { inApp = unquote(key[1]) === importer; continue; }
+    if (!inApp) continue;
+    const dep = /^ {6}(\S.*?):$/.exec(line);
+    if (dep) { name = unquote(dep[1]); continue; }
+    const version = /^ {8}version: (\S+)/.exec(line);
+    // The suffix records peers, as in 20.3.35(rxjs@7.8.2).
+    if (version && name) versions[name] = unquote(version[1]).split('(')[0];
+  }
+  return versions;
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -127,14 +165,16 @@ function readProject(dir) {
   }
   const lockPath = join(dir, 'package-lock.json');
   const lock = existsSync(lockPath) ? readJson(lockPath) : null;
+  const pnpmRoot = lock ? null : findPnpmRoot(dir);
+  const pnpmLock = pnpmRoot ? readPnpmLock(pnpmRoot, dir) : {};
   const packageManager = lock ? 'npm'
-    : existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm'
+    : pnpmRoot ? 'pnpm'
     : existsSync(join(dir, 'yarn.lock')) ? 'yarn'
     : existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bun.lock')) ? 'bun'
     : (pkg.packageManager || 'npm').split('@')[0];
 
   const installed = (name) => {
-    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version;
+    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name];
     if (fromLock && semver.valid(fromLock)) return { version: fromLock, source: 'lockfile' };
     const modPath = join(dir, 'node_modules', name, 'package.json');
     if (existsSync(modPath)) {
@@ -188,6 +228,14 @@ function eligibleReleases(doc, floor) {
   });
 }
 
+function hasAngularPeersForHop(doc, floor, majorRange) {
+  const line = eligibleReleases(doc, floor).filter((v) => semver.satisfies(v, majorRange));
+  // The preferred current release may have dropped the peers an older release had.
+  // Inspect that candidate, not an older peer-bearing release in the same line.
+  // With no eligible target line, retain the existing explicit-peer/history check.
+  return (line.length ? [line[0]] : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
+}
+
 function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
   const verdictOf = (v) => judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased);
   // An installed release that already names this major stays put: the upgrade changes nothing it doesn't have to.
@@ -198,6 +246,10 @@ function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
   const declared = candidates.find((v) => verdictOf(v) === 'declared');
   if (declared) return { version: declared, support: 'declared' };
   const open = candidates.find((v) => verdictOf(v) === 'open');
+  // Nothing names this major, so a move would only swap one open-ended promise for another, and bring the library's own
+  // breaking changes along. AG Grid 34 to 36 was that: its own table says 28 and up work on Angular 22.
+  const installed = floor && doc.versions[floor] && !doc.versions[floor].deprecated ? verdictOf(floor) : null;
+  if (installed === 'open' || installed === 'stale') return { version: floor, support: installed, newer: open && open !== floor ? open : null };
   if (open) return { version: open, support: 'open' };
   // Already installed and accepted by a range older than this major: moving it isn't possible, and npm won't
   // object, so the upgrade can proceed, but only the running app can say whether it works.
@@ -276,6 +328,47 @@ async function resolveShared({ project, registry, requirements, current, coupled
   return { changes, conflicts };
 }
 
+// ---- Licenses -------------------------------------------------------------------------------------------------
+
+const MAX_UNPACKED = 256 * 1024 * 1024;
+const licenseField = (manifest) => String(manifest?.license?.type ?? manifest?.license ?? '').trim();
+// What a package wrote goes to an agent as a plan line, so it stays one short line of plain text.
+const plainLine = (text) => text.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+const licenseTitle = (text) => text.split(/\r?\n/).map((line) => plainLine(line.replace(/^[#=*\s-]+/, ''))).find(Boolean);
+
+// Read from the tarball in memory, so nothing in it reaches the disk or runs.
+async function readLicenseFile(manifest) {
+  const named = /^see license in\s+(.+)$/i.exec(licenseField(manifest))?.[1].replace(/^\.\//, '').toLowerCase();
+  const res = await fetch(manifest.dist.tarball);
+  if (!res.ok) return null;
+  const tar = gunzipSync(Buffer.from(await res.arrayBuffer()), { maxOutputLength: MAX_UNPACKED });
+  let fallback = null;
+  for (let at = 0; at + 512 <= tar.length;) {
+    const size = parseInt(tar.toString('latin1', at + 124, at + 136), 8) || 0;
+    const file = tar.toString('latin1', at, at + 100).split('\0')[0].replace(/^[^/]+\//, '').toLowerCase();
+    if (file === named) return tar.toString('utf8', at + 512, at + 512 + size);
+    if (/^licen[cs]e(\.\w+)?$/.test(file)) fallback = tar.toString('utf8', at + 512, at + 512 + size);
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return fallback;
+}
+
+// npm doesn't warn about this, and the build, tests and page all still pass. PrimeNG went from MIT to a commercial
+// license with "SEE LICENSE IN LICENSE.md" as its field on both sides, so that form needs the files themselves.
+async function licenseChange(doc, { name, from, to }) {
+  const [before, after] = [doc?.versions?.[from], doc?.versions?.[to]];
+  if (!before || !after) return { name, unread: true };
+  const fields = [before, after].map(licenseField);
+  const comparable = (text) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (comparable(fields[0]) !== comparable(fields[1])) return { name, from, to, before: plainLine(fields[0]) || 'none', after: plainLine(fields[1]) || 'none' };
+  if (!/^see license/i.test(fields[1])) return null;
+  const files = await Promise.all([before, after].map((manifest) => readLicenseFile(manifest).catch(() => null)));
+  if (!files[0] || !files[1]) return { name, unread: true };
+  // Letters only, so a new copyright year isn't a new license.
+  const words = (text) => text.toLowerCase().replace(/[^a-z]/g, '');
+  return words(files[0]) === words(files[1]) ? null : { name, from, to, before: licenseTitle(files[0]), after: licenseTitle(files[1]) };
+}
+
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
 async function buildPlan({ projectDir, to }) {
@@ -283,6 +376,13 @@ async function buildPlan({ projectDir, to }) {
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const registry = registryClient(JSON.parse(configText), projectDir);
+
+  // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
+  // still exits 0. Angular 22's stops with an error instead.
+  const catalogued = Object.keys(project.deps).filter((n) => String(project.deps[n]).startsWith('catalog:') && (isFramework(n) || n === 'typescript'));
+  if (catalogued.length) {
+    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Either give these packages plain versions in package.json, commit that, and plan again, or update the catalog by hand, run pnpm install, then run ng update <package> --migrate-only --from <old version> for each package. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
+  }
 
   const currentCore = project.installed('@angular/core');
   if (!currentCore) throw new PlanError(`Could not work out the installed @angular/core version from "${project.deps['@angular/core']}".`);
@@ -301,7 +401,7 @@ async function buildPlan({ projectDir, to }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [],
+    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
 
@@ -326,10 +426,27 @@ async function buildPlan({ projectDir, to }) {
   });
   const coupledNames = screened.filter(Boolean).sort();
   const coupled = new Set(coupledNames);
-  const docs = new Map(await mapLimited(coupledNames, async (name) => [name, await registry.get(name, true)]));
+
+  // A library with no Angular peer can still be tied to one that moves. @nebular/eva-icons 16 peers on @nebular/theme
+  // at exactly 16.0.0, and `ng update` refuses the hop unless both are in the command.
+  const peersOnCoupled = (manifest) => Object.entries(manifest?.peerDependencies || {}).filter(([peer, range]) => coupled.has(peer) && !manifest.peerDependenciesMeta?.[peer]?.optional && semver.validRange(range));
+  const followerNames = [];
+  for (let found = true; found;) {
+    found = false;
+    for (const name of lookups) {
+      if (coupled.has(name)) continue;
+      const doc = await registry.get(name);
+      if (!doc || !Object.values(doc.versions).some((m) => peersOnCoupled(m).length > 0)) continue;
+      coupled.add(name);
+      followerNames.push(name);
+      found = true;
+    }
+  }
+
+  const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
 
   const current = {};
-  for (const name of coupledNames) current[name] = project.installed(name)?.version || null;
+  for (const name of [...coupledNames, ...followerNames]) current[name] = project.installed(name)?.version || null;
 
   let blockedAt = null;
   for (let major = currentMajor + 1; major <= target; major++) {
@@ -359,8 +476,8 @@ async function buildPlan({ projectDir, to }) {
     for (const name of coupledNames) {
       const doc = docs.get(name);
       const floor = current[name];
-      if (ALIGNED.test(name) && !Object.values(doc.versions).some((m) => angularPeers(m).length)) {
-        const version = semver.maxSatisfying(eligibleReleases(doc, null), majorRange);
+      if (ALIGNED.test(name) && !hasAngularPeersForHop(doc, floor, majorRange)) {
+        const version = semver.maxSatisfying(eligibleReleases(doc, floor), majorRange);
         if (version) {
           libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });
           current[name] = version;
@@ -374,7 +491,7 @@ async function buildPlan({ projectDir, to }) {
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
       const manifest = doc.versions[choice.version];
       libs.push({
-        name, from: floor, to: choice.version, support: choice.support,
+        name, from: floor, to: choice.version, support: choice.support, ...(choice.newer ? { newer: choice.newer } : {}),
         peer: angularPeers(manifest).map(([, r]) => r)[0] || null,
         migrations: Boolean(manifest['ng-update']?.migrations),
         deprecated: manifest.deprecated || doc.versions[doc['dist-tags']?.latest]?.deprecated || null,
@@ -413,6 +530,40 @@ async function buildPlan({ projectDir, to }) {
       if (!changed) break;
     }
 
+    // A follower only moves when the release in place stops accepting what its peers just moved to.
+    for (let pass = 0; pass < followerNames.length + 1; pass++) {
+      let changed = false;
+      for (const name of followerNames) {
+        const doc = docs.get(name);
+        const have = current[name];
+        if (!have || !doc?.versions[have]) continue;
+        const rejected = (v) => peersOnCoupled(doc.versions[v]).filter(([peer, range]) => current[peer] && !semver.satisfies(current[peer], range, { includePrerelease: true }));
+        if (rejected(have).length === 0) continue;
+        const to = eligibleReleases(doc, have).find((v) => rejected(v).length === 0);
+        if (!to) {
+          if (blockers.some((b) => b.name === name)) continue;
+          const wants = rejected(have).map(([peer, range]) => ({ by: name, peer, range }));
+          blockers.push({
+            name, major, kind: 'peer-conflict', installed: have, wants,
+            reason: `no stable release at or above ${have} accepts ${wants.map((w) => `${w.peer} ${current[w.peer]}`).join(', ')}, which Angular ${major} needs, and ${have} requires ${wants.map((w) => w.range).join(', ')}`,
+          });
+          continue;
+        }
+        const manifest = doc.versions[to];
+        libs.push({
+          name, from: have, to, support: 'follows',
+          peer: peersOnCoupled(manifest).map(([peer]) => `${peer} ${current[peer]}`).join(', '),
+          migrations: Boolean(manifest['ng-update']?.migrations),
+          deprecated: null,
+          lastPublished: day(doc.time?.[doc['dist-tags']?.latest]),
+        });
+        current[name] = to;
+        addPeers(name, manifest);
+        changed = true;
+      }
+      if (!changed) break;
+    }
+
     const { changes, conflicts } = await resolveShared({ project, registry, requirements, current, coupled });
     for (const c of conflicts) {
       blockers.push({
@@ -429,7 +580,15 @@ async function buildPlan({ projectDir, to }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    const command = [`${runnerFor(project)} ng update @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    // npm and pnpm install a required peer on their own, so nothing else says the app gained one.
+    for (const lib of moved) {
+      const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+      const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
+      const valid = added.filter((peer) => VALID_NAME.test(peer));
+      if (lib.from && valid.length) lib.newPeers = valid;
+      if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
+    }
+    const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {
@@ -440,6 +599,14 @@ async function buildPlan({ projectDir, to }) {
     if (blockedAt === null) {
       plan.hops.push(hop);
       plan.reachable = major;
+      // shortcut: only the libraries the plan moves, which already have full registry documents. Shared packages such as
+      // TypeScript would need a very large download each. Check those too if a shared package ever changes its license.
+      const compared = await mapLimited(moved.filter((lib) => lib.from), (lib) => licenseChange(docs.get(lib.name), lib));
+      for (const change of compared.filter(Boolean)) {
+        if (change.unread) { plan.unchecked.push({ name: change.name, reason: 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' }); continue; }
+        plan.licenseChanges.push({ major, ...change });
+        plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
+      }
     }
   }
 
@@ -455,7 +622,9 @@ async function buildPlan({ projectDir, to }) {
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
     if (behind.length) {
-      plan.patches = { packages: behind, command: `${runnerFor(project)} ng update ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
+      // Only a CLI that has to move bootstraps a temporary copy of itself.
+      const update = behind.some((b) => b.name === '@angular/cli') ? updateCommand(project) : `${runnerFor(project)} ng update`;
+      plan.patches = { packages: behind, command: `${update} ${behind.map((b) => `${b.name}@${b.to}`).join(' ')}` };
     }
   }
   plan.blockedAt = blockedAt;
@@ -467,6 +636,7 @@ async function buildPlan({ projectDir, to }) {
 const SUPPORT = {
   declared: 'supports it',
   aligned: 'follows Angular\'s major',
+  follows: 'moves with its peer',
   open: 'UNCONFIRMED: open-ended range, check the running app',
   stale: 'UNCONFIRMED: this release is older than the Angular major and only accepts it through an open-ended range, check the running app',
 };
@@ -492,7 +662,7 @@ function render(plan) {
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}; needed by ${s.neededBy.join(', ')}`);
     lines.push(`  Run: ${hop.command}`);
@@ -506,7 +676,9 @@ function render(plan) {
     const seen = new Set();
     for (const u of plan.unchecked) { const key = `${u.name}|${u.reason}`; if (!seen.has(key)) { seen.add(key); lines.push(`  ${u.name}: ${u.reason}.`); } }
   }
-  return lines.join('\n');
+  // An agent acts on this text, and much of it comes from the registry, so nothing in it gets to start a line of its own.
+  // Controls (C0 and C1), line and paragraph separators, and invisible format characters such as bidi overrides.
+  return lines.map((line) => line.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Cf}]+/gu, ' ')).join('\n');
 }
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
