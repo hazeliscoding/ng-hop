@@ -9,7 +9,7 @@
 
 An Angular upgrade fails on your dependencies, not on Angular. Library version numbers rarely match Angular's, some libraries lag behind, and an old release can claim to support a major it predates. `--force` makes the error go away and leaves you to find out what broke. ng-hop is an agent skill that works out how far your whole app can go today, moves it there one commit per major, and asks you when a library is in the way.
 
-**Status:** in development. See [ROADMAP.md](ROADMAP.md).
+**Status:** 0.1.0, the first release. See [ROADMAP.md](ROADMAP.md) for what's next.
 
 ![Claude Code loads ng-hop, plans the upgrade, moves an Angular 20 app to 21, gets past a build break without forcing anything, commits, and stops to ask what to do about Nebular, which blocks Angular 22](docs/demo/upgrade.gif)
 
