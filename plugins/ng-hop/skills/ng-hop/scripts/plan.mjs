@@ -677,7 +677,8 @@ function render(plan) {
     for (const u of plan.unchecked) { const key = `${u.name}|${u.reason}`; if (!seen.has(key)) { seen.add(key); lines.push(`  ${u.name}: ${u.reason}.`); } }
   }
   // An agent acts on this text, and much of it comes from the registry, so nothing in it gets to start a line of its own.
-  return lines.map((line) => line.replace(/[\x00-\x1f\x7f]+/g, ' ')).join('\n');
+  // Controls (C0 and C1), line and paragraph separators, and invisible format characters such as bidi overrides.
+  return lines.map((line) => line.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Cf}]+/gu, ' ')).join('\n');
 }
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
