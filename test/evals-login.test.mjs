@@ -191,7 +191,9 @@ test('evals only run when someone starts them, and only the jobs that need the l
   const jobs = WORKFLOW.slice(WORKFLOW.indexOf('\njobs:'));
   const job = (name) => new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  \\w+:\\n|$(?![\\s\\S]))`, 'm').exec(jobs)[0];
   for (const name of ['prepare', 'report']) assert.doesNotMatch(job(name), /secrets\./, name);
-  for (const name of ['canary', 'run']) assert.match(job(name), /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, name);
+  for (const name of ['canary', 'run', 'triggers']) assert.match(job(name), /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, name);
+  // Agent output isn't masked the way the secret is, and this job has no collect step to check it.
+  assert.doesNotMatch(job('triggers'), /upload-artifact/);
 });
 
 test('the workflow never puts the login in the environment of anything it starts', () => {
