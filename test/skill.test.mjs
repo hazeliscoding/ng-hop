@@ -79,6 +79,13 @@ test('undecided pnpm install scripts are declined, and approving one is left to 
   assert.doesNotMatch(`${skill}\n${trouble}`, /run `pnpm approve-builds/i);
 });
 
+test('a question about a license change still leaves the major committed', () => {
+  // An eval run stopped to ask with Angular 22 uncommitted. Every stop has to be safe, and a commit on a branch binds nobody.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  const section = trouble.slice(trouble.indexOf('Invalid PrimeUI License'), trouble.indexOf('A file named in `angular.json`'));
+  assert.match(section, /Commit the major first/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
