@@ -46,53 +46,39 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **Read the answers as well as the score, with someone who didn't write the checks (2026-11-07).** After the license fix, the score was 100% again, so a fresh agent compared what each setup told the person. It found that the skill never mentioned a library's new required peer (0 of 9, against 9 of 9 for plain Claude), never mentioned Angular 22's higher Node minimum (0 of 18, against 1 of 18), and once said nothing used a library after cutting a file short with `head`. Each is now in the plan, the skill or a check. *Why:* the checks can only catch what someone thought of, and the two worst findings so far came from reading. *Gave up:* one more pass per benchmark. It still isn't proof: 100% means passing every check written so far.
 - **Score both setups on the same checks, with results and process apart (2026-11-07).** The README counts only the checks both setups get, and splits what the person ends up with from how the work was done. *Why:* checks that only apply with the skill, such as whether it loaded, made the skill's total bigger, and process checks reward commits nobody asked plain Claude for. Counted that way, plain Claude gets 95% of the results, and that's the honest gap. *Gave up:* one big headline number.
 
+## Shipped
+
+| Release | Date | Milestones | What it delivered |
+|---|---|---|---|
+| 0.1.0 | 2026-11-07 | M0 to M4 | The repo, brand and CI. `plan.mjs`, which finds the highest reachable major from npm's own data in seconds, tested against a fake registry. The skill, which moves an app one committed major at a time with the build, tests and running app checked, and stops to ask at a blocker or a license change. pnpm 12, workspaces included. 25 eval cases run three times with and without the skill on GitHub's machines, trigger evals, and the scores in the README. Install from the marketplace, checked in CI. |
+
 ## Milestones
 
-### M0: Placeholder
+### M5: 0.2.0, real apps and other agents
 
-- [x] Repo, brand, license, agent rules and CI with secret scanning.
+The evals use small apps built for them. This release is about apps nobody built for a test, and agents other than Claude Code.
 
-**Done when:** the repo is on GitHub with all of the above, and CI passes.
+- [ ] Take my own apps on old majors (`readme-wizard`, `pr-sweep`) to the latest Angular with the skill, and fix what that finds.
+- [ ] Take a whole upgrade through OpenCode, and run the skill for real in GitHub Copilot. Update the README's agent table with what happened.
+- [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
 
-### M1: The plan
+**Done when:** both apps are on the latest Angular through the skill, and the README's agent table says what OpenCode and Copilot really did.
 
-- [x] `plan.mjs` finds the highest reachable major, each library's version per major, shared peers, blockers and what it can't check.
-- [x] Tests against a fake registry that behaves like npm, including the abbreviated form, auth failures and outages.
+### M6: 0.3.0, fewer stops
 
-**Done when:** `npm test` passes and a plan for a real 15-dependency app takes a few seconds.
+Each of these is a place where the skill stops or says less than it could today.
 
-### M2: The skill
+- [ ] Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`. Plain Claude did this and passed.
+- [ ] Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
+- [ ] Say when a framework package the app uses is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`.
+- [ ] Compare the licenses of packages the plan doesn't move, such as `@primeuix/themes`, which went commercial alongside PrimeNG 22.
 
-- [x] `SKILL.md`, `references/`, `guide.mjs` and `smoke.mjs`.
-- [x] The plan's command upgrades real apps with no `--force`.
-
-**Done when:** an agent with the skill takes a real app across two majors, with one commit per major.
-
-### M3: Proof
-
-- [x] Eval cases for questions and refusals, each run with and without the skill.
-- [x] Whole-upgrade evals, each run three times with and without the skill and rebuilt by the grader.
-- [x] Trigger evals, and a description tuned against a held-out set.
-- [x] Whole-upgrade evals on pnpm, with its install scripts decided, undecided and with Angular in a catalog.
-- [x] Scores in the README, with the cases where plain Claude does just as well.
-
-**Done when:** every case's result is in the benchmark, and the README reports it honestly.
-
-### M4: 0.1.0
-
-- [x] `CONTRIBUTING.md`, `SECURITY.md` and a changelog.
-- [x] Install from the marketplace on a clean machine. CI does this on every push, and runs a real plan from the installed copy.
-- [ ] Tag `v0.1.0`.
-
-**Done when:** someone can install it from the README's commands and run it on their app.
+**Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest.
 
 ## Later
 
-- Run the skill in GitHub Copilot for real, and take a whole upgrade through OpenCode. So far Copilot is checked from its docs and OpenCode on one question.
-- Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
-- Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`.
-- Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result.
-- Tell people when a framework package they use is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`. The plan leaves it to `ng update` and doesn't mention it.
+- Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so probably only the cheap question cases.
+- Evals on Windows. Only `npm test` runs there today, so a problem only Windows has shows up nowhere else.
 - A `--next` mode for upgrading to a prerelease Angular.
 - Use the DevTools protocol in `smoke.mjs`, so it sees every console error.
 
