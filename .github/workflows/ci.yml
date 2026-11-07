@@ -20,6 +20,9 @@ jobs:
         include:
           - os: ubuntu-latest
             node: '20'
+          # The skill's scripts promise Node 18, for apps on an Angular old enough to run on it.
+          - os: ubuntu-latest
+            node: '18'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
