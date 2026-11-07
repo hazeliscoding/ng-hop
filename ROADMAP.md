@@ -44,6 +44,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **Stop before a major that changes a library's license, and have the plan find it (2026-11-06).** The plan compares each moving library's license field, and the license files when the field only points at one, and warns ahead of the major. *Why:* three runs per case scored 100% with the skill, and that score was hiding the worst result in the batch. Five of six runs that ended on PrimeNG 22 moved the app onto a commercial license without a word, while plain Claude mentioned it every time, because it read more of the test output. The skill had made agents trust a plan that said nothing, and no check looked for it. *Gave up:* a tarball download per major for a library whose field says `SEE LICENSE IN`, and a stop on an upgrade that would have built. Shared packages such as TypeScript aren't compared, since they'd need a very large registry read each. A banner from a package the plan doesn't move is still only caught if someone sees it.
 - **Keep an installed open-ended library, and name the newer one (2026-11-07).** When no release names the major and the installed one still accepts it, it stays, marked UNCONFIRMED, with the newer version named in case the app needs it. *Why:* the plan moved AG Grid from 34.3.1 to 36.3.0, swapping one open-ended range for another, and bringing two majors of its own changes and 190 kB nobody asked for. AG Grid's own table says 28 and up work on Angular 22. Plain Claude read that table and stayed, and one run with the skill told the person 34.3.1 wouldn't work, which was false. *Gave up:* the library runs on a release older than the Angular major, so a break shows up in the checks instead of being avoided up front.
 - **Read the answers as well as the score, with someone who didn't write the checks (2026-11-07).** After the license fix, the score was 100% again, so a fresh agent compared what each setup told the person. It found that the skill never mentioned a library's new required peer (0 of 9, against 9 of 9 for plain Claude), never mentioned Angular 22's higher Node minimum (0 of 18, against 1 of 18), and once said nothing used a library after cutting a file short with `head`. Each is now in the plan, the skill or a check. *Why:* the checks can only catch what someone thought of, and the two worst findings so far came from reading. *Gave up:* one more pass per benchmark. It still isn't proof: 100% means passing every check written so far.
+- **Score both setups on the same checks, with results and process apart (2026-11-07).** The README counts only the checks both setups get, and splits what the person ends up with from how the work was done. *Why:* checks that only apply with the skill, such as whether it loaded, made the skill's total bigger, and process checks reward commits nobody asked plain Claude for. Counted that way, plain Claude gets 95% of the results, and that's the honest gap. *Gave up:* one big headline number.
 
 ## Milestones
 
@@ -70,10 +71,10 @@ Everything else gets ordinary care, but none of these three gets traded away for
 ### M3: Proof
 
 - [x] Eval cases for questions and refusals, each run with and without the skill.
-- [ ] Whole-upgrade evals, each run with and without the skill and rebuilt by the grader. `resume-interrupted` has run. The other eight were stopped when the machine ran low on memory.
+- [x] Whole-upgrade evals, each run three times with and without the skill and rebuilt by the grader.
 - [x] Trigger evals, and a description tuned against a held-out set.
-- [ ] Whole-upgrade evals on pnpm, with its install scripts decided, undecided and with Angular in a catalog.
-- [ ] Scores in the README, with the cases where plain Claude does just as well.
+- [x] Whole-upgrade evals on pnpm, with its install scripts decided, undecided and with Angular in a catalog.
+- [x] Scores in the README, with the cases where plain Claude does just as well.
 
 **Done when:** every case's result is in the benchmark, and the README reports it honestly.
 
