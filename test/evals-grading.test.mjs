@@ -112,3 +112,18 @@ test('a check that could not run is left out, because the failure that stopped i
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('facts an upgrade report owes the person, in the words real answers used', () => {
+  const peer = check('upgrade-clean-path', 'Says ng-select now needs @angular/cdk');
+  assert.ok(says(peer, 'ng-select 24 needs a new package. It now positions its dropdown with the Angular CDK.'));
+  assert.ok(!says(peer, 'All libraries moved, and nothing broke.'));
+
+  const node = check('upgrade-clean-path', 'Says Angular 22 needs a newer Node');
+  assert.ok(says(node, '**Node:** Angular 22 needs ^22.22.3, ^24.15.0 or >=26.0.0, so check your CI.'));
+  assert.ok(says(node, 'Node has to be at least 22.22 or 24.15 now.'));
+  assert.ok(!says(node, 'Your Node version is fine.'));
+
+  const wrong = check('ask-open-range', 'Does not claim 34.3.1 stops working on the newer Angular');
+  assert.ok(!says(wrong, "So 34.3.1 won't work past Angular 20, and 36.3.0 is the version to plan around."));
+  assert.ok(says(wrong, "34.3.1 accepts Angular 22 through an open-ended range, which doesn't prove it works."));
+});

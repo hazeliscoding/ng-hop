@@ -4,7 +4,7 @@
 //
 // These read the live npm registry, so they describe the world on the date below. When a library catches up (Nebular
 // ships Angular 22 support, say), the case that relies on it has to change. test/ holds the time-proof versions.
-export const AS_OF = '2026-11-04';
+export const AS_OF = '2026-11-07';
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -120,6 +120,8 @@ export const check = {
       return [angular === primeng, `Lockfile has Angular ${angular}, package.json has PrimeNG ${primeng}`];
     },
   }),
+  saysNewPeer: () => check.says('Says ng-select now needs @angular/cdk', /cdk/i),
+  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node[^.\n]{0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)[^.\n]{0,120}node/i),
   saysLicenseChanges: () => check.says('Tells the person PrimeNG 22 changes its license', /(primeng|primeui)[\s\S]{0,600}licen[sc]e|licen[sc]e[\s\S]{0,600}(primeng|primeui)/i),
   usedPlan: () => ({
     text: 'Used the plan script',
@@ -172,7 +174,7 @@ export const CASES = [
       check.says('Gives ng-select 24.x, whose number does not match Angular', /24\.\d+\.\d+/),
       check.says('Gives PrimeNG 22.x', /22\.\d+\.\d+/),
       check.says('Gives ngx-mask 22.x', /mask[\s\S]{0,120}22\.\d+\.\d+/i),
-      check.saysLicenseChanges(),
+      check.saysLicenseChanges(), check.saysNewPeer(),
     ],
   },
   {
@@ -182,6 +184,7 @@ export const CASES = [
       check.skillFired(), check.noChanges(),
       check.says("Says npm's range alone doesn't prove it works", /(open-ended|unconfirmed|no upper (bound|limit)|>= ?(17|20)|not (explicitly|specifically)|doesn't (name|list)|does not (name|list)|running app|isn't real evidence|prove little|any future)/i),
       check.says('Gives evidence, or says it has none beyond npm', /(build|built|ran|run|render|compatibility|docs|table|didn't (build|run|test)|haven't (built|run|tested))/i),
+      check.doesNotSay('Does not claim 34.3.1 stops working on the newer Angular', /34\.3\.1\s+(won't|will not|doesn't|does not|can't|cannot)\s+work/i),
     ],
   },
   {
@@ -281,7 +284,7 @@ should I just use --force?`,
     prompt: 'Upgrade this app to Angular 22, along with its libraries.',
     assertions: [
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
-      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.saysNewPeer(), check.saysNodeMoved(),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },
@@ -389,7 +392,7 @@ should I just use --force?`,
     prompt: 'Upgrade this app to Angular 22, along with its libraries.',
     assertions: [
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
-      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.saysNewPeer(), check.saysNodeMoved(),
       check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(4),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
