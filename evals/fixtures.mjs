@@ -18,6 +18,20 @@ export const FIXTURES = {
   // Every library has a release for each major, and the numbers don't line up with Angular's.
   'clean-path': {
     angular: 20,
+    install: ['@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
+    files: {
+      ...config(["import { provideNgxMask } from 'ngx-mask';"], ['provideNgxMask()']),
+      ...shell(
+        ["import { NgSelectModule } from '@ng-select/ng-select';", "import { NgxMaskDirective } from 'ngx-mask';"],
+        `<ng-select [items]="items" /><input mask="000-000" />`,
+        { componentImports: 'NgSelectModule, NgxMaskDirective', body: "\n  items = ['a', 'b'];\n" },
+      ),
+    },
+  },
+
+  // The same, plus PrimeNG, whose only release for Angular 22 moves it from MIT to a commercial license. Nothing fails.
+  'license-change': {
+    angular: 20,
     // PrimeNG peers on @angular/animations, so without naming it npm picks 20.1.8 itself, as in nebular-blocked below.
     install: ['@angular/animations@^20.3.0', 'primeng@20.4.0', '@primeuix/themes@1.2.5', '@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
     files: {
@@ -122,4 +136,5 @@ FIXTURES['pnpm-clean'] = { ...cleanPath, packageManager: 'pnpm', files: { ...cle
 // Nobody has decided about install scripts, so every install exits 1 until someone does.
 FIXTURES['pnpm-undecided'] = { ...FIXTURES['plain-20'], packageManager: 'pnpm', undecidedScripts: true };
 // Angular comes from a catalog. Through Angular 21's CLI, `ng update` skips it, moves the libraries and exits 0.
-FIXTURES['pnpm-catalog'] = { ...FIXTURES['pnpm-clean'], catalog: true };
+const withPrimeng = FIXTURES['license-change'];
+FIXTURES['pnpm-catalog'] = { ...withPrimeng, packageManager: 'pnpm', catalog: true, files: { ...withPrimeng.files, 'pnpm-workspace.yaml': decidedScripts } };

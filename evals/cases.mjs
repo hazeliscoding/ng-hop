@@ -37,19 +37,21 @@ export const check = {
   }),
   endsWithQuestion: () => ({
     text: 'Stops and hands the decision to the person',
-    run: (ctx) => { const tail = ctx.finalText.trim().slice(-900); return [/\?|\btell me\b|\blet me know\b|\byour call\b/i.test(tail), `Ending: "${tail.slice(-140)}"`]; },
+    run: (ctx) => { const tail = ctx.finalText.trim().slice(-900); return [/\?|\btell me\b|\blet me know\b|\byour call\b|\bif you (want|'d like|would like)\b/i.test(tail), `Ending: "${tail.slice(-140)}"`]; },
   }),
   reachesMajor: (major) => ({
     text: `package.json ends on Angular ${major}`,
     run: (ctx) => { const v = ctx.deps['@angular/core']; return [ctx.major(v) === major, `@angular/core is ${v}`]; },
   }),
   // setupOn: a major that a setup commit may sit on before the upgrade starts.
+  // majors: a list, or a function of the run, for a case where more than one place to stop is right.
   commitPerMajor: (majors, { setupOn } = {}) => ({
-    text: `One commit per major, in order: ${majors.join(', ')}`,
+    text: typeof majors === 'function' ? 'One commit per major, up to where it stopped' : `One commit per major, in order: ${majors.join(', ')}`,
     run: (ctx) => {
+      const expected = typeof majors === 'function' ? majors(ctx) : majors;
       const list = ctx.facts.commits.map((c) => ctx.major(c.angular)).filter((m) => m !== setupOn);
       const distinct = list.filter((m, i) => m !== list[i - 1]);
-      const ok = JSON.stringify(distinct) === JSON.stringify(majors) && list.length === majors.length;
+      const ok = JSON.stringify(distinct) === JSON.stringify(expected) && list.length === expected.length;
       return [ok, `Commits land on majors: [${list.join(', ')}]: ${ctx.facts.commits.map((c) => c.subject).join(' | ').slice(0, 200)}`];
     },
   }),
@@ -118,6 +120,7 @@ export const check = {
       return [angular === primeng, `Lockfile has Angular ${angular}, package.json has PrimeNG ${primeng}`];
     },
   }),
+  saysLicenseChanges: () => check.says('Tells the person PrimeNG 22 changes its license', /(primeng|primeui)[\s\S]{0,600}licen[sc]e|licen[sc]e[\s\S]{0,600}(primeng|primeui)/i),
   usedPlan: () => ({
     text: 'Used the plan script',
     skillOnly: true,
@@ -162,13 +165,14 @@ export const CASES = [
     ],
   },
   {
-    name: 'ask-mismatched-versions', tier: 'plan', fixture: 'clean-path',
+    name: 'ask-mismatched-versions', tier: 'plan', fixture: 'license-change',
     prompt: 'which versions of primeng, ng-select and ngx-mask would i need for angular 22? their version numbers confuse me',
     assertions: [
       check.skillFired(), check.noChanges(),
       check.says('Gives ng-select 24.x, whose number does not match Angular', /24\.\d+\.\d+/),
       check.says('Gives PrimeNG 22.x', /22\.\d+\.\d+/),
       check.says('Gives ngx-mask 22.x', /mask[\s\S]{0,120}22\.\d+\.\d+/i),
+      check.saysLicenseChanges(),
     ],
   },
   {
@@ -195,7 +199,7 @@ export const CASES = [
     prompt: "We still have @angular/flex-layout in here from years ago. Is that going to be a problem for going to Angular 21? Don't touch anything.",
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version/i),
+      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version|\bno version\b|(never|won't) be a version/i),
       check.says('Says it is deprecated', /deprecated|abandon|no longer maintained|end.of.life|discontinued|unmaintained/i),
       check.says('Points to replacing or removing it', /replac|remov|migrat(e|ing) (away|off)|CSS (grid|flex)/i),
     ],
@@ -211,7 +215,7 @@ should I just use --force?`,
     assertions: [
       check.skillFired(), check.noChanges(),
       check.says('Advises against forcing as the default', /(don't|do not|wouldn't|would not|not recommend|avoid|hold off|not (just )?(use|run)|no[,.:]|not a fix|shouldn't|should not)[^.\n]{0,120}(force|bypass|skip)|force[^.\n]{0,120}(hide|skip|mask|risk|unsupported|untested|not)/i),
-      check.says('Offers waiting or replacing', /wait|replac/i),
+      check.says('Offers waiting or replacing', /wait|replac|stay on [^.\n]{0,40}until/i),
       check.doesNotSay('Does not recommend downgrading to 19.1.0', /(?<!(?:don't|don’t|do not|not|never|won't|wouldn't|avoid|no)\s+)(use|install|pin|downgrade to|move to|switch to|go to|try)\s+(ngx-toastr@)?(version )?`?19\.1/i),
     ],
   },
@@ -282,13 +286,30 @@ should I just use --force?`,
     ],
   },
   {
+    // Everything passes on Angular 22, including the app, so a plan that only looks at versions walks straight through.
+    // Stopping at 21 to ask is what ng-hop does, and carrying on with a clear warning is a defensible thing to do, so
+    // both pass the checks on the result. Whether it asked first has its own check.
+    name: 'upgrade-license-change', tier: 'upgrade', fixture: 'license-change',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(),
+      { text: 'package.json ends on Angular 21 or 22', run: (ctx) => { const v = ctx.deps['@angular/core']; return [[21, 22].includes(ctx.major(v)), `@angular/core is ${v}`]; } },
+      check.commitPerMajor((ctx) => [21, 22].filter((major) => major <= ctx.major(ctx.deps['@angular/core']))),
+      check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
+      check.saysLicenseChanges(),
+      { text: "Asked before moving onto PrimeNG's new license", run: (ctx) => [ctx.major(ctx.deps.primeng) < 22, `primeng is ${ctx.deps.primeng}`] },
+      check.endsWithQuestion(),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
     name: 'upgrade-blocked', tier: 'upgrade', fixture: 'nebular-blocked',
     prompt: 'Upgrade this app to Angular 22.',
     assertions: [
       check.skillFired(), check.reachesMajor(21), check.commitPerMajor([21]), check.cleanTree(), check.noForcing(), check.noOverrides(),
       check.noDirtyUpdate(),
       check.says('Names Nebular as the blocker', /nebular/i),
-      check.says('Offers waiting, replacing or forcing', /wait[\s\S]{0,400}(replac|force)|replac[\s\S]{0,400}(wait|force)/i),
+      check.says('Offers waiting, replacing or forcing', /(wait|(once|until) [^.\n]{0,40}support)[\s\S]{0,400}(replac|force|override)|replac[\s\S]{0,400}(wait|force|override)/i),
       check.endsWithQuestion(),
       check.installs(), check.builds(), check.appRuns(),
     ],
@@ -346,7 +367,7 @@ should I just use --force?`,
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
       // Staying on a release the range accepts is as fair as moving, as long as the two packages agree: they pin each other.
       { text: 'Kept ag-grid-community and ag-grid-angular on the same version', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [Boolean(a) && a === c, `angular ${a}, community ${c}`]; } },
-      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t confirm)/i),
+      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t confirm|or later[^.\n]{0,80}doesn't tell)/i),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },

@@ -51,6 +51,7 @@ export async function grade(c, { config, facts, parsed, projectDir, runDir, veri
     verified: (step) => {
       const v = verification?.[step];
       if (!v) return [false, 'Not verified'];
+      if (v.out?.startsWith('skipped:')) return [null, v.out];
       return [v.ok, v.ok ? 'Passed when the grader ran it' : `Failed: ${v.out}`];
     },
   };
@@ -60,6 +61,8 @@ export async function grade(c, { config, facts, parsed, projectDir, runDir, veri
     let passed = false;
     let evidence;
     try { [passed, evidence] = a.run(ctx); } catch (err) { evidence = `Grader error: ${err.message}`; }
+    // A check that couldn't run says nothing about the result, and the failure that stopped it is already counted.
+    if (passed === null) continue;
     expectations.push({ text: a.text, passed: Boolean(passed), evidence: String(evidence) });
   }
   const passedCount = expectations.filter((e) => e.passed).length;
