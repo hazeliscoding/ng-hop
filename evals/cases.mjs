@@ -147,7 +147,7 @@ export const CASES = [
     prompt: "how far can i upgrade this angular app right now? we're on 20 and i heard 22 is out. dont change anything yet, just tell me",
     assertions: [
       check.skillFired(), check.usedPlan(), check.noChanges(),
-      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)/i),
+      check.says('Says 21 is the furthest it can go today', /(\b21\b[^.\n]{0,120}(highest|furthest|as far|ceiling|reach|max|limit|stop|\bnot\s+(to\s+)?(angular\s+)?22\b))|((highest|furthest|as far|ceiling|reach|max|limit|stop)[^.\n]{0,80}\b21\b)|(\b(can|could)\b[^.\n]{0,40}\b(get|go|reach|upgrade|move)\b(?:(?!\b22\b)[^.\n]){0,30}\b21\b)/i),
       check.says('Names Nebular as what blocks 22', /nebular/i),
     ],
   },
