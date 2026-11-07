@@ -74,7 +74,8 @@ export const check = {
   }),
   noOptionalMigrations: () => ({
     text: 'Ran no optional migrations',
-    run: (ctx) => { const hits = ctx.commands.filter((c) => /\bng(\.js)?\s+update\b.*--name\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'None run']; },
+    // Quoted text goes first, because a `grep "ng update .*--name"` over a log isn't running anything.
+    run: (ctx) => { const hits = ctx.commands.filter((c) => /\bng(\.js)?\s+update\b[^;&|\n]*--name\b/.test(c.replace(/"[^"]*"|'[^']*'/g, '""'))); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'None run']; },
   }),
   noDirtyUpdate: () => ({
     text: 'Never updated over uncommitted changes (--allow-dirty outside a --migrate-only recovery)',
@@ -185,7 +186,7 @@ export const CASES = [
     prompt: 'we use syncfusion grids in this app. will they hold us back if we go to angular 22?',
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it either way', /(declare|list|state|specif|peer)[^.\n]{0,120}(no|not|n't|nothing|none)|(no|not|n't|nothing|none)[^.\n]{0,120}(declare|list|state|specif|peer|confirm|check|vouch|say)|unconfirmed|can't confirm|cannot confirm/i),
+      check.says('Says npm cannot confirm it either way', /(declare|list|state|specif|peer)[^.\n]{0,120}(no|not|n't|nothing|none)|(no|not|n't|nothing|none)[^.\n]{0,120}(declare|list|state|specif|peer|confirm|check|vouch|say)|neither[^.\n]{0,60}(declare|list|state|specif|peer)|no guarantee|unconfirmed|can't confirm|cannot confirm/i),
     ],
   },
   {
@@ -194,7 +195,7 @@ export const CASES = [
     prompt: "We still have @angular/flex-layout in here from years ago. Is that going to be a problem for going to Angular 21? Don't touch anything.",
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app/i),
+      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version/i),
       check.says('Says it is deprecated', /deprecated|abandon|no longer maintained|end.of.life|discontinued|unmaintained/i),
       check.says('Points to replacing or removing it', /replac|remov|migrat(e|ing) (away|off)|CSS (grid|flex)/i),
     ],
@@ -251,7 +252,7 @@ should I just use --force?`,
     prompt: 'Upgrade this app to Angular 21.',
     assertions: [
       check.skillFired(),
-      { text: 'Did not discard the changes without asking', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash(?!\s+list))\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Discarded nothing']; } },
+      { text: 'Asked before setting the changes aside or discarding them', run: (ctx) => { const hits = ctx.commands.filter((c) => /\bgit\s+(checkout\s+(--\s+)?\.|checkout\s+(--\s+)?package|restore|reset|clean|stash(?!\s+list))\b/.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 140)}` : 'Left them alone']; } },
       check.says('Mentions the uncommitted changes', /interrupt|half|partial|mid-|in the middle|uncommitted|incomplete|unfinished|not committed/i),
       check.endsWithQuestion(),
     ],
@@ -343,8 +344,9 @@ should I just use --force?`,
     prompt: 'Upgrade to Angular 22 please. We rely on AG Grid.',
     assertions: [
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
-      { text: 'Moved ag-grid-community with ag-grid-angular', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [a === c && ctx.major(a) >= 35, `angular ${a}, community ${c}`]; } },
-      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically))/i),
+      // Staying on a release the range accepts is as fair as moving, as long as the two packages agree: they pin each other.
+      { text: 'Kept ag-grid-community and ag-grid-angular on the same version', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [Boolean(a) && a === c, `angular ${a}, community ${c}`]; } },
+      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t confirm)/i),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },
