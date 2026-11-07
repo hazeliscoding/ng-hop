@@ -41,12 +41,13 @@ Show the person the result in a few lines: where they can get to, what blocks an
 - **If they only asked a question** ("how far can I go?", "does PrimeNG support 22?", "is this upgrade safe?"), answer from the plan and stop. Change nothing.
 - **If it's already on the target major with patch releases available,** and they asked to upgrade, install dependencies as in step 3, run the command it prints, check it as in step 4f, and commit. That's the whole job.
 - **If the plan is blocked,** carry on up to the highest reachable major, then stop as step 5 describes. Say that's what you're doing.
+- **A note that a library's license changes on a major:** the build, tests and app check all pass after a change like this, so the plan is the only warning they'll get, and it can cost them money. Read both license files (`npm pack <package>@<version>` in a temporary folder, then unpack it with `tar`). If only names or dates differ, say so and carry on. If the terms differ, go as far as the major before it and stop, even if they asked for the later one, because they can't have agreed to a license they haven't seen. Quote the new license's own words, and ask whether to accept it, stay where they are, or replace the library. If they accept, carry on with that major. Don't add a key or look for a way around the license's check. If they only asked a question, tell them in your answer.
 - **`Node: too-old` on a major:** `ng` will refuse to run. Stop before that major and ask them to switch Node. Don't switch it yourself, since `nvm use` changes it for the whole machine on Windows. `unsupported` means Node is newer than Angular lists: mention it and carry on while the checks pass.
 - **An Nx workspace:** the plan says so. Use `nx migrate` for the framework packages, and the plan for the library facts.
 
 ## 3. Record the starting point
 
-Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`), then record, before changing anything:
+Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. Then record, before changing anything:
 
 ```sh
 npx --no-install ng build
@@ -71,6 +72,8 @@ node $SCRIPTS/guide.mjs --from <N-1> --to <N>
 Most steps won't apply to this app. Search the code for what each one mentions instead of assuming. Do the "before" steps that apply. If the script can't reach the guide, read the page it names and say so in your report.
 
 **c. Run the plan's `Run:` command exactly as printed.** It names Angular and every library that has to move, because `ng update` checks peers against everything it's about to install. Naming them together is what makes `--force` unnecessary. The earlier commit means the tree is clean, so `--allow-dirty` isn't needed either.
+
+For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`. This small transport uses pnpm's `dlx` cache for the target CLI and scopes Angular's own version-dispatch control to that child, so it cannot redispatch to the app's old CLI and bootstrap inside the workspace. It still checks a clean Git tree and leaves Angular's peer checks enabled. It does not install a global CLI, provision a package manager, retry, reset or commit anything itself.
 
 **d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error.
 
@@ -112,4 +115,5 @@ An upgrade diff is already hard to review, and changes nobody asked for are the 
 - **No optional migrations** (`ng update --name ...`) and no moving to signals, standalone or new control flow, unless the major can't build without it. List them in the report instead.
 - **Tests stay as they are** unless the upgrade itself broke them. Never delete a test or loosen an assertion to get to green. If you do change a spec because an API changed, say so under hand fixes.
 - **No unrelated bumps or cleanups:** no `npm audit fix`, no newer versions of libraries the plan leaves alone, no reformatting.
-- **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
+- **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions`, `peerDependencyRules` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
+- **No approving a package's install script** without the person's approval. It runs that package's code on every install.

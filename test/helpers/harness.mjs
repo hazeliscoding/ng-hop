@@ -5,13 +5,15 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'ng-hop', 'skills', 'ng-hop', 'scripts');
 export const PLAN = join(SCRIPTS, 'plan.mjs');
 export const GUIDE = join(SCRIPTS, 'guide.mjs');
 export const SMOKE = join(SCRIPTS, 'smoke.mjs');
+export const UPDATE = join(SCRIPTS, 'update.mjs');
 
-// releases: { '21.0.0': { peer: '^21.0.0', at: '2026-01-01', deprecated, peers: {...}, migrations: true } }
+// releases: { '21.0.0': { peer: '^21.0.0', at: '2026-01-01', deprecated, peers: {...}, migrations: true, license, files: { 'LICENSE.md': 'text' } } }
 export function pkg(name, releases, tags = {}) {
   const versions = {};
   const time = {};
@@ -22,6 +24,8 @@ export function pkg(name, releases, tags = {}) {
     if (r.deprecated) versions[version].deprecated = r.deprecated;
     if (r.migrations) versions[version]['ng-update'] = { migrations: './migrations.json' };
     if (r.engines) versions[version].engines = r.engines;
+    if (r.license) versions[version].license = r.license;
+    if (r.files) versions[version].files = r.files;
     if (r.at) time[version] = `${r.at}T00:00:00.000Z`;
   }
   const stable = Object.keys(releases).filter((v) => !v.includes('-'));
@@ -46,11 +50,38 @@ export function typescript() {
   return pkg('typescript', { '5.8.3': {}, '5.9.3': {}, '6.0.3': {} });
 }
 
+// A real .tgz, because a parser tested only against its own idea of the format proves nothing.
+function tarball(files) {
+  const blocks = [];
+  for (const [path, text] of Object.entries(files)) {
+    const body = Buffer.from(text);
+    const header = Buffer.alloc(512);
+    header.write(`package/${path}`, 0, 'latin1');
+    header.write('0000644\0', 100, 'latin1');
+    header.write(`${body.length.toString(8).padStart(11, '0')}\0`, 124, 'latin1');
+    header.write('        ', 148, 'latin1');
+    header.write('0', 156, 'latin1');
+    header.write('ustar\u000000', 257, 'latin1');
+    const sum = header.reduce((a, b) => a + b, 0);
+    header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'latin1');
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
+}
+
 export async function startRegistry(packages, { requireAuth = false, failWith = null, hits = null } = {}) {
   const byName = new Map(packages.map((p) => [p.name, p]));
   const server = http.createServer((req, res) => {
     const name = decodeURIComponent(req.url.slice(1).split('?')[0]);
     if (hits) hits.push(name);
+    const download = /^-\/tarball\/(.+)\/([^/]+)$/.exec(name);
+    if (download) {
+      const files = byName.get(download[1])?.versions[download[2]]?.files;
+      if (files === 'corrupt') { res.writeHead(200); return res.end('this is not a gzip file'); }
+      if (!files) { res.writeHead(404); return res.end(); }
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      return res.end(tarball(files));
+    }
     if (failWith) { res.writeHead(failWith); return res.end('{}'); }
     if (requireAuth && !req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth required"}'); }
     const doc = byName.get(name);
@@ -63,6 +94,10 @@ export async function startRegistry(packages, { requireAuth = false, failWith = 
       for (const [v, m] of Object.entries(doc.versions)) {
         body.versions[v] = { name: m.name, version: m.version, peerDependencies: m.peerDependencies, ...(m.deprecated ? { deprecated: m.deprecated } : {}), ...(m.engines ? { engines: m.engines } : {}) };
       }
+    }
+    if (body === doc) {
+      const versions = Object.fromEntries(Object.entries(doc.versions).map(([v, { files, ...m }]) => [v, { ...m, dist: { tarball: `http://127.0.0.1:${server.address().port}/-/tarball/${doc.name}/${v}` } }]));
+      body = { ...doc, versions };
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(body));

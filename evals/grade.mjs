@@ -3,7 +3,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PLUGIN, testCommand } from './common.mjs';
+import { installCommand, PLUGIN, testCommand } from './common.mjs';
 
 const SMOKE = join(PLUGIN, 'skills', 'ng-hop', 'scripts', 'smoke.mjs');
 const env = { ...process.env, NG_CLI_ANALYTICS: 'false', CHROME_BIN: process.env.CHROME_BIN || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '') };
@@ -23,7 +23,7 @@ function attempt(cmd, cwd, timeout = 600000) {
 function verifyResult(projectDir) {
   const result = {};
   rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
-  result.install = attempt('npm ci --no-audit --no-fund', projectDir);
+  result.install = attempt(installCommand(projectDir), projectDir);
   if (!result.install.ok) return { ...result, build: { ok: false, out: 'skipped: install failed' }, test: { ok: false, out: 'skipped: install failed' }, smoke: { ok: false, out: 'skipped: install failed' } };
   result.build = attempt('npx ng build', projectDir);
   result.test = attempt(testCommand(projectDir), projectDir);
@@ -47,10 +47,11 @@ export async function grade(c, { config, facts, parsed, projectDir, runDir, veri
     read: (p) => { const f = join(projectDir, p); return existsSync(f) ? readFileSync(f, 'utf8') : null; },
     major: (v) => { const m = /(\d+)/.exec(String(v ?? '')); return m ? Number(m[1]) : null; },
     around: (m) => m.input.slice(Math.max(0, m.index - 30), m.index + Math.min(m[0].length, 140) + 30).replace(/\s+/g, ' ').trim(),
-    gitDiffNames: (glob) => { try { return execSync(`git diff ${facts.baseCommit} --name-only --ignore-cr-at-eol -- "${glob}"`, { cwd: projectDir, encoding: 'utf8', stdio: 'pipe' }).trim(); } catch (err) { return String(err.message); } },
+    changedFiles: (suffix) => (facts.changedFiles || []).filter((f) => f.endsWith(suffix)).join('\n'),
     verified: (step) => {
       const v = verification?.[step];
       if (!v) return [false, 'Not verified'];
+      if (v.out?.startsWith('skipped:')) return [null, v.out];
       return [v.ok, v.ok ? 'Passed when the grader ran it' : `Failed: ${v.out}`];
     },
   };
@@ -60,6 +61,8 @@ export async function grade(c, { config, facts, parsed, projectDir, runDir, veri
     let passed = false;
     let evidence;
     try { [passed, evidence] = a.run(ctx); } catch (err) { evidence = `Grader error: ${err.message}`; }
+    // A check that couldn't run says nothing about the result, and the failure that stopped it is already counted.
+    if (passed === null) continue;
     expectations.push({ text: a.text, passed: Boolean(passed), evidence: String(evidence) });
   }
   const passedCount = expectations.filter((e) => e.passed).length;

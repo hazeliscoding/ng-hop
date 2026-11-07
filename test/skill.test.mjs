@@ -64,6 +64,37 @@ test('nothing tells an agent to run plain npx ng, which can download an unrelate
   assert.doesNotMatch(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /['"`]npx['"`]\s*[,}]/);
 });
 
+test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {
+  // pnpm says so itself: The "pnpm" field in package.json is no longer read by pnpm.
+  const blocked = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8');
+  assert.match(blocked, /`peerDependencyRules\.allowedVersions` in `pnpm-workspace\.yaml`/);
+});
+
+test('undecided pnpm install scripts are declined, and approving one is left to the person', () => {
+  // Approving runs third-party code on every install. Declining is pnpm's own default and is easy to reverse.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  assert.match(trouble, /ERR_PNPM_IGNORED_BUILDS/);
+  assert.match(trouble, /Unable to install packages/);
+  assert.match(trouble, /Don't approve/);
+  assert.doesNotMatch(`${skill}\n${trouble}`, /run `pnpm approve-builds/i);
+});
+
+test('a question about a license change still leaves the major committed', () => {
+  // An eval run stopped to ask with Angular 22 uncommitted. Every stop has to be safe, and a commit on a branch binds nobody.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  const section = trouble.slice(trouble.indexOf('Invalid PrimeUI License'), trouble.indexOf('A file named in `angular.json`'));
+  assert.match(section, /Commit the major first/);
+});
+
+test('the skill says what to do when the plan warns about a license', () => {
+  // Five of six eval runs moved an app onto a commercial license without a word, while every check passed.
+  const rule = skill.split('\n').find((line) => line.includes('license changes on a major'));
+  assert.ok(rule, 'the skill has to answer the note plan.mjs prints');
+  assert.match(rule, /stop/);
+  assert.match(rule, /ask/);
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /its license changes/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

@@ -2,6 +2,8 @@
 // something else. `test` queries are never used to tune the description, so they show whether it generalizes.
 export const TRIGGER_QUERIES = [
   // ---- Should fire: different words for the same need, and cases that never say "upgrade" ------------------------
+  { split: 'train', should_trigger: true, query: "ng update says Repository is not clean but git status was clean before I ran it, this is a pnpm project" },
+  { split: 'test', should_trigger: false, query: 'how do I upgrade pnpm itself from 10 to 12 in this repo? not touching anything else' },
   { split: 'train', should_trigger: true, query: "we're stuck on angular 18 at work and my lead wants us on the latest by end of quarter. can you get this repo there? we've got primeng and ngrx in it" },
   { split: 'train', should_trigger: true, query: 'bump angular to 21 pls' },
   { split: 'train', should_trigger: true, query: `ng update @angular/core@21 fails with this:
