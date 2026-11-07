@@ -18,7 +18,8 @@ export const FIXTURES = {
   // Every library has a release for each major, and the numbers don't line up with Angular's.
   'clean-path': {
     angular: 20,
-    install: ['primeng@20.4.0', '@primeuix/themes@1.2.5', '@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
+    // PrimeNG peers on @angular/animations, so without naming it npm picks 20.1.8 itself, as in nebular-blocked below.
+    install: ['@angular/animations@^20.3.0', 'primeng@20.4.0', '@primeuix/themes@1.2.5', '@ng-select/ng-select@20.7.0', 'ngx-mask@20.0.3'],
     files: {
       ...config(["import { providePrimeNG } from 'primeng/config';", "import Aura from '@primeuix/themes/aura';", "import { provideNgxMask } from 'ngx-mask';"], ['providePrimeNG({ theme: { preset: Aura } })', 'provideNgxMask()']),
       ...shell(
