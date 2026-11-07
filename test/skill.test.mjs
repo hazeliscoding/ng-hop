@@ -86,6 +86,15 @@ test('a question about a license change still leaves the major committed', () =>
   assert.match(section, /Commit the major first/);
 });
 
+test('the skill says what to do when the plan warns about a license', () => {
+  // Five of six eval runs moved an app onto a commercial license without a word, while every check passed.
+  const rule = skill.split('\n').find((line) => line.includes('license changes on a major'));
+  assert.ok(rule, 'the skill has to answer the note plan.mjs prints');
+  assert.match(rule, /stop/);
+  assert.match(rule, /ask/);
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /its license changes/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

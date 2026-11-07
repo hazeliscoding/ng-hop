@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const exec = promisify(execFile);
@@ -323,6 +324,47 @@ async function resolveShared({ project, registry, requirements, current, coupled
   return { changes, conflicts };
 }
 
+// ---- Licenses -------------------------------------------------------------------------------------------------
+
+const MAX_UNPACKED = 256 * 1024 * 1024;
+const licenseField = (manifest) => String(manifest?.license?.type ?? manifest?.license ?? '').trim();
+// What a package wrote goes to an agent as a plan line, so it stays one short line of plain text.
+const plainLine = (text) => text.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+const licenseTitle = (text) => text.split(/\r?\n/).map((line) => plainLine(line.replace(/^[#=*\s-]+/, ''))).find(Boolean);
+
+// Read from the tarball in memory, so nothing in it reaches the disk or runs.
+async function readLicenseFile(manifest) {
+  const named = /^see license in\s+(.+)$/i.exec(licenseField(manifest))?.[1].replace(/^\.\//, '').toLowerCase();
+  const res = await fetch(manifest.dist.tarball);
+  if (!res.ok) return null;
+  const tar = gunzipSync(Buffer.from(await res.arrayBuffer()), { maxOutputLength: MAX_UNPACKED });
+  let fallback = null;
+  for (let at = 0; at + 512 <= tar.length;) {
+    const size = parseInt(tar.toString('latin1', at + 124, at + 136), 8) || 0;
+    const file = tar.toString('latin1', at, at + 100).split('\0')[0].replace(/^[^/]+\//, '').toLowerCase();
+    if (file === named) return tar.toString('utf8', at + 512, at + 512 + size);
+    if (/^licen[cs]e(\.\w+)?$/.test(file)) fallback = tar.toString('utf8', at + 512, at + 512 + size);
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return fallback;
+}
+
+// npm doesn't warn about this, and the build, tests and page all still pass. PrimeNG went from MIT to a commercial
+// license with "SEE LICENSE IN LICENSE.md" as its field on both sides, so that form needs the files themselves.
+async function licenseChange(doc, { name, from, to }) {
+  const [before, after] = [doc?.versions?.[from], doc?.versions?.[to]];
+  if (!before || !after) return { name, unread: true };
+  const fields = [before, after].map(licenseField);
+  const comparable = (text) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (comparable(fields[0]) !== comparable(fields[1])) return { name, from, to, before: plainLine(fields[0]) || 'none', after: plainLine(fields[1]) || 'none' };
+  if (!/^see license/i.test(fields[1])) return null;
+  const files = await Promise.all([before, after].map((manifest) => readLicenseFile(manifest).catch(() => null)));
+  if (!files[0] || !files[1]) return { name, unread: true };
+  // Letters only, so a new copyright year isn't a new license.
+  const words = (text) => text.toLowerCase().replace(/[^a-z]/g, '');
+  return words(files[0]) === words(files[1]) ? null : { name, from, to, before: licenseTitle(files[0]), after: licenseTitle(files[1]) };
+}
+
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
 async function buildPlan({ projectDir, to }) {
@@ -355,7 +397,7 @@ async function buildPlan({ projectDir, to }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [],
+    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
 
@@ -545,6 +587,14 @@ async function buildPlan({ projectDir, to }) {
     if (blockedAt === null) {
       plan.hops.push(hop);
       plan.reachable = major;
+      // shortcut: only the libraries the plan moves, which already have full registry documents. Shared packages such as
+      // TypeScript would need a very large download each. Check those too if a shared package ever changes its license.
+      const compared = await mapLimited(moved.filter((lib) => lib.from), (lib) => licenseChange(docs.get(lib.name), lib));
+      for (const change of compared.filter(Boolean)) {
+        if (change.unread) { plan.unchecked.push({ name: change.name, reason: 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' }); continue; }
+        plan.licenseChanges.push({ major, ...change });
+        plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
+      }
     }
   }
 

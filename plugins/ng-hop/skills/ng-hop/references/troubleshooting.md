@@ -120,7 +120,7 @@ A peer range says which versions a library accepts, not that it works with them.
 
 ## The app shows a license banner after a major (`Invalid PrimeUI License`)
 
-A library's new major can change its license, and the build, tests and `smoke.mjs` all still pass. PrimeNG 21 is MIT, while PrimeNG 22 is the commercial PrimeUI license with a required key and a free tier for small organizations, and it shows a red badge without a key, in production builds too. No PrimeNG 21 release accepts Angular 22. npm can't warn about this: its `license` field says `SEE LICENSE IN LICENSE.md` on both.
+A library's new major can change its license, and the build, tests and `smoke.mjs` all still pass. PrimeNG 21 is MIT, while PrimeNG 22 is the commercial PrimeUI license with a required key and a free tier for small organizations, and it shows a red badge without a key, in production builds too. No PrimeNG 21 release accepts Angular 22. npm can't warn about this: its `license` field says `SEE LICENSE IN LICENSE.md` on both. The plan compares the files and warns before the major for each library it moves, so you should only land here for a package it doesn't, such as a dependency of one of them.
 
 This can cost the person money, so put it first in your report and ask whether to keep the major, stay on the one before, or replace the library. Commit the major first, like any other that passes its checks: it's on its own branch, going back takes one command, and a stop shouldn't leave work uncommitted. Quote the library's own `LICENSE.md` instead of summarizing from memory, and don't add a key or look for a way around the check.
 
