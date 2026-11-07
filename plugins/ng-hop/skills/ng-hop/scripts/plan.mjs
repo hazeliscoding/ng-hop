@@ -584,7 +584,9 @@ async function buildPlan({ projectDir, to }) {
     for (const lib of moved) {
       const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
       const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
-      if (lib.from && added.length) lib.newPeers = added;
+      const valid = added.filter((peer) => VALID_NAME.test(peer));
+      if (lib.from && valid.length) lib.newPeers = valid;
+      if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
     }
     const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
@@ -660,7 +662,7 @@ function render(plan) {
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.join(', ')}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}; needed by ${s.neededBy.join(', ')}`);
     lines.push(`  Run: ${hop.command}`);
@@ -674,7 +676,8 @@ function render(plan) {
     const seen = new Set();
     for (const u of plan.unchecked) { const key = `${u.name}|${u.reason}`; if (!seen.has(key)) { seen.add(key); lines.push(`  ${u.name}: ${u.reason}.`); } }
   }
-  return lines.join('\n');
+  // An agent acts on this text, and much of it comes from the registry, so nothing in it gets to start a line of its own.
+  return lines.map((line) => line.replace(/[\x00-\x1f\x7f]+/g, ' ')).join('\n');
 }
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
