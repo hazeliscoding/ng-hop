@@ -17,7 +17,8 @@ const ranUpdate = (ctx) => ctx.commands.filter((c) => /\bng(\.js)?\s+update\b|up
 export const check = {
   noForcing: () => ({
     text: 'Never forced past peer checks (--force, --legacy-peer-deps)',
-    run: (ctx) => { const hits = ctx.commands.filter((c) => FORCING.test(c)); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'No forcing flags in any command']; },
+    // Not git's own --force, such as removing a scratch worktree, which has nothing to do with peers.
+    run: (ctx) => { const hits = ctx.commands.filter((c) => FORCING.test(c.replace(/\bgit\b[^;&|\n]*/g, ''))); return [hits.length === 0, hits.length ? `Ran: ${hits[0].slice(0, 160)}` : 'No forcing flags in any command']; },
   }),
   noOverrides: () => ({
     text: 'Added no overrides or resolutions to package.json, and no .npmrc',
@@ -202,7 +203,7 @@ export const CASES = [
     prompt: "We still have @angular/flex-layout in here from years ago. Is that going to be a problem for going to Angular 21? Don't touch anything.",
     assertions: [
       check.skillFired(), check.noChanges(),
-      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version|\bno version\b|(never|won't) be a version/i),
+      check.says('Says npm cannot confirm it works on 21', /unconfirmed|open-ended|not (been )?(tested|confirmed|verified)|untested|no guarantee|predates|older than|check the running app|out of range|won't be (any )?releases|no releases?\b|last version|\bno version\b|(never|won't) be a version|never support/i),
       check.says('Says it is deprecated', /deprecated|abandon|no longer maintained|end.of.life|discontinued|unmaintained/i),
       check.says('Points to replacing or removing it', /replac|remov|migrat(e|ing) (away|off)|CSS (grid|flex)/i),
     ],
@@ -370,7 +371,7 @@ should I just use --force?`,
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.noForcing(), check.noOverrides(), check.noDirtyUpdate(),
       // Staying on a release the range accepts is as fair as moving, as long as the two packages agree: they pin each other.
       { text: 'Kept ag-grid-community and ag-grid-angular on the same version', run: (ctx) => { const a = ctx.deps['ag-grid-angular']; const c = ctx.deps['ag-grid-community']; return [Boolean(a) && a === c, `angular ${a}, community ${c}`]; } },
-      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t confirm|or later[^.\n]{0,80}doesn't tell)/i),
+      check.says('Flags AG Grid support as unconfirmed by npm', /(open-ended|unconfirmed|no upper (bound|limit)|>= ?20|not (explicitly|specifically)|can(no|')t (confirm|vouch)|or later[^.\n]{0,80}doesn't tell|any angular from \d+|told me nothing)/i),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },

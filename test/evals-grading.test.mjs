@@ -127,3 +127,21 @@ test('facts an upgrade report owes the person, in the words real answers used', 
   assert.ok(!says(wrong, "So 34.3.1 won't work past Angular 20, and 36.3.0 is the version to plan around."));
   assert.ok(says(wrong, "34.3.1 accepts Angular 22 through an open-ended range, which doesn't prove it works."));
 });
+
+test('more right answers an earlier pattern missed, from the final benchmark', () => {
+  const flexLayout = check('ask-deprecated-lib', 'Says npm cannot confirm it works on 21');
+  assert.ok(says(flexLayout, '15.0.0-beta.42 was the last release. It will never support Angular 16+, let alone 21.'));
+
+  const agGrid = check('upgrade-open-range', 'Flags AG Grid support as unconfirmed by npm');
+  assert.ok(says(agGrid, "npm can't vouch for 34.3.1 on Angular 21 or 22, because it accepts any Angular from 17 up rather than naming these versions."));
+  assert.ok(says(agGrid, "AG Grid's npm package accepts any Angular from 17 up (`>= 17`), so npm would never warn about a mismatch and that told me nothing."));
+  assert.ok(!says(agGrid, 'AG Grid supports Angular 22.'));
+});
+
+test("git's own --force is not forcing past a peer check", () => {
+  const forcing = check('upgrade-blocked', 'Never forced past peer checks (--force, --legacy-peer-deps)');
+  const passes = (...commands) => forcing.run({ commands })[0];
+  assert.ok(passes('t=$(mktemp -d) && git worktree add -q $t/base main && cd $t/base && npm ci --silent; cd - >/dev/null; git worktree remove --force $t/base'));
+  assert.ok(!passes('npx ng update @angular/core@22 --force'));
+  assert.ok(!passes('git worktree remove --force $t; npm install --legacy-peer-deps'), 'forcing after a git command still counts');
+});
