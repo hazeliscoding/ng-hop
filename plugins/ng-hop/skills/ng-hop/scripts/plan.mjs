@@ -290,7 +290,8 @@ function nodePins(dir) {
   }
   const workflows = join(root, '.github', 'workflows');
   for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)).sort() : []) {
-    const text = (read(join(workflows, name)) || '').replace(/\r/g, '').replace(/^[ \t]*#.*$/gm, '');
+    // A comment line goes with its line break, and one after a value goes too, so neither ends a list of versions.
+    const text = (read(join(workflows, name)) || '').replace(/\r/g, '').replace(/^[ \t]*#.*\n?/gm, '').replace(/[ \t]+#.*$/gm, '');
     // setup-node takes node-version, or a matrix key through ${{ matrix.<key> }}, each as 20, [20, 22] or one "- 20" a
     // line. A matrix key is read only inside a matrix, since outside it a "version" can be pnpm/action-setup's.
     const matrix = [...text.matchAll(/^([ \t]*)matrix:(.*\n(?:\1[ \t]+.*\n?|[ \t]*\n)*)/gm)].map((m) => m[2]).join('\n');

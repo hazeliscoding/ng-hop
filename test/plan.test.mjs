@@ -742,6 +742,13 @@ test('the forms read before are still read, and node-version-file is no version'
   ]);
 });
 
+test('a list of Node versions one a line is read past a comment after an item or between items', async () => {
+  // 22.x fits, so only a list read to its end names 18.x.
+  assert.deepEqual(await pinsOf({
+    '.github/workflows/ci.yml': matrixWorkflow('        node-version:\n          - 22.x # current\n          # - 21.x\n          - 18.x\n', 'node-version'),
+  }), [{ file: '.github/workflows/ci.yml', value: '18.x' }]);
+});
+
 test('a commented-out line is not a pin, and doesn\'t hide the line in use', async () => {
   // devcontainer.json allows comments, and so does a workflow's YAML, so either can keep an old pin as one.
   assert.deepEqual(await pinsOf({
