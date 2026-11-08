@@ -54,15 +54,17 @@ Everything else gets ordinary care, but none of these three gets traded away for
 
 ## Milestones
 
-### M5: 0.2.0, real apps and other agents
+### M5: 0.2.0, real apps, OpenCode, Windows and evals that keep up
 
-The evals use small apps built for them. This release is about apps nobody built for a test, and agents other than Claude Code.
+The evals use small apps built for them, run on Linux, and only when someone starts them. This release is about apps nobody built for a test, another agent, Windows, and noticing when a library catches up.
 
 - [ ] Take my own apps on old majors (`readme-wizard`, `pr-sweep`) to the latest Angular with the skill, and fix what that finds.
-- [ ] Take a whole upgrade through OpenCode, and run the skill for real in GitHub Copilot. Update the README's agent table with what happened.
+- [ ] Take a whole upgrade through OpenCode, and update the README's agent table with what happened.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
+- [ ] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
+- [ ] Evals on Windows. Only `npm test` runs there today, so a problem only Windows has shows up nowhere else.
 
-**Done when:** both apps are on the latest Angular through the skill, and the README's agent table says what OpenCode and Copilot really did.
+**Done when:** both apps are on the latest Angular through the skill, the README's agent table says what OpenCode really did, a scheduled run has reported, and real upgrades have run on Windows.
 
 ### M6: 0.3.0, fewer stops
 
@@ -71,16 +73,15 @@ Each of these is a place where the skill stops or says less than it could today.
 - [ ] Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`. Plain Claude did this and passed.
 - [ ] Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
 - [ ] Say when a framework package the app uses is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`.
-- [ ] Compare the licenses of packages the plan doesn't move, such as `@primeuix/themes`, which went commercial alongside PrimeNG 22.
+- [ ] Check the licenses of what a moved library brings with it: shared packages the plan moves, and new dependencies, such as `@primeui/license-manager` with PrimeNG 22.
+- [ ] A `--next` mode, for trying a prerelease Angular. Angular's `next` tag can be a new major or a minor of the current one, so it has to handle both.
+- [ ] See every console error in the app check, through Chrome's DevTools protocol instead of its log. Today a plain `console.error('oops')` goes unnoticed.
 
-**Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest.
+**Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest, `--next` plans a real prerelease, and the app check fails on a plain `console.error`.
 
 ## Later
 
-- Evals in GitHub Actions on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so probably only the cheap question cases.
-- Evals on Windows. Only `npm test` runs there today, so a problem only Windows has shows up nowhere else.
-- A `--next` mode for upgrading to a prerelease Angular.
-- Use the DevTools protocol in `smoke.mjs`, so it sees every console error.
+- Run the skill for real in GitHub Copilot. So far it's checked from Copilot's docs only.
 
 ## Not planned
 
