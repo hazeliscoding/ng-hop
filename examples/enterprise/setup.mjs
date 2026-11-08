@@ -16,10 +16,11 @@ const target = process.argv[2] && resolve(process.argv[2]);
 
 function run(cmd, args, cwd) {
   console.log(`  ${cmd} ${args.join(' ')}`);
-  // pnpm on Windows is a .cmd shim, which only runs through a shell. Its arguments here are fixed, none from input, and
-  // git runs without one, since a shell would split an argument with a space in it.
+  // pnpm on Windows is a .cmd shim, which only runs through a shell. Its arguments here are fixed, none from input and
+  // none with a space, so they go as one command line: Node would join them the same way, but warns when it has to. git
+  // runs without a shell, since a shell would split an argument with a space in it.
   const shell = process.platform === 'win32' && cmd === 'pnpm';
-  const result = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell, env: { ...process.env, NG_CLI_ANALYTICS: 'false' } });
+  const result = spawnSync(shell ? `${cmd} ${args.join(' ')}` : cmd, shell ? [] : args, { cwd, stdio: 'inherit', shell, env: { ...process.env, NG_CLI_ANALYTICS: 'false' } });
   if (result.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed in ${cwd}`);
 }
 
