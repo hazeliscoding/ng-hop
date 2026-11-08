@@ -427,21 +427,31 @@ const licenseField = (manifest) => String(manifest?.license?.type ?? manifest?.l
 const plainLine = (text) => text.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
 const licenseTitle = (text) => text.split(/\r?\n/).map((line) => plainLine(line.replace(/^[#=*\s-]+/, ''))).find(Boolean);
 
-// Read from the tarball in memory, so nothing in it reaches the disk or runs.
-async function readLicenseFile(manifest) {
-  const named = /^see license in\s+(.+)$/i.exec(licenseField(manifest))?.[1].replace(/^\.\//, '').toLowerCase();
+// A release's files, read from its tarball in memory, so nothing in it reaches the disk or runs. A path too long for
+// the name field continues in the ustar prefix field.
+async function tarball(manifest) {
   const res = await fetch(manifest.dist.tarball);
   if (!res.ok) return null;
   const tar = gunzipSync(Buffer.from(await res.arrayBuffer()), { maxOutputLength: MAX_UNPACKED });
-  let fallback = null;
+  const files = [];
   for (let at = 0; at + 512 <= tar.length;) {
     const size = parseInt(tar.toString('latin1', at + 124, at + 136), 8) || 0;
-    const file = tar.toString('latin1', at, at + 100).split('\0')[0].replace(/^[^/]+\//, '').toLowerCase();
-    if (file === named) return tar.toString('utf8', at + 512, at + 512 + size);
-    if (/^licen[cs]e(\.\w+)?$/.test(file)) fallback = tar.toString('utf8', at + 512, at + 512 + size);
+    const field = (start, length) => tar.toString('latin1', at + start, at + start + length).split('\0')[0];
+    const prefix = field(257, 5) === 'ustar' ? field(345, 155) : '';
+    const name = `${prefix ? `${prefix}/` : ''}${field(0, 100)}`.replace(/^[^/]+\//, '');
+    const start = at + 512;
+    if (name) files.push({ name, text: () => tar.toString('utf8', start, start + size) });
     at += 512 + Math.ceil(size / 512) * 512;
   }
-  return fallback;
+  return files;
+}
+
+async function readLicenseFile(manifest) {
+  const named = /^see license in\s+(.+)$/i.exec(licenseField(manifest))?.[1].replace(/^\.\//, '').toLowerCase();
+  const files = await tarball(manifest);
+  if (!files) return null;
+  const file = files.find((f) => f.name.toLowerCase() === named) || files.findLast((f) => /^licen[cs]e(\.\w+)?$/i.test(f.name));
+  return file ? file.text() : null;
 }
 
 // npm doesn't warn about this, and the build, tests and page all still pass. PrimeNG went from MIT to a commercial
