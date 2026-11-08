@@ -677,6 +677,41 @@ test('every place the plan reads a Node pin names it when it is below the range'
   ]);
 });
 
+// A workflow whose setup-node reads a matrix key, as `node-version: ${{ matrix.<key> }}`.
+const matrixWorkflow = (lines, key) => `jobs:\n  test:\n    strategy:\n      matrix:\n${lines}    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \${{ matrix.${key} }}\n`;
+
+test('a Node pin written the way docker init, mise or a GitHub matrix writes it is read too', async () => {
+  assert.deepEqual(await pinsOf({
+    // docker init's template: the version is an ARG's default, used in FROM.
+    Dockerfile: '# syntax=docker/dockerfile:1\nARG NODE_VERSION=20.11.0\nFROM node:${NODE_VERSION}-alpine as base\n',
+    // mise reads node as well as asdf's nodejs.
+    '.tool-versions': 'node 20.18.0\n',
+    // A matrix key of any name, in a flow list or one item a line, and with Windows line endings, as git can check out.
+    '.github/workflows/a.yml': matrixWorkflow('        node: [18, 22]\n', 'node').replace(/\n/g, '\r\n'),
+    '.github/workflows/b.yml': matrixWorkflow('        node-version:\n          - 16.x\n          - 22.x\n', 'node-version'),
+    // ng-hop's own CI: include entries, quoted, with a comment between them.
+    '.github/workflows/c.yml': matrixWorkflow("        os: [ubuntu-latest]\n        node: ['22']\n        include:\n          - os: ubuntu-latest\n            node: '20'\n          # The oldest one.\n          - os: ubuntu-latest\n            node: '19'\n", 'node'),
+    // Outside the matrix, a key of the same name is another action's: this version is pnpm's.
+    '.github/workflows/d.yml': matrixWorkflow('        version: [17, 24]\n', 'version').replace('    steps:\n', '    steps:\n      - uses: pnpm/action-setup@v4\n        with:\n          version: 9\n'),
+  }), [
+    { file: '.tool-versions', value: '20.18.0' }, { file: 'Dockerfile', value: 'node:20.11.0-alpine' },
+    { file: '.github/workflows/a.yml', value: '18' }, { file: '.github/workflows/b.yml', value: '16.x' },
+    { file: '.github/workflows/c.yml', value: '20' }, { file: '.github/workflows/c.yml', value: '19' },
+    { file: '.github/workflows/d.yml', value: '17' },
+  ]);
+});
+
+test('the forms read before are still read, and node-version-file is no version', async () => {
+  assert.deepEqual(await pinsOf({
+    Dockerfile: 'FROM --platform=linux/amd64 node:20-alpine AS build\nFROM nginx:1.27\n',
+    '.github/workflows/a.yml': matrixWorkflow('        node-version: [18.x, 22.x]\n', 'node-version'),
+    '.github/workflows/b.yml': `${setupNode('24').replace("node-version: '24'", "node-version-file: '.nvmrc'")}  old:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: "20" # the one before\n`,
+  }), [
+    { file: 'Dockerfile', value: 'node:20-alpine' },
+    { file: '.github/workflows/a.yml', value: '18.x' }, { file: '.github/workflows/b.yml', value: '20' },
+  ]);
+});
+
 test('a commented-out line is not a pin, and doesn\'t hide the line in use', async () => {
   // devcontainer.json allows comments, and so does a workflow's YAML, so either can keep an old pin as one.
   assert.deepEqual(await pinsOf({

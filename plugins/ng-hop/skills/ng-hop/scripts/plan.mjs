@@ -251,10 +251,14 @@ function nodePins(dir) {
   const bases = [...new Set([dir, root])];
   for (const base of bases) {
     for (const name of ['.nvmrc', '.node-version']) { const text = read(join(base, name)); if (text?.trim()) add(join(base, name), text.trim().split('\n')[0]); }
-    const tools = /^nodejs\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
+    // asdf writes nodejs, and mise reads node too.
+    const tools = /^node(?:js)?\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
     if (tools) add(join(base, '.tool-versions'), tools[1]);
     for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
-      for (const [, image] of (read(join(base, docker)) || '').matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image, 'image');
+      const text = read(join(base, docker)) || '';
+      // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
+      const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
+      for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
     }
     // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
     const devcontainer = (read(join(base, '.devcontainer', 'devcontainer.json')) || '').replace(/^[ \t]*\/\/.*$/gm, '');
@@ -269,9 +273,17 @@ function nodePins(dir) {
     if (pkg.volta?.node) add(join(dir, 'package.json'), pkg.volta.node);
   } catch { /* readProject reports a broken package.json */ }
   const workflows = join(root, '.github', 'workflows');
-  for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)) : []) {
-    for (const [, value] of (read(join(workflows, name)) || '').replace(/^[ \t]*#.*$/gm, '').matchAll(/node-version:\s*([^#\n]+)/g)) {
-      for (const v of value.replace(/[[\]'"]/g, '').split(',')) if (/^\s*v?\d/.test(v)) add(join(workflows, name), v);
+  for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)).sort() : []) {
+    const text = (read(join(workflows, name)) || '').replace(/\r/g, '').replace(/^[ \t]*#.*$/gm, '');
+    // setup-node takes node-version, or a matrix key through ${{ matrix.<key> }}, each as 20, [20, 22] or one "- 20" a
+    // line. A matrix key is read only inside a matrix, since outside it a "version" can be pnpm/action-setup's.
+    const matrix = [...text.matchAll(/^([ \t]*)matrix:(.*\n(?:\1[ \t]+.*\n?|[ \t]*\n)*)/gm)].map((m) => m[2]).join('\n');
+    const keys = new Set([...text.matchAll(/node-version:\s*\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g)].map((m) => m[1]));
+    keys.delete('node-version');
+    for (const [source, key] of [[text, 'node-version'], ...[...keys].map((k) => [matrix, k])]) {
+      for (const [, value] of source.matchAll(new RegExp(`(?<![\\w-])${key}:[ \\t]*([^#\\n]*(?:\\n[ \\t]*-[ \\t]+[^#\\n]*)*)`, 'g'))) {
+        for (const v of value.replace(/[[\]'"]|\n[ \t]*-/g, ',').split(',')) if (/^\s*v?\d/.test(v)) add(join(workflows, name), v);
+      }
     }
   }
   return pins;
