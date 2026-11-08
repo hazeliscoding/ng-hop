@@ -11,7 +11,7 @@ Acme's portal is on Angular 21 and can't go to 22 on its own. Its UI comes from 
 
 ## Set it up
 
-You need Node 24.15 or newer, pnpm 12 and git. Verdaccio 7 needs Node 24 or newer, and Angular 22, which the upgrade moves to, needs 24.15 or newer on Node 24.
+You need Node 24.15 or newer, pnpm 12 and git, and Docker Desktop for the dev container. Verdaccio 7 needs Node 24 or newer, and Angular 22, which the upgrade moves to, needs 24.15 or newer on Node 24.
 
 1. Start the registry, and leave it running:
    ```sh
@@ -39,7 +39,7 @@ npx @devcontainers/cli exec --workspace-folder <folder>/acme-portal pnpm test --
 
 A plain `up` keeps a container made before the upgrade, on its old Node, and it reports success once the install is done, before anything runs Angular. `--watch=false` makes the tests run once and stop, since in a terminal they'd wait for changes.
 
-The container reaches the registry on your machine through `.devcontainer/registry-forward.mjs`.
+The container reaches the registry on your machine through `.devcontainer/registry-forward.mjs` and Docker Desktop's `host.docker.internal`, which leads to your machine's 127.0.0.1, where the registry listens. Docker Engine on Linux has no such name by default, so there the container can't install the `@acme` packages.
 
 ## On video
 
