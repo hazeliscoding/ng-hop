@@ -135,6 +135,15 @@ A library's new major can change its license, and the build, tests and `smoke.mj
 
 This can cost the person money, so put it first in your report and ask whether to keep the major, stay on the one before, or replace the library. Commit the major first, like any other that passes its checks: it's on its own branch, going back takes one command, and a stop shouldn't leave work uncommitted. Quote the library's own `LICENSE.md` instead of summarizing from memory, and don't add a key or look for a way around the check.
 
+## `Could not resolve "@angular/cdk/overlay"` after a library's new major
+
+```text
+✘ [ERROR] Could not resolve "@angular/cdk/overlay"
+    node_modules/@ng-select/ng-select/fesm2022/ng-select-ng-select.mjs:3:153:
+```
+
+The library's new major started requiring a peer the app doesn't list: ng-select 24 needs `@angular/cdk`. npm, pnpm and bun install a required peer on their own, and yarn doesn't, so this shows on yarn. The plan lists the peer under the major as `not installed`, with the version to install. Install that version and run the checks again.
+
 ## A file named in `angular.json` no longer exists
 
 Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js`, which apps often list under `scripts`. Before removing the entry, search the code for anything using what it provided (a global `marked`, for instance). If nothing does, remove it and say so under hand fixes. If something does, switch that code to an import.

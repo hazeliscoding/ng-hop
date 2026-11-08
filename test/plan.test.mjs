@@ -119,6 +119,20 @@ test('a peer a library newly requires is named, because npm and pnpm add it with
   assert.equal(libIn(listed, 21, '@ng-select/ng-select').newPeers, undefined, 'the app already lists it');
 });
 
+test('a peer a library newly requires is listed to install, with its version, because yarn does not add it', async () => {
+  // On yarn 4, ng-select 24 failed the build with: Could not resolve "@angular/cdk/overlay".
+  const lib = pkg('@ng-select/ng-select', { '23.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '24.0.0': { peers: { '@angular/core': '^21.0.0', '@angular/cdk': '^21.0.0' }, at: '2025-12-01' } });
+  const cdk = pkg('@angular/cdk', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '21.1.0': { peer: '^21.0.0', at: '2026-01-01' } });
+  const options = { deps: { ...base, '@ng-select/ng-select': '^23.0.0' }, lock: { ...lockBase, '@ng-select/ng-select': '23.0.0' } };
+  const r = await plan(world(lib, cdk), app(options), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === '@angular/cdk'), { name: '@angular/cdk', from: null, to: '21.1.0', neededBy: ['@ng-select/ng-select'] });
+  const text = await plan(world(lib, cdk), app(options), { to: 21, text: true });
+  assert.match(text.stdout, /@angular\/cdk: not installed -> 21\.1\.0; needed by @ng-select\/ng-select/);
+
+  const missing = await plan(world(lib), app(options), { to: 21 });
+  assert.ok(missing.plan.unchecked.some((u) => u.name === '@angular/cdk'), 'a peer the registry has no release of is reported, not guessed');
+});
+
 test('a floor that names the major counts as declared, not as open-ended', async () => {
   const lib = pkg('ng2-charts', { '10.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '11.0.0': { peer: '>=22.0.0', at: '2026-06-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ng2-charts': '^10.0.0' }, lock: { ...lockBase, 'ng2-charts': '10.0.0' } }), { to: 22 });
@@ -976,8 +990,9 @@ test('a long list of new peers is cut short', async () => {
   const peers = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`peer-${i}`, '^1.0.0']));
   const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peers: { '@angular/core': '^21.0.0', ...peers }, at: '2025-12-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21, text: true });
-  assert.match(r.stdout, /peer-7 and 4 more, not in package\.json/);
-  assert.ok(!r.stdout.includes('peer-8'));
+  const line = r.stdout.split('\n').find((l) => l.includes('ui-lib: 20.0.0 -> 21.0.0'));
+  assert.match(line, /peer-7 and 4 more, not in package\.json/);
+  assert.ok(!line.includes('peer-8'), 'the library\'s own line stays short, whatever else the plan lists');
 });
 
 test('a deprecation message can\'t forge a line of the plan', async () => {
