@@ -52,7 +52,7 @@ Exempting a release relaxes that guard, so it's the person's call, even for thei
 - **Wait** until the release is a day old, then re-run the plan and its command. It costs a day and nothing else.
 - **Install it first,** only for a library the plan doesn't mark `ships migrations`. `ng update` skips migrations for a version `package.json` already claims, so for a library that ships them, wait. With their go-ahead, add each release to the exemption list (`- '@acme/ui-core@22.0.0'` under `minimumReleaseAgeExclude`, or under `npmPreapprovedPackages`), or the team's whole scope (`'@acme/*'`) once if they trust their registry, and commit that by itself. It changes no installed package, so it's safe to stop on. Then run the plan's `Run:` command with `--install-first <package>` for each of those libraries. `update.mjs` installs them first, in the form `package.json` gives them now, checks that only `package.json` and the lockfile changed, and then updates the rest, all in the one commit for that major. Say in the report that the update ran that way, and why.
 
-If `update.mjs` stops with `Installing first also changed pnpm-workspace.yaml`, pnpm wrote an exemption the list didn't cover, such as one for a release newer than the one approved. Put the tree back (`git restore .`, and delete `pnpm-workspace.yaml` if `git status` shows it as untracked), reinstall with `pnpm install --frozen-lockfile`, and ask about that release.
+If `update.mjs` stops with `Installing first also changed pnpm-workspace.yaml`, pnpm wrote an exemption the list didn't cover, such as one for a release newer than the one approved. Put the tree back with `git restore :/`, which also covers a workspace root above the app, where pnpm writes to the root's `pnpm-workspace.yaml` and lockfile. If `git status` shows `pnpm-workspace.yaml` as untracked, pnpm made it beside `package.json` because there was none, so delete it. Then reinstall with `pnpm install --frozen-lockfile`, and ask about that release.
 
 ## The plan rejects angular-eslint with "requires no Angular version"
 
@@ -104,7 +104,7 @@ Error: ERR_PNPM_IGNORED_BUILDS
 
 pnpm 11 and newer won't run a dependency's install script until the project has decided about it, and every install exits 1 until each one is decided. Inside `ng update` this only shows as `✖ Installing packages [FAILED: Unable to install packages]`, with no migrations run, so run `pnpm install` yourself to see the reason. pnpm also writes `set this to true or false` placeholders into `pnpm-workspace.yaml`, which dirties the tree and must never be committed.
 
-1. Put the tree back: `git restore .`, and delete `pnpm-workspace.yaml` if `git status` shows it as untracked, since pnpm just made it.
+1. Put the tree back: `git restore :/`, which also covers a workspace root above the app, and delete `pnpm-workspace.yaml` if `git status` shows it as untracked, since pnpm just made it.
 2. Decline each package the error names, by adding it to `pnpm-workspace.yaml` as `false` and keeping any entries already there:
    ```yaml
    allowBuilds:
@@ -121,7 +121,7 @@ In your report, list what you declined and say that `pnpm approve-builds <packag
 
 Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps.
 
-The plan's pnpm command handles this: `update.mjs` copies the catalog's versions into `package.json`, lets `ng update` run as usual, then writes the new versions back into the catalog, puts `package.json` back on `catalog:`, and runs `pnpm install`. If an update fails, `package.json` goes back on its catalog entries and the catalog is left as it was. So if you see this line, someone ran a plain `ng update`: put the tree back with `git restore .` and run the plan's command instead.
+The plan's pnpm command handles this: `update.mjs` copies the catalog's versions into `package.json`, lets `ng update` run as usual, then writes the new versions back into the catalog, puts `package.json` back on `catalog:`, and runs `pnpm install`. If an update fails, `package.json` goes back on its catalog entries and the catalog is left as it was. So if you see this line, someone ran a plain `ng update`: put the tree back with `git restore :/` and run the plan's command instead.
 
 A catalog is shared across the workspace. When the plan says other projects use the same entries, moving the catalog moves them too, without their migrations, so ask before going ahead.
 

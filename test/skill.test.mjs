@@ -158,6 +158,14 @@ test('a release-age exemption waits for the person, like an override', () => {
   assert.match(rule, /minimumReleaseAgeExclude/);
 });
 
+test('putting the tree back reaches a pnpm workspace root above the app', () => {
+  // pnpm writes an app's lockfile and exemptions at the workspace root, and git 2.55's `git restore .` run in the app's
+  // folder left them changed, so the next update.mjs refused a tree that wasn't clean.
+  const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
+  assert.ok(docs.some((d) => d.includes('`git restore :/`')), 'positive control: the docs still say how to put the tree back');
+  for (const doc of docs) assert.doesNotMatch(doc, /git restore \.(?:[\s`]|$)/m);
+});
+
 // One lettered step of the upgrade loop in SKILL.md, from its bold label to the next one.
 function step(letter) {
   const start = skill.indexOf(`**${letter}. `);
