@@ -195,9 +195,7 @@ test('evals run when someone starts them or on the weekly schedule, which covers
 
   const jobs = WORKFLOW.slice(WORKFLOW.indexOf('\njobs:'));
   const job = (name) => new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  \\w+:\\n|$(?![\\s\\S]))`, 'm').exec(jobs)[0];
-  // OpenCode's job runs third-party code with no user switch, which is only safe because nothing secret is near it.
-  for (const name of ['prepare', 'report', 'opencode']) assert.doesNotMatch(job(name), /secrets\./, name);
-  assert.match(job('opencode'), /node evals\/collect\.mjs/, 'its results leave out .git and links too');
+  for (const name of ['prepare', 'report']) assert.doesNotMatch(job(name), /secrets\./, name);
   for (const name of ['canary', 'run', 'triggers']) assert.match(job(name), /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, name);
   // Agent output isn't masked the way the secret is, and this job has no collect step to check it.
   assert.doesNotMatch(job('triggers'), /upload-artifact/);
@@ -247,20 +245,4 @@ test('agents run as a user with no sudo, in an environment with nothing of the r
   assert.match(MACHINE, /CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0/);
   // pnpm refuses to change a lockfile when it sees CI, which is not what happens on someone's machine.
   assert.doesNotMatch(MACHINE, /\bCI=/);
-});
-
-test('collecting results leaves out .git, node_modules and links, and keeps every plain file', { skip: process.platform === 'win32' && 'a link needs privileges to make on Windows' }, async () => {
-  const { symlinkSync, existsSync } = await import('node:fs');
-  const from = tempDir(), to = join(tempDir(), 'out');
-  mkdirSync(join(from, 'run-1', 'project', '.git'), { recursive: true });
-  mkdirSync(join(from, 'run-1', 'project', 'node_modules', 'x'), { recursive: true });
-  writeFileSync(join(from, 'run-1', 'project', '.git', 'config'), ['[diff]', '  external = touch /tmp/pwned', ''].join('\n'));
-  writeFileSync(join(from, 'run-1', 'project', 'node_modules', 'x', 'index.js'), '');
-  writeFileSync(join(from, 'run-1', 'grading.json'), '{}');
-  writeFileSync(join(from, 'run-1', 'project', 'package.json'), '{}');
-  symlinkSync('/etc/passwd', join(from, 'run-1', 'outside'));
-  const r = spawnSync(process.execPath, [join(EVALS, 'collect.mjs'), from, to], { encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(existsSync(join(to, 'run-1', 'grading.json')) && existsSync(join(to, 'run-1', 'project', 'package.json')), 'the positive control: plain files arrive');
-  for (const gone of ['run-1/project/.git', 'run-1/project/node_modules', 'run-1/outside']) assert.ok(!existsSync(join(to, gone)), gone);
 });

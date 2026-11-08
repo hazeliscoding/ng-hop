@@ -1,5 +1,5 @@
 name: Evals
-run-name: "Evals: ${{ inputs.cases || (github.event_name == 'schedule' && 'the weekly questions') || 'every case' }} on ${{ inputs.agent == 'opencode' && 'OpenCode' || inputs.model || 'claude-opus-5-5' }}"
+run-name: "Evals: ${{ inputs.cases || (github.event_name == 'schedule' && 'the weekly questions') || 'every case' }} on ${{ inputs.model || 'claude-opus-5-5' }}"
 
 # Runs the eval cases on a batch of GitHub's machines instead of one person's. Evals cost usage, so this never runs on
 # its own. They also install real npm packages, so the login reaches only Claude Code: see .github/actions/eval-machine
@@ -28,14 +28,8 @@ on:
         default: both
         type: choice
         options: [both, with_skill, without_skill]
-      agent:
-        description: Which agent runs the cases. OpenCode uses a free model with no login, on Linux and Windows.
-        required: false
-        default: claude
-        type: choice
-        options: [claude, opencode]
       model:
-        description: Model the agent runs on (empty means claude-opus-5-5, or opencode/big-pickle for OpenCode)
+        description: Model the agent runs on (empty means claude-opus-5-5)
         required: false
         default: ''
       parallel:
@@ -65,7 +59,6 @@ concurrency:
 jobs:
   canary:
     name: Check the login is out of reach
-    if: inputs.agent != 'opencode'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -83,8 +76,6 @@ jobs:
   prepare:
     name: Build the fixture apps
     needs: canary
-    # OpenCode needs no login, so its runs have no canary to wait for.
-    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -160,7 +151,7 @@ jobs:
   run:
     name: ${{ matrix.case }}
     needs: prepare
-    if: ${{ !inputs.triggers && inputs.agent != 'opencode' }}
+    if: ${{ !inputs.triggers }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -219,75 +210,6 @@ jobs:
           name: results-${{ matrix.case }}
           path: ${{ runner.temp }}/results
           include-hidden-files: true
-          retention-days: 14
-
-  # OpenCode on a free model holds no login and no secret, so it runs without the user switch, and on Windows too, where
-  # nothing could keep Claude Code's login from an install script. Its results still leave out .git and links.
-  opencode:
-    name: OpenCode ${{ matrix.case }} on ${{ matrix.os }}
-    needs: prepare
-    # The canary is skipped for OpenCode, and a plain condition would count that against every job after it.
-    if: ${{ !failure() && !cancelled() && inputs.agent == 'opencode' }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.parallel || '4') }}
-      matrix:
-        os: [ubuntu-24.04, windows-latest]
-        case: ${{ fromJSON(needs.prepare.outputs.cases) }}
-    env:
-      NG_CLI_ANALYTICS: 'false'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-      - name: Install OpenCode and the package managers, beside the runner's own
-        shell: bash
-        run: |
-          prefix="$RUNNER_TEMP/tools"
-          npm install -g --prefix "$prefix" @opencode/cli@2.2.0 pnpm@12.16.1 @yarnpkg/cli-dist@4.18.1 bun@1.4.4
-          if [ "$RUNNER_OS" = Windows ]; then
-            echo "$prefix" >> "$GITHUB_PATH"
-            echo "OPENCODE_BIN=$prefix/node_modules/@opencode/cli/bin/opencode.exe" >> "$GITHUB_ENV"
-          else
-            echo "$prefix/bin" >> "$GITHUB_PATH"
-          fi
-          git config --global user.name "Fixture for evals"
-          git config --global user.email "fixture@example.invalid"
-          # A job's own env can't read the runner's paths, so these come from here.
-          echo "NG_HOP_WORKSPACE=$RUNNER_TEMP/ws" >> "$GITHUB_ENV"
-          if [ "$RUNNER_OS" = Linux ]; then echo "CHROME_BIN=/usr/bin/google-chrome" >> "$GITHUB_ENV"; fi
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: templates
-          path: ${{ runner.temp }}/ws/templates
-      - name: Run the case
-        shell: bash
-        env:
-          CASE: ${{ matrix.case }}
-          CONFIG: ${{ inputs.config }}
-          MODEL: ${{ inputs.model }}
-          RUNS: ${{ inputs.runs || '1' }}
-        run: |
-          args=()
-          [ "$CONFIG" = both ] || args+=(--config "$CONFIG")
-          [ -z "$MODEL" ] || args+=(--model "$MODEL")
-          node evals/run.mjs --agent opencode --iteration ci --case "$CASE" --runs "$RUNS" "${args[@]}"
-      - name: Collect the results, without .git or links
-        if: always()
-        shell: bash
-        run: node evals/collect.mjs "$NG_HOP_WORKSPACE/iteration-ci" "$RUNNER_TEMP/results/iteration-ci"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: results-opencode-${{ matrix.os }}-${{ matrix.case }}
-          path: ${{ runner.temp }}/results
-          include-hidden-files: true
-          if-no-files-found: ignore
           retention-days: 14
 
   report:
