@@ -44,9 +44,16 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
+      # A folder of their own, first on the path, because Windows runners already have a yarn in npm's global folder.
       - name: Install the package managers
         shell: bash
-        run: npm install -g pnpm@12.16.1 @yarnpkg/cli-dist@4.18.1 bun@1.4.4
+        run: |
+          prefix="$RUNNER_TEMP/tools"
+          npm install -g --prefix "$prefix" pnpm@12.16.1 @yarnpkg/cli-dist@4.18.1 bun@1.4.4
+          if [ "$RUNNER_OS" = Windows ]; then echo "$prefix" >> "$GITHUB_PATH"; else echo "$prefix/bin" >> "$GITHUB_PATH"; fi
+      - name: Check which versions are in use
+        shell: bash
+        run: echo "node $(node --version), pnpm $(pnpm --version), yarn $(yarn --version), bun $(bun --version)"
       - name: Build the fixture app
         shell: bash
         run: node evals/prepare.mjs "${{ matrix.fixture }}"

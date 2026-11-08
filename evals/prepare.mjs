@@ -6,9 +6,9 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { FIXTURES } from './fixtures.mjs';
-import { TEMPLATES, testCommand } from './common.mjs';
+import { developerEnv, TEMPLATES, testCommand } from './common.mjs';
 
-const run = (cmd, cwd, opts = {}) => execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf8', timeout: 600000, env: { ...process.env, NG_CLI_ANALYTICS: 'false' }, ...opts });
+const run = (cmd, cwd, opts = {}) => execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf8', timeout: 600000, env: developerEnv({ NG_CLI_ANALYTICS: 'false' }), ...opts });
 
 function moveAngularToCatalog(dir) {
   const path = join(dir, 'package.json');

@@ -9,7 +9,7 @@ import { cpSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { installCommand, PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
+import { developerEnv, installCommand, PLUGIN, TEMPLATES, WORKSPACE } from './common.mjs';
 import { FIXTURES } from './fixtures.mjs';
 
 const SCRIPTS = join(PLUGIN, 'skills', 'ng-hop', 'scripts');
@@ -20,9 +20,7 @@ const dir = join(WORKSPACE, 'hops', values.fixture);
 
 // The plan's quoting on Windows is written for PowerShell, which an agent there uses as often as Git Bash.
 const SHELL = process.platform === 'win32' ? 'pwsh' : '/bin/bash';
-// GitHub sets CI, and pnpm then refuses to change a lockfile, which isn't what happens on someone's machine.
-const env = { ...process.env, NG_CLI_ANALYTICS: 'false' };
-delete env.CI;
+const env = developerEnv({ NG_CLI_ANALYTICS: 'false' });
 const tail = (text) => String(text || '').trim().split('\n').slice(-25).join('\n').slice(-3000);
 const shell = (command) => {
   const r = spawnSync(command, { cwd: dir, shell: SHELL, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 30 * 60 * 1000 });
