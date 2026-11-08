@@ -116,9 +116,10 @@ This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versi
 
 ## The build and tests pass, but the dev server fails
 
-`smoke.mjs` exists for this. Read its `server error` lines.
+`smoke.mjs` exists for this. Read its `server error` lines, or its `server log` lines when no error line matched.
 
-- **`Could not resolve "marked-katex-extension"` (or `mermaid`, `katex`, `clipboard`):** `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
+- **`Failed to resolve import "marked-katex-extension"` from Vite, or `Could not resolve "marked-katex-extension"` from esbuild (or `mermaid`, `katex`, `clipboard`):** the page comes back but renders nothing, with a 500 for `main.js` in the console. `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
+- **The server starts, but nothing answers on its port:** from Angular 22, `@angular/build`'s dev server takes the `PORT` environment variable over `--port`. `smoke.mjs` sets both. When you run `ng serve` yourself, unset `PORT` or give it the same port.
 - **Anything else:** check whether the same error appears in the `smoke.mjs` result from before this major. If it does, it isn't from this upgrade.
 
 ## `No matching export in "node_modules/@angular/cdk/fesm2022/collections.mjs" for import "_VIEW_REPEATER_STRATEGY"`
