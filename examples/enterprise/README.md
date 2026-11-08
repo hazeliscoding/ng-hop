@@ -30,3 +30,7 @@ You need Node 22.22.3 or newer and pnpm 12.
 3. Back in the portal, the plan is clear. The agent takes the app to 22, raises the dev container's Node to one Angular 22 accepts, and checks the build, the tests and the running app.
 
 The upgrade runs from your machine, not inside the dev container. The container keeps its own `node_modules`, so open it afterwards to check it still works: "Reopen in Container" in VS Code, or `npx @devcontainers/cli up --workspace-folder <folder>/acme-portal`. It reaches the registry on your machine through `.devcontainer/registry-forward.mjs`.
+
+## On video
+
+The M7 tutorial follows one run of this, from the plan to the rebuilt container. Its source is in [`docs/video/enterprise`](../../docs/video/enterprise/).

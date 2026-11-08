@@ -1,0 +1,88 @@
+<div class="panel term" style="left:96px; top:150px; width:1100px;" data-cue="0" data-out="s28$">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code &middot; acme-portal</span></div>
+      <div class="term-body">
+        <div class="you" data-cue="s27">Yes, publish both, then upgrade the portal.</div>
+        <div class="cmd" style="margin-top:14px;" data-cue="s28">cd &hellip;/acme-ui &amp;&amp; &hellip; pnpm build &hellip; &amp;&amp; pnpm run publish &hellip;</div>
+        <div class="ok" data-cue="s28+0.6">Published package @acme/ui-core@22.0.0</div>
+        <div class="ok" data-cue="s28+1.1">Published package @acme/ui-forms@22.0.0</div>
+        <div class="cmd" style="margin-top:14px;" data-cue="s28+2.3">cd &hellip;/acme-portal &amp;&amp; &hellip; node &hellip;/plan.mjs --to 22</div>
+        <div class="ok" data-cue="s28+3.6">Result: Angular 22 is reachable.</div>
+        <div class="out" data-cue="s28+4.3">  @acme/ui-core: 21.4.0 -&gt; 22.0.0; supports it (^22.0.0)</div>
+        <div class="out" data-cue="s28+4.8">  @acme/ui-forms: 21.4.0 -&gt; 22.0.0; supports it (^22.0.0)</div>
+      </div>
+    </div>
+
+    <div class="shot" style="left:1244px; top:150px; width:580px;" data-cue="s28+6.4" data-out="s28$"><img src="assets/portal-angular-21.png" alt="Acme Portal on Angular 21, running in Chrome" /></div>
+
+    <div class="panel card" style="left:1244px; top:543px; width:580px;" data-cue="s28+6.9" data-out="s28$">
+      <h3>Before changing anything</h3>
+      <ul class="ticks">
+        <li data-cue="s28+9.1">The portal builds</li>
+        <li data-cue="s28+9.8">Its one test passes</li>
+        <li data-cue="s28+10.5">The app renders in Chrome</li>
+      </ul>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:1728px;" data-cue="s29" data-out="s30$">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code &middot; acme-portal</span></div>
+      <div class="term-body">
+        <div class="cmd">pnpm exec node &hellip;/update.mjs @angular/core@22 @angular/cli@22 @acme/ui-core@22.0.0 &hellip;</div>
+        <div class="out" data-cue="s29+0.5">Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (<span class="err">requires "^21.2.0"</span>, would install "22.2.5").</div>
+        <div class="out" data-cue="s29+1.1">Package "@acme/ui-forms" has an incompatible peer dependency to "@angular/forms" (<span class="err">requires "^21.2.0"</span>, would install "22.2.5").</div>
+        <div class="err" data-cue="s29+1.7">Incompatible peer dependencies found. See above for details. &hellip;</div>
+      </div>
+    </div>
+
+    <div class="box amber pop" style="left:96px; top:497px; width:840px;" data-cue="s29+2.3" data-out="s30+1.2"><b>ng update quotes "^21.2.0"</b>the Angular peers of the old 21.4.0 releases</div>
+    <div class="box teal pop" style="left:984px; top:497px; width:840px;" data-cue="s29+5.0" data-out="s30+1.2"><b>The registry has 22.0.0</b>with "^22.0.0" peers, published minutes earlier</div>
+
+    <div style="position:absolute; left:96px; top:510px; width:1728px;" data-cue="s30+1.8" data-out="s30$">
+      <div class="h2">The cause is pnpm 12's <span class="warn">minimum release age</span>,</div>
+      <div class="lead" style="margin-top:16px;" data-cue="s30+6.6">a supply-chain safeguard that won't resolve versions published very recently.</div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:1100px;" data-cue="s31" data-out="s31$">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code &middot; scratch copy of acme-portal</span></div>
+      <div class="term-body">
+        <div class="cmd">T=$(mktemp -d) &amp;&amp; &hellip; cp package.json pnpm-workspace.yaml &hellip;</div>
+        <div class="cmd" data-cue="s31+0.5">pnpm add @acme/ui-core@22.0.0 --lockfile-only</div>
+        <div class="warn" data-cue="s31+1.1"><div>Added 1 entry to minimumReleaseAgeExclude &hellip;:</div><div>  @acme/ui-core@22.0.0</div></div>
+        <div class="dim" data-cue="s31+1.9">---with exclusion</div>
+        <div class="ok" data-cue="s31+2.4">&#10003; Lockfile passes supply-chain policies (561 entries in 2.1s)</div>
+      </div>
+    </div>
+
+    <div class="panel diff" style="left:1244px; top:150px; width:580px;" data-cue="s31+3.3">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal &middot; pnpm-workspace.yaml</span></div>
+      <div class="term-body">
+        <div> minimumReleaseAgeExclude:</div>
+        <div>   - '@acme/ui-core@21.4.0'</div>
+        <div>   - '@acme/ui-forms@21.4.0'</div>
+        <div class="add" data-cue="s32+0.3">+  - '@acme/ui-core@22.0.0'</div>
+        <div class="add" data-cue="s32+0.8">+  - '@acme/ui-forms@22.0.0'</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:1100px;" data-cue="s32+1.4">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code &middot; acme-portal</span></div>
+      <div class="term-body">
+        <div class="cmd">&hellip; git add pnpm-workspace.yaml &amp;&amp; git commit &hellip;</div>
+        <div class="err" style="margin-top:14px;" data-cue="s32+3.7">Permission for this action was denied by the Claude Code auto mode classifier.</div>
+        <div class="err" data-cue="s32+6.1">Reason: [Security Weaken].</div>
+      </div>
+    </div>
+
+    <div class="panel card stop pop" style="left:96px; top:460px; width:1100px;" data-cue="s32+8.5">
+      <h3>Which do you want?</h3>
+      <div style="display:flex; align-items:center; margin-bottom:16px;"><span class="num">1</span><span><b>Exempt the two versions.</b> This is what I recommend.</span></div>
+      <div style="display:flex; align-items:center;"><span class="num">2</span><span>Wait until 22.0.0 is older than the limit.</span></div>
+    </div>
+
+    <div class="panel card aside" style="left:1244px; top:460px; width:580px;" data-cue="s33+0.3">
+      <h3>The system working</h3>
+      <ul class="ticks">
+        <li data-cue="s33+1.0">The release-age rule held the new releases back</li>
+        <li data-cue="s33+1.8">Claude Code blocked the change</li>
+        <li data-cue="s33+2.6">The agent asked you to decide</li>
+      </ul>
+    </div>

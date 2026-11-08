@@ -1,0 +1,10 @@
+# Made from the sources here by tools/voice.mjs, tools/build.mjs and the HyperFrames CLI
+.voice/
+.hyperframes/
+assets/vo-*.wav
+timings.json
+index.html
+compositions/
+chapters.txt
+meta.json
+*.mp4
