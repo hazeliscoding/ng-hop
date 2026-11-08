@@ -367,6 +367,19 @@ test('a library needing an extra package brings it along when the project declar
   assert.match(text.stdout, /marked: 15\.0\.0 -> 17\.0\.2, fits \^17\.0\.0 \|\| \^18\.0\.0; needed by ngx-markdown/);
 });
 
+test('a peer two libraries newly need gets a version that fits both, whichever comes first', async () => {
+  // The first library's newest fit, 18.0.0, is outside the second one's range, so picking per library contradicted itself.
+  const lib = (name, range) => pkg(name, { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peers: { '@angular/core': '^21.0.0', 'chart-core': range }, at: '2025-12-01' } });
+  const core = pkg('chart-core', { '17.0.2': {}, '18.0.0': {} });
+  const options = { deps: { ...base, 'a-chart': '^20.0.0', 'b-chart': '^20.0.0' }, lock: { ...lockBase, 'a-chart': '20.0.0', 'b-chart': '20.0.0' } };
+  const r = await plan(world(lib('a-chart', '^17.0.0 || ^18.0.0'), lib('b-chart', '^17.0.0'), core), app(options), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === 'chart-core'), { name: 'chart-core', from: null, to: '17.0.2', ranges: ['^17.0.0 || ^18.0.0', '^17.0.0'], neededBy: ['a-chart', 'b-chart'] });
+
+  const apart = await plan(world(lib('a-chart', '^18.0.0'), lib('b-chart', '^17.0.0'), core), app(options), { to: 21 });
+  assert.ok(!apart.plan.hops[0].shared.some((s) => s.name === 'chart-core'), 'no version fits both, so none is named');
+  assert.ok(apart.plan.unchecked.some((u) => u.name === 'chart-core' && /a-chart and b-chart newly need \^18\.0\.0 and \^17\.0\.0/.test(u.reason)), JSON.stringify(apart.plan.unchecked));
+});
+
 test('a library that moves names its repository, where its release notes are when the package has none', async () => {
   const md = pkg('ngx-markdown', {
     '20.0.0': { peer: '^20.0.0', at: '2025-06-01', repository: { type: 'git', url: 'git+https://github.com/jfcere/ngx-markdown.git' } },
