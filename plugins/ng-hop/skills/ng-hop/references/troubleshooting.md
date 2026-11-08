@@ -44,6 +44,8 @@ This shows right after the team publishes a release that does accept the new Ang
 
 Exempting a release relaxes a safeguard, so it's the person's call, even for their own package: ask. They can wait until the release is old enough, or exempt it as its own commit, the way the file already lists earlier releases, or exempt the team's whole scope (`'@acme/*'`) once, if they trust their registry.
 
+An exemption gets the release past pnpm, but not past `ng update`. Angular CLI 22 applies the same age rule in its own resolver, with pnpm's `minimum-release-age` (24 hours by default from pnpm 11) or yarn 4's `npmMinimalAgeGate`, and it doesn't read `minimumReleaseAgeExclude`. So for its first day, the new release still fails the peer check. Either wait the day out, or, with the person's go-ahead, install the exempted releases first (`pnpm add <package>@<version>`), then run the plan's update for Angular with `--allow-dirty`, all in the one commit for that major. Say in the report that the update ran that way, and why.
+
 ## The plan rejects angular-eslint with "requires no Angular version"
 
 An older planner could report this despite a current, target-aligned builder release:
