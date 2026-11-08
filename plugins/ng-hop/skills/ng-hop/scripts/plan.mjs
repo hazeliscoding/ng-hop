@@ -256,7 +256,8 @@ function nodePins(dir) {
     for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
       for (const [, image] of (read(join(base, docker)) || '').matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image, 'image');
     }
-    const devcontainer = read(join(base, '.devcontainer', 'devcontainer.json')) || '';
+    // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
+    const devcontainer = (read(join(base, '.devcontainer', 'devcontainer.json')) || '').replace(/^[ \t]*\/\/.*$/gm, '');
     const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
     if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
     const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
@@ -269,7 +270,7 @@ function nodePins(dir) {
   } catch { /* readProject reports a broken package.json */ }
   const workflows = join(root, '.github', 'workflows');
   for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)) : []) {
-    for (const [, value] of (read(join(workflows, name)) || '').matchAll(/node-version:\s*([^#\n]+)/g)) {
+    for (const [, value] of (read(join(workflows, name)) || '').replace(/^[ \t]*#.*$/gm, '').matchAll(/node-version:\s*([^#\n]+)/g)) {
       for (const v of value.replace(/[[\]'"]/g, '').split(',')) if (/^\s*v?\d/.test(v)) add(join(workflows, name), v);
     }
   }

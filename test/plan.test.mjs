@@ -677,6 +677,14 @@ test('every place the plan reads a Node pin names it when it is below the range'
   ]);
 });
 
+test('a commented-out line is not a pin, and doesn\'t hide the line in use', async () => {
+  // devcontainer.json allows comments, and so does a workflow's YAML, so either can keep an old pin as one.
+  assert.deepEqual(await pinsOf({
+    '.devcontainer/devcontainer.json': '{\n  // "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",\n  "image": "mcr.microsoft.com/devcontainers/typescript-node:20-bookworm"\n}\n',
+    '.github/workflows/ci.yml': `${setupNode('24')}          # node-version: 16.x\n`,
+  }), [{ file: '.devcontainer/devcontainer.json', value: 'mcr.microsoft.com/devcontainers/typescript-node:20-bookworm' }]);
+});
+
 test('an engines range is below the range when the lowest Node it allows is one the range refuses', async () => {
   // ">=24" allows Node 24.0, and Angular's CLI stops on 24.0 to 24.14 when the range starts 24 at 24.15.
   assert.deepEqual(await pinsOf(engines('>=24')), [{ file: 'package.json', value: '>=24' }]);
