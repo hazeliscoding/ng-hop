@@ -218,6 +218,12 @@ test('a blocker whose scope has a registry of its own is confirmed as the team\'
   assert.doesNotMatch(skill, /when the plan says it comes from their own registry/);
 });
 
+test('the team\'s libraries go only to the major the app needs next, since the app moves one major at a time', () => {
+  // On the fake registry, an app on Angular 20 whose library had a release for 22 and none for 21 was still blocked at 21.
+  assert.match(libraries(), /--to <major>/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /to the Angular major the plan names/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

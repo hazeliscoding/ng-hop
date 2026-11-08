@@ -14,7 +14,7 @@ For each blocker, from the plan and a quick search:
 
 ## The choices
 
-**Upgrade it first.** When the blocker is the team's own library, waiting would only wait on themselves. Work in that library's repository, with this skill and `references/libraries.md`, in the order the plan gives, and publish once they say so. Then come back to the app and run the plan again. Recommend this for their own libraries, once you've confirmed they are, and say which needs which. A vendor's library behind a registry of its own is a maintained library like any other, so for one of those, waiting is usually right.
+**Upgrade it first.** When the blocker is the team's own library, waiting would only wait on themselves. Work in that library's repository, with this skill and `references/libraries.md`, to the Angular major the plan names, in the order it gives, and publish once they say so. Then come back to the app and run the plan again. Recommend this for their own libraries, once you've confirmed they are, and say which needs which. A vendor's library behind a registry of its own is a maintained library like any other, so for one of those, waiting is usually right.
 
 **Wait.** Stay on the ceiling, with the work committed, and run the plan again later. It costs nothing and the app is already further along than it was. This is the usual recommendation for a maintained library, especially when the Angular major is recent.
 
