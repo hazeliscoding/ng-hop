@@ -41,8 +41,11 @@ export function parseOpenCode(events) {
       after = [];
       const input = part.state?.input || {};
       tools[part.tool] = (tools[part.tool] || 0) + 1;
-      if (part.tool === 'bash' && input.command) commands.push(input.command);
-      if (part.tool === 'skill' && input.name) skills.push(input.name);
+      // OpenCode 2 names its shell tool `shell` and loads a skill by `id`; 1.x said `bash` and `name`.
+      if ((part.tool === 'shell' || part.tool === 'bash') && input.command) commands.push(input.command);
+      // Code Mode can call the other tools, so its code is checked like a command.
+      if (part.tool === 'execute' && input.code) commands.push(input.code);
+      if (part.tool === 'skill' && (input.id || input.name)) skills.push(input.id || input.name);
       // Reading the skill's file by hand loads it just as well.
       if (part.tool === 'read' && /[\\/]ng-hop[\\/]SKILL\.md$/i.test(input.filePath || input.path || '')) skills.push('ng-hop');
     }

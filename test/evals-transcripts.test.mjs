@@ -42,6 +42,19 @@ test('an OpenCode run: its commands, the skill it loaded, its last message and i
   assert.equal(p.tools.bash, 2);
 });
 
+test('an OpenCode 2 run: its shell commands, a skill loaded by id, and code that can call the other tools', () => {
+  const code = 'return await tools.opencode.session_move({ directory: "/work/app" });';
+  const p = parseTranscript(transcript([
+    tool('skill', { id: 'ng-hop' }),
+    tool('shell', { command: 'node plan.mjs --to 22', workdir: '/work/app' }),
+    tool('execute', { code }),
+    oc('text', { type: 'text', text: 'Done.' }),
+  ]));
+  assert.deepEqual(p.skills, ['ng-hop']);
+  assert.deepEqual(p.commands, ['node plan.mjs --to 22', code]);
+  assert.equal(p.tools.shell, 1);
+});
+
 test('an OpenCode run that read the skill\'s file instead of calling the skill tool still loaded it', () => {
   const p = parseTranscript(transcript([tool('read', { filePath: '/home/evals/.config/opencode/skills/ng-hop/SKILL.md' }), oc('text', { type: 'text', text: 'Done.' })]));
   assert.deepEqual(p.skills, ['ng-hop']);
