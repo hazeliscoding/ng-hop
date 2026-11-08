@@ -860,7 +860,7 @@ function render(plan) {
   const p = plan.project;
   lines.push(`Angular ${p.angular} (from ${p.angularSource}), ${p.packageManager}, Node ${p.node}. Latest Angular: ${plan.latestAngular}.`);
   if (plan.status === 'already-there') {
-    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? 'Only patch releases are available.' : 'Nothing to upgrade.'}`);
+    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? (plan.next ? `${plan.next} is a prerelease of it.` : 'Only patch releases are available.') : 'Nothing to upgrade.'}`);
     if (plan.patches) {
       for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
       lines.push(`  Run: ${plan.patches.command}`);
