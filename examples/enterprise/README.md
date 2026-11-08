@@ -29,7 +29,17 @@ You need Node 24.15 or newer, pnpm 12 and git. Verdaccio 7 needs Node 24 or newe
 2. Asked where they live, you point the agent at `<folder>/acme-ui`. It upgrades that workspace to Angular 22, moves each library's peer ranges and version, builds and tests them, and asks before publishing.
 3. Back in the portal, the plan is clear. The agent takes the app to 22, raises the dev container's Node to one Angular 22 accepts, and checks the build, the tests and the running app.
 
-The upgrade runs from your machine, not inside the dev container. The container keeps its own `node_modules`, so open it afterwards to check it still works: "Reopen in Container" in VS Code, or `npx @devcontainers/cli up --workspace-folder <folder>/acme-portal`. It reaches the registry on your machine through `.devcontainer/registry-forward.mjs`.
+The upgrade runs from your machine, not inside the dev container. The container has its own Node and its own `node_modules`, so rebuild it afterwards and check the app there. In VS Code, run "Dev Containers: Rebuild and Reopen in Container", or "Dev Containers: Rebuild Container" if you're already in it, then `pnpm run build` and `pnpm test --watch=false` in its terminal. From a terminal:
+
+```sh
+npx @devcontainers/cli up --remove-existing-container --workspace-folder <folder>/acme-portal
+npx @devcontainers/cli exec --workspace-folder <folder>/acme-portal pnpm run build
+npx @devcontainers/cli exec --workspace-folder <folder>/acme-portal pnpm test --watch=false
+```
+
+A plain `up` keeps a container made before the upgrade, on its old Node, and it reports success once the install is done, before anything runs Angular. `--watch=false` makes the tests run once and stop, since in a terminal they'd wait for changes.
+
+The container reaches the registry on your machine through `.devcontainer/registry-forward.mjs`.
 
 ## On video
 
