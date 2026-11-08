@@ -198,6 +198,15 @@ test('a workspace of several libraries builds with its own scripts, not plain ng
   assert.match(libraries(), /Cannot determine project for command/);
 });
 
+test('the publish question says the code is unpushed, and where a dry run says it would go', () => {
+  // A dry run of pnpm 12.16.1 sent a library to its publishConfig registry over the workspace's .npmrc, npm 11.19.0 the
+  // other way round, and run from inside dist both named the public registry.
+  const publish = libraries().slice(libraries().indexOf('## Publishing waits for the person'));
+  assert.match(publish, /stop before it/, 'positive control: this is the publish step');
+  assert.match(publish, /--dry-run/);
+  assert.match(publish, /pushed/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
