@@ -53,7 +53,9 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **Run the question cases weekly, with the skill only (2026-11-07).** *Why:* the cases read the live registry, so the right answer changes when a library catches up, and nobody would notice until a full batch. A failed check with the skill fails the run, and GitHub emails whoever last changed the schedule. It costs about $1.50 of usage a week. *Gave up:* the upgrade cases and the baseline stay manual, since a full batch costs about $32.
 - **Scripted upgrades with no agent cover Windows, yarn, bun and pnpm catalogs (2026-11-07).** `evals/hop.mjs` takes a fixture through the plan's own commands and checks the build, tests and running app after every major. It needs no login, so it runs on every change to the scripts and weekly. *Why:* it found five real problems in its first day, among them pnpm 12's native binary on Windows and yarn 4 stalling while installing Angular's temporary CLI, none of which the Linux agent evals could see. *Gave up:* it follows the plan's commands rather than an agent's judgement, so it tests the scripts, not the skill's instructions.
 - **OpenCode and Claude Code on Windows run on the owner's machine, not in CI (2026-11-07).** *Why:* OpenCode's free models refused GitHub's runners with `FreeUsageLimitError` and a 21-hour wait. A paid key, like Claude Code's login on Windows, would sit where an install script can read it: OpenCode only takes keys from its environment or config, and Windows lets a process read the memory of another of the same user, with nothing like Linux's Yama to stop it. *Gave up:* those runs need the owner's say-so and a machine with memory to spare. The harness still runs OpenCode, with `--agent opencode`.
-- **Keep the version `ng update` picks inside a peer range (2026-11-08).** For a shared package the plan names the smallest move, while `ng update` takes the newest release the peers allow, such as TypeScript 5.9 where the plan said 5.8. The plan now prints the range, and anything inside it stays. *Why:* going back to the plan's pick fights `ng update` and costs a reinstall, and on readme-wizard an agent installed a package the re-run plan no longer listed. *Gave up:* the smallest possible move, for shared packages only. A library `ng update` takes a major further than the plan is reported.
+- **Keep the version `ng update` picks inside a peer range (2026-11-08).** For a shared package the plan names the smallest move, while `ng update` takes the newest release the peers allow, such as TypeScript 5.9 where the plan said 5.8. The plan now prints the range, and anything inside it stays. *Why:* going back to the plan's pick fights `ng update` and costs a reinstall, and on readme-wizard an agent installed a package the re-run plan no longer listed. *Gave up:* the smallest possible move, for shared packages only. A library `ng update` takes a major further than the plan is reported, and the plan checks the license of the newest release that fits as well as its own pick.
+- **M7's internal libraries live in their own repo and reach the app through a private registry (2026-11-08).** A local Verdaccio on the Windows host stands in for a company's Artifactory or GitHub Packages. *Why:* "upgrade the libraries first" only means something when they're published separately, and that's how teams with shared UI libraries usually work. *Gave up:* the monorepo case, where `ng update` moves the libraries and the app in one go.
+- **M7's video is built with HyperFrames from the real run (2026-11-08).** Its terminal output, diffs and screenshots go into HTML scenes rendered to video, with a synthetic voice, captions and chapters, about 8 to 10 minutes, and short asides for newer and more senior developers. *Why:* it shows what really happened, and a scene can be fixed and rendered again without re-recording. *Gave up:* a live screen recording's feel.
 - **No unit test running stops the run, like a failing build (2026-11-08).** *Why:* on readme-wizard, one spec that didn't compile stopped Karma before any of its 20 specs ran, at the start and after all four majors, and the report called it one failing test. *Gave up:* one more question, on apps whose tests were already broken.
 
 ## Shipped
@@ -71,9 +73,10 @@ The evals use small apps built for them, run on Linux, and only when someone sta
 - [ ] Take my own apps on old majors (`readme-wizard`, `pr-sweep`) to the latest Angular with the skill, and fix what that finds. Both upgrades are open for review, as pr-sweep #4 and readme-wizard #1. What they found:
   - [x] The app check never saw the dev server's errors once it was ready, and a `PORT` in the shell moved Angular 22's dev server.
   - [x] Line endings: each run wrote its own script to restore them, and one dropped a final newline, so the skill ships one.
-  - [x] No test signal: an app with no `test` target, or a suite that stops before any spec runs, now stops the run to ask.
+  - [x] No test signal: an app with no `test` target runs the project's own test command, and a run where no test can run at all stops to ask.
   - [x] The report: release notes from the repository when a package ships none, the version `ng update` chose inside a range, and only the optional migrations that would change the app.
   - [ ] Check the files `angular.json` loads from a library against its next release, so a dropped file such as `marked.min.js` shows in the plan instead of the build.
+  - [ ] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says.
 - [x] Take a whole upgrade through OpenCode, and update the README's agent table with what happened. OpenCode 2.2 on a free model took the test app from Angular 20 to 22 on Windows, one commit per major, and passed all 17 checks.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
 - [x] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
@@ -94,17 +97,17 @@ Each of these is a place where the skill stops or says less than it could today.
 
 **Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest, `--next` plans a real prerelease, and the app check fails on a plain `console.error`.
 
+Met on 2026-11-08. With the skill: yarn 16/16, bun 16/16 and the catalog 14/14, once the grader read a catalog's commits right. Without it: 11/15, 11/15 and 11/13, mostly no commits and the work left on main. `--next` planned Angular's real `22.3.0-next.4` on an app at 22.2.5, and the app check's tests fail on a plain `console.error` in Chrome.
+
 ### M7: 0.4.0, an enterprise upgrade, on video
 
-A company's app is rarely one package. This release takes one built like the real thing from Angular 21 to 22, and turns the run into a tutorial.
+A company's app is rarely one package. This release takes one built like the real thing from Angular 21 to 22, and turns the run into a tutorial. The video is for developers who are new to agentic coding but not to development, and should still work for juniors and seniors.
 
 - [ ] A fixture: an Angular 21 app on the pnpm toolchain, with internal UI libraries whose peer ranges stop at Angular 21, so they have to reach 22 before the app can.
 - [ ] Set up for a dev container, and upgraded from the Windows host, not inside the container.
 - [ ] When a blocking library belongs to the person, offer to upgrade it first, in dependency order, besides waiting, replacing or forcing.
 - [ ] Take it to Angular 22 with the skill: the libraries first, then the app.
 - [ ] Make a video tutorial from that run.
-
-To decide when it starts: whether the libraries live in the pnpm workspace or come from a private registry, and the video's format.
 
 **Done when:** the skill takes the libraries and then the app to Angular 22 from the Windows host, the dev container still builds and serves the app afterwards, and the video is made.
 
