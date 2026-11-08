@@ -43,7 +43,7 @@ const css = String.raw`
       .term { font-family: var(--mono); font-size: 28px; line-height: 1.5; overflow: hidden; }
       .term-bar { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-family: var(--sans); font-size: 28px; }
       .term-bar .dot { width: 14px; height: 14px; border-radius: 50%; background: #2b5450; }
-      .term-bar .where { margin-left: 10px; }
+      .term-bar .where { margin-left: 10px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .term-body { padding: 14px 26px 20px; }
       .term-body > div { white-space: pre-wrap; }
       .you { color: var(--teal); font-weight: 700; }
