@@ -217,7 +217,7 @@ async function main() {
   }
   if (result.serverErrors.length) result.ok = false;
   // A failed page with no error line above: what the server said last usually explains it.
-  if (!result.ok && server.state === 'ready' && !result.serverErrors.length) result.serverLog = server.log.split('\n').map((l) => l.trim()).filter(Boolean).slice(-12).map((l) => l.slice(0, 300));
+  if (!result.ok && server.state === 'ready' && !result.serverErrors.length && !result.consoleErrors.length) result.serverLog = server.log.split('\n').map((l) => l.trim()).filter(Boolean).slice(-12).map((l) => l.slice(0, 300));
   if (server.child) stopTree(server.child);
 
   if (values.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

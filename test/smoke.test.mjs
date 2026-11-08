@@ -79,6 +79,21 @@ test('a failed page with no error line shows the server\'s last lines instead', 
   assert.match(result.serverLog.join('\n'), /something the patterns do not know went wrong/);
 });
 
+test('the text report shows the server\'s last lines when nothing matched, and where to look them up', async () => {
+  const p = fakeApp("http.createServer((q, r) => { console.log('something the patterns do not know went wrong'); r.writeHead(500); r.end('nope'); }).listen(port, '127.0.0.1', () => console.log('Compiled successfully.'));");
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--no-browser'], { cwd: p.dir });
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /server log: something the patterns do not know went wrong/);
+  assert.match(r.stdout, /references\/troubleshooting\.md/);
+});
+
+test('positive control: Vite\'s Internal server error on a request fails the check', async () => {
+  const vite = `http.createServer((q, r) => { console.log('[vite] Internal server error: Transform failed with 1 error'); r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root>hi</app-root></body></html>'); }).listen(port, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + port + '/'));`;
+  const { code, result } = await check(fakeApp(vite), '--no-browser');
+  assert.equal(code, 1);
+  assert.match(result.serverErrors.join(), /Internal server error: Transform failed/);
+});
+
 test('a project with no install says what to do', async () => {
   const p = project({ deps: { '@angular/core': '^21.0.0' } });
   made.push(p);
