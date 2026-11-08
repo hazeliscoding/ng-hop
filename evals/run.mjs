@@ -4,7 +4,7 @@
 // A run already finished is skipped, so an interrupted batch picks up where it stopped.
 // Usage: node evals/run.mjs --iteration 1 [--case name[,name]] [--tier plan|upgrade|real] [--config with_skill|without_skill]
 //        [--runs 1] [--agent claude|opencode] [--model id] [--max-seconds 560]
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { freemem, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +21,12 @@ const { values } = parseArgs({ options: {
 } });
 if (!['claude', 'opencode'].includes(values.agent)) throw new Error(`--agent takes claude or opencode, not ${values.agent}`);
 const model = values.model || (values.agent === 'opencode' ? 'opencode/big-pickle' : 'claude-opus-5-5');
+const OPENCODE = process.env.OPENCODE_BIN || 'opencode';
+if (values.agent === 'opencode' && !values.regrade) {
+  // The config runOpenCode writes uses OpenCode 2's names. On another version its denied commands might not apply, and --auto would run them.
+  const version = execFileSync(OPENCODE, ['--version'], { encoding: 'utf8' }).trim();
+  if (!/^(opencode )?v?2\./.test(version)) throw new Error(`The OpenCode runs need OpenCode 2, not ${version}`);
+}
 const started = Date.now();
 const maxMs = values['max-seconds'] ? Number(values['max-seconds']) * 1000 : Infinity;
 const minFree = Number(values['min-free-gb']) * 1024 ** 3;
@@ -80,21 +86,25 @@ function runClaude(c, config, projectDir, runDir) {
 
 // OpenCode on a free model needs no login, so there's nothing for an install script to take, and it runs where Claude
 // Code can't safely, such as on Windows. Each run gets a home of its own, so nothing from the machine's own setup or
-// another run reaches it, with sharing off so no session leaves as a public link.
+// another run reaches it, with sharing off so no session leaves as a public link. It's denied what a Claude run is, as
+// OpenCode 2's shell rules: a pattern ending in ` *` also matches the bare command.
+const OPENCODE_DENIED = ['git push *', 'gh *', 'nvm *', 'npm install -g *', 'npm i -g *'];
 function runOpenCode(c, config, projectDir, runDir) {
   const home = mkdtempSync(join(tmpdir(), 'ng-hop-opencode-'));
   const xdg = Object.fromEntries(['CONFIG', 'DATA', 'STATE', 'CACHE'].map((k) => [`XDG_${k}_HOME`, join(home, k.toLowerCase())]));
   const settings = join(xdg.XDG_CONFIG_HOME, 'opencode');
   mkdirSync(settings, { recursive: true });
   writeFileSync(join(settings, 'opencode.json'), JSON.stringify({
-    $schema: 'https://opencode.ai/config.json', share: 'disabled', autoupdate: false,
-    permission: { bash: { '*': 'allow', 'git push*': 'deny', 'gh *': 'deny', 'nvm *': 'deny', 'npm install -g*': 'deny', 'npm i -g*': 'deny' } },
+    $schema: 'https://opencode.ai/config.json', share: 'disabled', update: 'disable',
+    permissions: OPENCODE_DENIED.map((resource) => ({ action: 'shell', resource, effect: 'deny' })),
   }, null, 2));
   if (config === 'with_skill') cpSync(join(PLUGIN, 'skills', 'ng-hop'), join(settings, 'skills', 'ng-hop'), { recursive: true });
   const args = ['run', '--standalone', '--auto', '--format', 'json', '--model', model, c.prompt];
   return new Promise((resolve) => {
     const out = [];
-    const child = spawn(process.env.OPENCODE_BIN || 'opencode', args, { cwd: projectDir, env: developerEnv({ ...xdg, NG_CLI_ANALYTICS: 'false' }), stdio: ['ignore', 'pipe', 'pipe'] });
+    // `opencode run` starts its session in $PWD when that's set, not in its working folder, so both name the project.
+    const env = developerEnv({ ...xdg, PWD: projectDir, NG_CLI_ANALYTICS: 'false' });
+    const child = spawn(OPENCODE, args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => { stderr += d; });
