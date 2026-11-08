@@ -125,9 +125,9 @@ test('a peer a library newly requires is listed to install, with its version, be
   const cdk = pkg('@angular/cdk', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '21.1.0': { peer: '^21.0.0', at: '2026-01-01' } });
   const options = { deps: { ...base, '@ng-select/ng-select': '^23.0.0' }, lock: { ...lockBase, '@ng-select/ng-select': '23.0.0' } };
   const r = await plan(world(lib, cdk), app(options), { to: 21 });
-  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === '@angular/cdk'), { name: '@angular/cdk', from: null, to: '21.1.0', neededBy: ['@ng-select/ng-select'] });
+  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === '@angular/cdk'), { name: '@angular/cdk', from: null, to: '21.1.0', ranges: ['^21.0.0'], neededBy: ['@ng-select/ng-select'] });
   const text = await plan(world(lib, cdk), app(options), { to: 21, text: true });
-  assert.match(text.stdout, /@angular\/cdk: not installed -> 21\.1\.0; needed by @ng-select\/ng-select/);
+  assert.match(text.stdout, /@angular\/cdk: not installed -> 21\.1\.0, fits \^21\.0\.0; needed by @ng-select\/ng-select/);
 
   const missing = await plan(world(lib), app(options), { to: 21 });
   assert.ok(missing.plan.unchecked.some((u) => u.name === '@angular/cdk'), 'a peer the registry has no release of is reported, not guessed');
@@ -358,8 +358,13 @@ test('TypeScript that already fits stays put', async () => {
 test('a library needing an extra package brings it along when the project declares it', async () => {
   const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0 || ^18.0.0' } } });
   const marked = pkg('marked', { '15.0.0': {}, '17.0.0': {}, '17.0.2': {}, '18.0.0': {} });
-  const r = await plan(world(md, marked), app({ deps: { ...base, 'ngx-markdown': '^20.0.0', marked: '^15.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0', marked: '15.0.0' } }), { to: 21 });
+  const options = { deps: { ...base, 'ngx-markdown': '^20.0.0', marked: '^15.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0', marked: '15.0.0' } };
+  const r = await plan(world(md, marked), app(options), { to: 21 });
   assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === 'marked').to, '17.0.2');
+  // On readme-wizard, ng update put marked on 18 where the plan said 17: both fit, and the line says so.
+  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === 'marked').ranges, ['^17.0.0 || ^18.0.0']);
+  const text = await plan(world(md, marked), app(options), { to: 21, text: true });
+  assert.match(text.stdout, /marked: 15\.0\.0 -> 17\.0\.2, fits \^17\.0\.0 \|\| \^18\.0\.0; needed by ngx-markdown/);
 });
 
 test('an extra package the project does not declare is left for npm to install', async () => {

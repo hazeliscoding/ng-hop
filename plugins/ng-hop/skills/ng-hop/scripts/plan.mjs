@@ -404,7 +404,8 @@ async function resolveShared({ project, registry, requirements, current, coupled
     const doc = await registry.get(peer);
     const pick = doc ? minimalBump(doc, ranges, have) : null;
     if (!pick) { conflicts.push({ name: peer, have, wants }); continue; }
-    changes.push({ name: peer, from: have, to: pick, neededBy: [...new Set(wants.map((w) => w.by))] });
+    // ng update takes the newest release in these ranges, so `to` is the smallest move and anything in them fits.
+    changes.push({ name: peer, from: have, to: pick, ranges: [...new Set(ranges)], neededBy: [...new Set(wants.map((w) => w.by))] });
     current[peer] = pick;
   }
   return { changes, conflicts };
@@ -725,12 +726,16 @@ async function buildPlan({ projectDir, to, next = false }) {
       for (const peer of lib.from ? valid : []) {
         const range = after.peerDependencies[peer];
         const listed = changes.find((s) => s.name === peer);
-        if (listed) { if (!listed.neededBy.includes(lib.name)) listed.neededBy.push(lib.name); continue; }
+        if (listed) {
+          if (!listed.neededBy.includes(lib.name)) listed.neededBy.push(lib.name);
+          if (!listed.ranges.includes(range)) listed.ranges.push(range);
+          continue;
+        }
         const doc = await registry.get(peer).catch(() => null);
         // A framework package keeps in step with core, as ng update keeps the rest of them.
         const fits = isFramework(peer) && semver.satisfies(frameworkVersion, range, { includePrerelease: true }) ? frameworkVersion
           : doc && semver.validRange(range) ? semver.maxSatisfying(eligibleReleases(doc, null), range) : null;
-        if (fits) changes.push({ name: peer, from: null, to: fits, neededBy: [lib.name] });
+        if (fits) changes.push({ name: peer, from: null, to: fits, ranges: [range], neededBy: [lib.name] });
         else plan.unchecked.push({ name: peer, reason: `${lib.name} ${lib.to} newly needs ${range}, and the registry has no release to install for it` });
       }
     }
@@ -840,7 +845,7 @@ function render(plan) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
       lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
     }
-    for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}; needed by ${s.neededBy.join(', ')}`);
+    for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}${s.ranges?.length ? `, fits ${s.ranges.join(' and ')}` : ''}; needed by ${s.neededBy.join(', ')}`);
     lines.push(`  Run: ${hop.command}`);
   }
   if (plan.blockers.length) {

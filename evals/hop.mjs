@@ -76,8 +76,10 @@ for (let step = 0; step < 6 && !failures.length; step++) {
   const deps = () => { const p = readPkg(); return { ...p.devDependencies, ...p.dependencies }; };
   for (const item of [...hop.libs.filter((l) => l.from !== l.to), ...hop.shared]) {
     const spec = deps()[item.name];
-    // Not in package.json at all is a peer the plan lists as newly needed, which yarn won't add on its own.
-    if (spec && (spec.startsWith('catalog:') || (semver.validRange(spec) && semver.satisfies(item.to, spec)))) continue;
+    // Not in package.json at all is a peer the plan lists as newly needed, which yarn won't add on its own. A version
+    // the update chose inside the plan's ranges stays, as the skill says, rather than going back to the plan's pick.
+    const inRanges = item.ranges && semver.validRange(spec) && item.ranges.every((r) => semver.satisfies(semver.minVersion(spec), r));
+    if (spec && (spec.startsWith('catalog:') || inRanges || (semver.validRange(spec) && semver.satisfies(item.to, spec)))) continue;
     console.log(`  also installing ${item.name}@${item.to}, ${spec ? `which the update left at ${spec}` : 'which the plan lists as newly needed'}`);
     const added = shell(`${manager()} ${item.name}@${item.to}`);
     if (!added.ok) fail(`installing ${item.name}@${item.to}`, added.out);
