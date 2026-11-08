@@ -41,10 +41,14 @@ function pnpmCommand(cwd) {
 // installs a temporary newer one with the project's manager, and on yarn 4 that stopped with no error. npm comes with
 // Node, and its own script is run directly, with no shell.
 function npmCommand() {
-  const script = [process.env.npm_execpath, join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')]
+  // Windows keeps npm beside node.exe, and Linux and macOS keep it in lib/ beside bin/.
+  const nodeDir = dirname(process.execPath);
+  const script = [process.env.npm_execpath, join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'), join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')]
     .find((file) => file && /[\\/]npm-cli\.c?js$/i.test(file) && existsSync(file));
-  if (!script) throw new Error('Could not find npm next to Node, which runs the target Angular CLI for a yarn project. No fallback was run.');
-  return { file: process.execPath, prefix: [script] };
+  if (script) return { file: process.execPath, prefix: [script] };
+  // Outside Windows, npm on the path is a script that Node can start without a shell.
+  if (process.platform !== 'win32') return { file: 'npm', prefix: [] };
+  throw new Error('Could not find npm next to Node, which runs the target Angular CLI for a yarn project. No fallback was run.');
 }
 
 // ---- pnpm catalogs ----------------------------------------------------------------------------------------------
