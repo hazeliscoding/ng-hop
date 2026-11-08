@@ -1,0 +1,66 @@
+/* Acme's design tokens and the base styles for its components. Apps load this file from angular.json's styles. */
+:root {
+  --acme-ink: #1d2433;
+  --acme-muted: #5b6473;
+  --acme-surface: #ffffff;
+  --acme-canvas: #f3f5f9;
+  --acme-brand: #2f5bea;
+  --acme-brand-ink: #ffffff;
+  --acme-radius: 10px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--acme-ink);
+  background: var(--acme-canvas);
+}
+
+.acme-button {
+  border: 1px solid var(--acme-brand);
+  border-radius: var(--acme-radius);
+  padding: 0.5rem 1rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.acme-button--primary {
+  background: var(--acme-brand);
+  color: var(--acme-brand-ink);
+}
+
+.acme-button--quiet {
+  background: transparent;
+  color: var(--acme-brand);
+}
+
+.acme-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.acme-card {
+  background: var(--acme-surface);
+  border-radius: var(--acme-radius);
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+.acme-card__title {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+}
+
+.acme-field {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.acme-field__label {
+  color: var(--acme-muted);
+  font-size: 0.875rem;
+}
+
+.acme-field__input {
+  border: 1px solid #c9cfda;
+  border-radius: var(--acme-radius);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+}

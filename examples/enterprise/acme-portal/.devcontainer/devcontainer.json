@@ -1,0 +1,11 @@
+{
+  "name": "acme-portal",
+  "build": { "dockerfile": "Dockerfile" },
+  "workspaceFolder": "/workspaces/acme-portal",
+  "remoteUser": "node",
+  "containerEnv": { "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0", "NG_CLI_ANALYTICS": "false" },
+  "mounts": ["source=acme-portal-node-modules,target=/workspaces/acme-portal/node_modules,type=volume"],
+  "postCreateCommand": "nohup node .devcontainer/registry-forward.mjs > /tmp/registry-forward.log 2>&1 & pnpm install --frozen-lockfile",
+  "postStartCommand": "nohup node .devcontainer/registry-forward.mjs > /tmp/registry-forward.log 2>&1 &",
+  "forwardPorts": [4200]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@acme/ui-forms",
+  "version": "21.4.0",
+  "peerDependencies": {
+    "@angular/common": "^21.2.0",
+    "@angular/core": "^21.2.0",
+    "@angular/forms": "^21.2.0",
+    "@acme/ui-core": "^21.4.0"
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  },
+  "sideEffects": false,
+  "description": "Acme's form fields, built on @acme/ui-core."
+}

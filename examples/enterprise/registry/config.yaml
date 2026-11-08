@@ -1,0 +1,11 @@
+# A stand-in for a company registry: Acme's packages are published here, and everything else still comes from npm,
+# because each repo's .npmrc only sends the @acme scope here. Anyone on this machine may publish, which a real registry
+# wouldn't allow, so the example stays on the upgrade rather than on logging in. Run it with:
+#   npx verdaccio@7.0.2 --config examples/enterprise/registry/config.yaml
+storage: ./storage
+packages:
+  '@acme/*':
+    access: $all
+    publish: $all
+listen: 127.0.0.1:4873
+log: { type: stdout, format: pretty, level: warn }

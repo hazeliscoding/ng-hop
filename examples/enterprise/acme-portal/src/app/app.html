@@ -1,0 +1,22 @@
+<header class="masthead">
+  <h1>Acme Portal</h1>
+  <p>Equipment requests for the Acme team.</p>
+</header>
+
+<main class="layout">
+  <acme-card heading="New request">
+    <form [formGroup]="form" (ngSubmit)="submit()">
+      <acme-text-field label="What do you need?" formControlName="title" />
+      <acme-text-field label="What is it for?" formControlName="reason" />
+      <acme-button type="submit" [disabled]="form.invalid">Send request</acme-button>
+    </form>
+  </acme-card>
+
+  <acme-card heading="Your requests">
+    <ul class="requests">
+      @for (request of requests(); track $index) {
+        <li><strong>{{ request.title }}</strong> <span>{{ request.reason }}</span></li>
+      }
+    </ul>
+  </acme-card>
+</main>

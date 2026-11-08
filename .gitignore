@@ -12,3 +12,6 @@ evals/results/
 !CLAUDE.md
 !.claude-plugin/
 !.claude-plugin/**
+
+# The enterprise example's local registry keeps its packages here
+examples/enterprise/registry/storage/
