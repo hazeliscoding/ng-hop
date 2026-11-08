@@ -861,7 +861,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     let node = { range: nodeRange, status: 'unknown' };
     if (nodeRange && semver.validRange(nodeRange)) {
       const version = process.version.replace(/^v/, '');
-      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.ltr(version, nodeRange) ? 'too-old' : 'unsupported';
+      // A Node in a gap of the range, as 24.14 is in Angular 22's, is too old: a newer one fits, and ng won't start on it.
+      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old';
       const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
       if (below.length) node.pins = below;
     }

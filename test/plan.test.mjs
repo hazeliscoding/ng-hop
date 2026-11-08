@@ -810,6 +810,13 @@ test('Node outside a major\'s range is reported on that major', async () => {
   assert.equal(r.plan.hops.find((h) => h.major === 22).node.status, 'unsupported');
 });
 
+test('a Node in a gap of a major\'s range is too old, since a newer one fits and ng refuses this one', async () => {
+  // 24.14 is above 22.22 but below 24.15, in a gap of Angular 22's range, and its CLI won't start on it.
+  const r = await plan(nodeWorld(), app({ deps: base, lock: lockBase }), { to: 21, node: '24.14.1' });
+  assert.equal(r.plan.project.node, '24.14.1');
+  assert.equal(r.plan.hops[0].node.status, 'too-old');
+});
+
 // ---- Project state and refusing to guess ------------------------------------------------------------------------------
 
 test('the lockfile wins over the declared range, so a resumed upgrade starts where it stopped', async () => {

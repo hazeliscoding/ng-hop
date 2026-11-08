@@ -138,9 +138,11 @@ export function project({ deps = {}, devDeps = {}, lock = null, files = {}, nx =
   return { dir, remove: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-export function runScript(script, args, { cwd, env = {} } = {}) {
+// node: the Node version the script sees itself running on, so a test can try one this machine doesn't have.
+export function runScript(script, args, { cwd, env = {}, node } = {}) {
+  const preload = node ? ['--import', `data:text/javascript,Object.defineProperty(process,'version',{value:'v${node}'})`] : [];
   return new Promise((resolve) => {
-    execFile(process.execPath, [script, ...args], { cwd, env: { ...process.env, ...env }, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [...preload, script, ...args], { cwd, env: { ...process.env, ...env }, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout, stderr });
     });
   });
@@ -149,7 +151,7 @@ export function runScript(script, args, { cwd, env = {} } = {}) {
 // own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
 // .npmrc the way a team sets it up. rcDir puts that .npmrc in another folder, such as a pnpm workspace's root, and auth
 // makes the registry want the token the .npmrc then holds.
-export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null } = {}) {
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
   const token = company && own.auth ? `${company.url.replace(/^http:/, '')}:_authToken=test-only\n` : '';
@@ -159,7 +161,7 @@ export async function plan(packages, proj, { to, next = false, text = false, reg
     if (to !== undefined) args.push('--to', String(to));
     if (next) args.push('--next');
     if (!text) args.push('--json');
-    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url } });
+    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url }, node });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null };
   } finally {
     await registry.close();
