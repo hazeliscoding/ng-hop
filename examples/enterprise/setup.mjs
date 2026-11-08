@@ -35,10 +35,10 @@ async function main() {
   const ping = await fetch(`${REGISTRY}-/ping`).catch(() => { throw new Error(`No registry answers at ${REGISTRY}. Start it first:\n  ${START_REGISTRY}`); });
   if (!ping.ok) throw new Error(`The server at ${REGISTRY} answered ${ping.status} to a ping. Stop whatever holds port 4873, then start the example's registry:\n  ${START_REGISTRY}`);
   // 4873 is Verdaccio's default port, so another registry may answer there, and setup would publish Acme's libraries to
-  // it. The example's has only @acme packages, so one that serves a public package such as react isn't it.
-  // shortcut: a registry that needs a login answers 401 for react too, so it gets through, and setup would publish to it
-  // if npm has a token for it. To stop on one, also stop on a 401 for @acme/ui-core, which the example's lets anyone read.
+  // it. The example's has only @acme packages, so one that serves a public package such as react isn't it. Nor is one
+  // that wants a login to read @acme packages, since the example's lets anyone read them.
   if ((await fetch(`${REGISTRY}react`)).ok) throw new Error(`The registry at ${REGISTRY} serves react, so it isn't the example's, which has only @acme packages. Stop it or move it to another port, then start the example's:\n  ${START_REGISTRY}`);
+  if ([401, 403].includes((await fetch(`${REGISTRY}@acme%2fui-core`)).status)) throw new Error(`The registry at ${REGISTRY} wants a login to read @acme packages, so it isn't the example's, which lets anyone read them. Stop it or move it to another port, then start the example's:\n  ${START_REGISTRY}`);
   // The registry keeps what earlier runs published, and a later release there would leave the portal nothing to wait for.
   for (const name of ['@acme/ui-core', '@acme/ui-forms']) {
     const later = (await versions(name)).find((v) => !v.startsWith('21.'));
