@@ -196,6 +196,14 @@ test('evals only run when someone starts them, and only the jobs that need the l
   assert.doesNotMatch(job('triggers'), /upload-artifact/);
 });
 
+test('the scripted hops hold no secret, so running them on every change risks nothing', () => {
+  const hops = readFileSync(fileURLToPath(new URL('../.github/workflows/hops.yml', import.meta.url)), 'utf8');
+  assert.doesNotMatch(hops, /secrets\./);
+  assert.match(hops, /^permissions:\n {2}contents: read$/m);
+  assert.equal(hops.match(/uses: actions\/checkout@/g).length, hops.match(/persist-credentials: false/g).length);
+  assert.doesNotMatch(hops, /uses: [^./][^@\n]*@(?![0-9a-f]{40})/, 'actions are pinned by commit');
+});
+
 test('the workflow never puts the login in the environment of anything it starts', () => {
   assert.doesNotMatch(WORKFLOW, /--preserve-env|sudo -E/);
   assert.doesNotMatch(WORKFLOW, /CLAUDE_CODE_OAUTH_TOKEN:/, 'the secret goes into a step as LOGIN, and out on stdin');

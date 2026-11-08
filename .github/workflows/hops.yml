@@ -1,0 +1,55 @@
+name: Hops
+
+# Takes fixture apps through the plan's own commands, with no agent, where the agent evals don't run: Windows, yarn,
+# bun and a pnpm catalog. Nothing here holds a login or any secret, so it can run on every change to the scripts.
+# See evals/hop.mjs.
+
+on:
+  pull_request:
+    paths:
+      - 'plugins/ng-hop/skills/ng-hop/scripts/**'
+      - 'evals/hop.mjs'
+      - 'evals/prepare.mjs'
+      - 'evals/fixtures.mjs'
+      - 'evals/common.mjs'
+      - '.github/workflows/hops.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  hop:
+    name: ${{ matrix.fixture }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, fixture: clean-path }
+          - { os: windows-latest, fixture: pnpm-clean }
+          - { os: ubuntu-24.04, fixture: clean-path }
+          - { os: ubuntu-24.04, fixture: yarn-clean }
+          - { os: ubuntu-24.04, fixture: bun-clean }
+    env:
+      NG_HOP_WORKSPACE: ${{ github.workspace }}/../ws
+      NG_CLI_ANALYTICS: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install the package managers
+        shell: bash
+        run: npm install -g pnpm@12.16.1 @yarnpkg/cli-dist@4.18.1 bun@1.4.4
+      - name: Build the fixture app
+        shell: bash
+        run: node evals/prepare.mjs "${{ matrix.fixture }}"
+      - name: Take it through the plan's commands
+        shell: bash
+        run: node evals/hop.mjs --fixture "${{ matrix.fixture }}"
