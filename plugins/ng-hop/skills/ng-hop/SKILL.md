@@ -26,8 +26,6 @@ Run `git status --short`. Commits are the safety net for this whole process, so 
 - **Changes that look like an upgrade, but nobody has mentioned one** (`package.json`, the lockfile, migration edits): say so and ask whether they're safe to set aside.
 - **Not a git repo:** ask whether to run `git init` and commit first.
 
-If you're on the default branch, create `upgrade/angular-<target>` before changing anything. On any other branch, stay there. Never push.
-
 ## 2. Plan
 
 ```sh
@@ -45,6 +43,8 @@ Show the person the result in a few lines: where they can get to, what blocks an
 - **`Node: too-old` on a major:** `ng` will refuse to run. Stop before that major and ask them to switch Node. Don't switch it yourself, since `nvm use` changes it for the whole machine on Windows. `unsupported` means Node is newer than Angular lists: mention it and carry on while the checks pass.
 - **An Nx workspace:** the plan says so. Use `nx migrate` for the framework packages, and the plan for the library facts.
 - **They asked to try a prerelease** (an RC, Angular's `next`, or a major the plan says has a prerelease out): plan with `--next`, and only then, because nothing else should land on a version that isn't meant for production. The rest works the same way, one committed major at a time. Say in your report that it's a prerelease, and which libraries only accept it through a prerelease of their own.
+
+Before changing anything, if you're on the default branch, create `upgrade/angular-<major>` for the major this run will reach: the target, or the ceiling when the plan is blocked. On any other branch, stay there. Never push.
 
 ## 3. Record the starting point
 
