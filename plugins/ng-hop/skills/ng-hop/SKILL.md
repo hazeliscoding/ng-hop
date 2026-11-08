@@ -81,9 +81,9 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 **d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error.
 
 **e. Finish the major:**
-- Install anything the plan lists under the major that `ng update` didn't move (check `package.json`). TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
+- Install anything the re-run plan lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
 - Do the guide's remaining steps that apply.
-- Read what each library's new major changed, from its changelog or README in `node_modules/<package>`, even if nothing broke. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report.
+- Read what each library's new major changed, even if nothing broke: its changelog in `node_modules/<package>`, or when it ships none, the release notes or `CHANGELOG.md` in the repository the plan names, for every major crossed. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report, and so does a library `ng update` took to a later major than the plan named.
 - Fix what the upgrade broke. When a library's own major change breaks your code, read that library's changelog or migration guide instead of guessing at its API.
 
 **f. Check it against the starting point:** the same build, tests and `smoke.mjs` as step 3. Only new failures count. A build and tests can pass while the app won't start, so don't skip `smoke.mjs`. For a library the plan marks UNCONFIRMED, npm can't vouch for it, so look for the library's own compatibility table and check the running app, and say what you found. Staying on an installed version that passes is right: only move it, to the newer version the plan names, if it fails, and say that a move wasn't required. If `smoke.mjs` reports no browser, say that the page was fetched but never rendered.
@@ -107,7 +107,7 @@ Keep it short and lead with the result:
 - **Result:** the Angular version reached, and the target if it fell short.
 - **Commits:** one line per major.
 - **Hand fixes:** what you changed yourself and why. This is what needs a reviewer.
-- **Library changes:** what a library's new major changed that touches this app, and any peer it newly requires.
+- **Library changes:** what each library's new major changed that touches this app, any peer it newly requires, and any library `ng update` took further than the plan. Never leave this out: when nothing applies, say what you read.
 - **Node:** the range the new Angular needs, if it's stricter than before. Their CI and deployment images need it too, even if this machine is fine.
 - **Unconfirmed:** libraries npm couldn't vouch for, and what you checked instead.
 - **Already failing:** anything from step 3, left as it was.
