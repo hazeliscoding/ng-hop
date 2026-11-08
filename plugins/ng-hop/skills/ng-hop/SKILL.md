@@ -83,6 +83,7 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 
 **e. Finish the major:**
 - Install anything the plan from step (a) lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
+- If the repo pins Node itself below the range this major needs, in a dev container, `.nvmrc`, `engines` or a CI workflow, raise the pin to a version in that range, keeping its form, and say so under hand fixes. Those are the team's machines, and they'd fail where this one passes. Don't switch this machine's Node.
 - For an `angular.json:` line under the major, a file the app loads that the library no longer ships, follow `references/troubleshooting.md` for a file named in `angular.json` that no longer exists.
 - Do the guide's remaining steps that apply.
 - Read what each library's new major changed, even if nothing broke: its changelog in `node_modules/<package>`, or when it ships none, the release notes or `CHANGELOG.md` in the repository the plan names, for every major crossed. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report, and so does a library `ng update` took to a later major than the plan named.
@@ -110,7 +111,7 @@ Keep it short and lead with the result:
 - **Commits:** one line per major.
 - **Hand fixes:** what you changed yourself and why. This is what needs a reviewer.
 - **Library changes:** what each library's new major changed that touches this app, any peer it newly requires, and any library `ng update` took further than the plan. Never leave this out: when nothing applies, say what you read.
-- **Node:** the range the new Angular needs, if it's stricter than before. Their CI and deployment images need it too, even if this machine is fine.
+- **Node:** the range the new Angular needs, if it's stricter than before, and any pin you raised. Their CI, deployment and dev container images need it too, even if this machine is fine.
 - **Unconfirmed:** libraries npm couldn't vouch for, and what you checked instead.
 - **Already failing:** anything from step 3, left as it was.
 - **Available but not done:** the optional migrations the last major's `ng update` still offers that would change this app (search the code for what each one targets), settings the migrations added to keep the old behaviour (such as `ChangeDetectionStrategy.Eager`), and deprecations to plan for. A deprecated package nothing imports only needs removing.
