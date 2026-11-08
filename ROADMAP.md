@@ -51,6 +51,8 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **Read Chrome over the DevTools protocol, through a pipe (2026-11-07).** *Why:* Chrome's log doesn't record a message's level, so a plain `console.error('oops')` passed and the word ERROR in an ordinary log line failed. `--remote-debugging-pipe` gives the protocol over two file descriptors, so it needs no WebSocket, which Node 18 lacks, and no library. It now waits for the root to fill instead of a fixed virtual-time budget. *Gave up:* about two seconds more per check, and fifteen when an app never renders.
 - **Move a pnpm catalog in the pnpm runner, around Angular's own update (2026-11-07).** `update.mjs` copies the catalog's versions into `package.json`, runs `ng update` as usual, writes the new versions back into the catalog, puts `package.json` back on `catalog:` and reinstalls. *Why:* Angular's CLI can't change a catalog, and `pnpm update` can't either: on pnpm 12.16.1 it replaced `catalog:` in `package.json` with a plain version. Plain Claude moved a catalog by hand and passed. Going around `ng update` instead of replacing it keeps its peer checks and migrations. *Gave up:* it edits `pnpm-workspace.yaml` as text, so it reads block-style catalogs only, and refuses anything else before changing a thing. A catalog other projects share moves them too, so the plan names them and the skill asks.
 - **Run the question cases weekly, with the skill only (2026-11-07).** *Why:* the cases read the live registry, so the right answer changes when a library catches up, and nobody would notice until a full batch. A failed check with the skill fails the run, and GitHub emails whoever last changed the schedule. It costs about $1.50 of usage a week. *Gave up:* the upgrade cases and the baseline stay manual, since a full batch costs about $32.
+- **Scripted upgrades with no agent cover Windows, yarn, bun and pnpm catalogs (2026-11-07).** `evals/hop.mjs` takes a fixture through the plan's own commands and checks the build, tests and running app after every major. It needs no login, so it runs on every change to the scripts and weekly. *Why:* it found five real problems in its first day, among them pnpm 12's native binary on Windows and yarn 4 stalling while installing Angular's temporary CLI, none of which the Linux agent evals could see. *Gave up:* it follows the plan's commands rather than an agent's judgement, so it tests the scripts, not the skill's instructions.
+- **OpenCode and Claude Code on Windows run on the owner's machine, not in CI (2026-11-07).** *Why:* OpenCode's free models refused GitHub's runners with `FreeUsageLimitError` and a 21-hour wait. A paid key, like Claude Code's login on Windows, would sit where an install script can read it: OpenCode only takes keys from its environment or config, and Windows lets a process read the memory of another of the same user, with nothing like Linux's Yama to stop it. *Gave up:* those runs need the owner's say-so and a machine with memory to spare. The harness still runs OpenCode, with `--agent opencode`.
 
 ## Shipped
 
@@ -67,8 +69,8 @@ The evals use small apps built for them, run on Linux, and only when someone sta
 - [ ] Take my own apps on old majors (`readme-wizard`, `pr-sweep`) to the latest Angular with the skill, and fix what that finds.
 - [ ] Take a whole upgrade through OpenCode, and update the README's agent table with what happened.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
-- [ ] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
-- [ ] Evals on Windows. Only `npm test` runs there today, so a problem only Windows has shows up nowhere else.
+- [x] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
+- [x] Evals on Windows. Only `npm test` runs there today, so a problem only Windows has shows up nowhere else. The plan's real commands now run there on every change to the scripts. An agent on Windows runs on the owner's machine only.
 
 **Done when:** both apps are on the latest Angular through the skill, the README's agent table says what OpenCode really did, a scheduled run has reported, and real upgrades have run on Windows.
 
@@ -76,8 +78,8 @@ The evals use small apps built for them, run on Linux, and only when someone sta
 
 Each of these is a place where the skill stops or says less than it could today.
 
-- [ ] Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`. Plain Claude did this and passed.
-- [ ] Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either.
+- [x] Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`. Plain Claude did this and passed.
+- [x] Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either. Both now pass from Angular 20 to 22.
 - [x] Say when a framework package the app uses is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`.
 - [x] Check the licenses of what a moved library brings with it: shared packages the plan moves, and new dependencies, such as `@primeui/license-manager` with PrimeNG 22.
 - [x] A `--next` mode, for trying a prerelease Angular. Angular's `next` tag can be a new major or a minor of the current one, so it has to handle both.
