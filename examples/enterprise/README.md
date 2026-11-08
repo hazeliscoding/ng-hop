@@ -23,6 +23,8 @@ You need Node 24.15 or newer, pnpm 12 and git, and Docker Desktop for the dev co
    ```
 3. Open `<folder>/acme-portal` in your agent, with ng-hop installed, and ask: "Upgrade this app to Angular 22."
 
+To start over, stop the registry, delete `examples/enterprise/registry/storage/` and start it again. The registry keeps what each run publishes, and once the libraries' 22.0.0 is in it, the portal isn't blocked any more.
+
 ## What should happen
 
 1. The plan says the portal is blocked by `@acme/ui-core` and `@acme/ui-forms`, that both come from your own registry, and that ui-core goes first.

@@ -23,14 +23,19 @@ function run(cmd, args, cwd) {
   if (result.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed in ${cwd}`);
 }
 
-async function published(name, version) {
+async function versions(name) {
   const res = await fetch(`${REGISTRY}${name.replace('/', '%2f')}`);
-  return res.ok && Boolean((await res.json()).versions?.[version]);
+  return res.ok ? Object.keys((await res.json()).versions ?? {}) : [];
 }
 
 async function main() {
   if (!target) throw new Error('Usage: node examples/enterprise/setup.mjs <folder>');
   try { await fetch(`${REGISTRY}-/ping`); } catch { throw new Error(`No registry answers at ${REGISTRY}. Start it first:\n  npx verdaccio@7.0.2 --config examples/enterprise/registry/config.yaml`); }
+  // The registry keeps what earlier runs published, and a later release there would leave the portal nothing to wait for.
+  for (const name of ['@acme/ui-core', '@acme/ui-forms']) {
+    const later = (await versions(name)).find((v) => !v.startsWith('21.'));
+    if (later) throw new Error(`The registry already has ${name}@${later} from an earlier run, so the portal wouldn't be blocked. To start over, stop the registry, delete examples/enterprise/registry/storage and start it again.`);
+  }
   for (const repo of ['acme-ui', 'acme-portal']) {
     if (existsSync(join(target, repo))) throw new Error(`${join(target, repo)} already exists. Pick an empty folder.`);
   }
@@ -47,7 +52,7 @@ async function main() {
   run('pnpm', ['test'], ui);
   for (const lib of ['ui-core', 'ui-forms']) {
     const { name, version } = JSON.parse(readFileSync(join(ui, 'dist', 'acme', lib, 'package.json'), 'utf8'));
-    if (await published(name, version)) console.log(`  ${name}@${version} is already in the registry, so it's left as it is`);
+    if ((await versions(name)).includes(version)) console.log(`  ${name}@${version} is already in the registry, so it's left as it is`);
     else run('pnpm', ['publish', join('dist', 'acme', lib), '--no-git-checks'], ui);
   }
 
