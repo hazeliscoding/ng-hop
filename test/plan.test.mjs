@@ -602,11 +602,15 @@ test('pnpm bootstrap: the printed Run command selects the target CLI, not the lo
   assert.doesNotMatch(r.stdout, /Run: pnpm exec ng update/);
 });
 
+// A test project is a repo of its own, so the search for the repo's root stops there, whatever the folders above it hold.
+const git = { '.git/HEAD': 'ref: refs/heads/main\n' };
+
 test('the repo\'s own Node pins below a major\'s range are named under it, wherever the repo keeps them', async () => {
   // The enterprise run's agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
   const [core, compiler] = angular();
   core.versions['21.2.0'].engines = { node: '^22.22.3 || ^24.15.0 || >=26.0.0' };
   const files = {
+    ...git,
     '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\nRUN corepack enable\n',
     '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" }, "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm" }',
     '.nvmrc': '22\n',
