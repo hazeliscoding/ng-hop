@@ -231,13 +231,17 @@ function judge(manifest, published, major, frameworkVersion, angularReleased) {
   return verdict;
 }
 
-function eligibleReleases(doc, floor) {
+// prerelease: only for a --next hop, where a library's own prerelease may be all that supports the new major.
+// Stable releases still come first.
+function eligibleReleases(doc, floor, prerelease = false) {
   const latest = doc['dist-tags']?.latest;
-  return newestFirst(stableOnly(Object.keys(doc.versions))).filter((v) => {
+  const eligible = (versions) => newestFirst(versions).filter((v) => {
     if (doc.versions[v].deprecated) return false;
-    if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest)) return false;
+    if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest) && !semver.prerelease(v)) return false;
     return !floor || semver.gte(v, floor);
   });
+  const stable = eligible(stableOnly(Object.keys(doc.versions)));
+  return prerelease ? [...stable, ...eligible(Object.keys(doc.versions).filter((v) => semver.valid(v) && semver.prerelease(v)))] : stable;
 }
 
 function hasAngularPeersForHop(doc, floor, majorRange) {
@@ -248,13 +252,13 @@ function hasAngularPeersForHop(doc, floor, majorRange) {
   return (line.length ? [line[0]] : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
 }
 
-function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
+function chooseRelease(doc, floor, major, frameworkVersion, angularReleased, prerelease = false) {
   const verdictOf = (v) => judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased);
   // An installed release that already names this major stays put: the upgrade changes nothing it doesn't have to.
   if (floor && doc.versions[floor] && !doc.versions[floor].deprecated && verdictOf(floor) === 'declared') {
     return { version: floor, support: 'declared' };
   }
-  const candidates = eligibleReleases(doc, floor);
+  const candidates = eligibleReleases(doc, floor, prerelease);
   const declared = candidates.find((v) => verdictOf(v) === 'declared');
   if (declared) return { version: declared, support: 'declared' };
   const open = candidates.find((v) => verdictOf(v) === 'open');
@@ -420,7 +424,7 @@ async function broughtLicenses(registry, lib, before, after) {
 
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
-async function buildPlan({ projectDir, to }) {
+async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
@@ -441,8 +445,16 @@ async function buildPlan({ projectDir, to }) {
   if (!coreDoc || !compilerDoc) throw new PlanError('The registry has no @angular/core or @angular/compiler-cli.');
   const latestAngular = coreDoc['dist-tags'].latest;
   const latestMajor = semver.major(latestAngular);
-  const target = to ?? latestMajor;
-  if (target > latestMajor) throw new PlanError(`Angular ${target} isn't released yet. The latest stable version is ${latestAngular}.`);
+  // Angular's `next` tag is either a minor of the current major or the next major, depending on the month.
+  const nextTag = coreDoc['dist-tags'].next;
+  const prerelease = semver.valid(nextTag) && semver.prerelease(nextTag) && semver.gt(nextTag, latestAngular) ? nextTag : null;
+  const nextMajor = prerelease ? semver.major(prerelease) : null;
+  if (next && !prerelease) throw new PlanError(`Angular has no prerelease newer than ${latestAngular} right now, so --next has nothing to try.`);
+  if (next && to !== undefined && to !== nextMajor) throw new PlanError(`--next aims at Angular's next prerelease, ${prerelease}, so leave out --to or make it ${nextMajor}.`);
+  const target = to ?? (next ? nextMajor : latestMajor);
+  if (!next && target > latestMajor) {
+    throw new PlanError(`Angular ${target} isn't released yet. The latest stable version is ${latestAngular}.${nextMajor === target ? ` A prerelease, ${prerelease}, is out: plan with --next to try it.` : ''}`);
+  }
   if (target < currentMajor) throw new PlanError(`The project is on Angular ${currentMajor}, already past ${target}. This skill only moves forward.`);
 
   const plan = {
@@ -450,9 +462,12 @@ async function buildPlan({ projectDir, to }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
+    latestAngular, target, next: next ? prerelease : null, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
+  if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
+  const cliDoc = next ? await registry.get('@angular/cli') : null;
+  const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';
 
   // Which dependencies are tied to Angular? Read every one, because the name alone can't say.
   const names = Object.keys(project.deps).filter((n) => !isFramework(n));
@@ -500,11 +515,12 @@ async function buildPlan({ projectDir, to }) {
   let blockedAt = null;
   for (let major = currentMajor + 1; major <= target; major++) {
     const majorRange = `>=${major}.0.0 <${major + 1}.0.0`;
-    const frameworkVersion = semver.maxSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange);
+    const toPrerelease = Boolean(next) && major === nextMajor;
+    const frameworkVersion = toPrerelease ? prerelease : semver.maxSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange);
     if (!frameworkVersion) throw new PlanError(`The registry has no stable @angular/core ${major}.`);
-    const angularReleased = coreDoc.time?.[`${major}.0.0`] || coreDoc.time?.[semver.minSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange)];
+    const angularReleased = coreDoc.time?.[`${major}.0.0`] || coreDoc.time?.[semver.minSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange)] || coreDoc.time?.[frameworkVersion];
     const coreManifest = coreDoc.versions[frameworkVersion];
-    const compilerVersion = semver.maxSatisfying(stableOnly(Object.keys(compilerDoc.versions)), majorRange);
+    const compilerVersion = toPrerelease && compilerDoc.versions[prerelease] ? prerelease : semver.maxSatisfying(stableOnly(Object.keys(compilerDoc.versions)), majorRange);
     const compilerManifest = compilerDoc.versions[compilerVersion];
 
     const libs = [];
@@ -536,7 +552,7 @@ async function buildPlan({ projectDir, to }) {
         }
         continue;
       }
-      const choice = chooseRelease(doc, floor, major, frameworkVersion, angularReleased);
+      const choice = chooseRelease(doc, floor, major, frameworkVersion, angularReleased, toPrerelease);
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
       const manifest = doc.versions[choice.version];
       libs.push({
@@ -637,7 +653,9 @@ async function buildPlan({ projectDir, to }) {
       if (lib.from && valid.length) lib.newPeers = valid;
       if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
     }
-    const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
+    const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;
+    const command = [`${updateCommand(project)} ${framework}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {
@@ -692,7 +710,10 @@ async function buildPlan({ projectDir, to }) {
     for (const name of ['@angular/core', '@angular/cli']) {
       const have = project.installed(name)?.version;
       const doc = have ? await registry.get(name) : null;
-      const newest = doc ? semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`) : null;
+      const tagged = doc?.['dist-tags']?.next;
+      const newest = !doc ? null
+        : next ? (semver.valid(tagged) && semver.major(tagged) === currentMajor ? tagged : null)
+        : semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`);
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
     if (behind.length) {
@@ -726,7 +747,7 @@ function render(plan) {
       lines.push(`  Run: ${plan.patches.command}`);
     }
   }
-  else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.target} is reachable.`);
+  else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
   else lines.push(plan.reachable === semver.major(p.angular)
     ? `Result: BLOCKED. Angular ${plan.blockedAt} isn't possible today, so this project stays on ${plan.reachable} until a blocker below is resolved.`
     : `Result: BLOCKED at Angular ${plan.blockedAt}. Angular ${plan.reachable} is the highest version everything supports today.`);
@@ -757,18 +778,19 @@ function render(plan) {
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
 
-const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--json]
+const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--json]
 
 Works out how far an Angular app can upgrade today, and what is in the way. Changes nothing.
   --project  the project folder (default: the current folder)
   --to       the Angular major to aim for (default: the latest stable)
+  --next     aim for Angular's next prerelease instead, only when someone asks to try one
   --json     print the plan as JSON
 Exit codes: 0 the target is reachable or there is nothing to do, 2 blocked before the target, 1 no plan could be made.`;
 
 async function main() {
   let values;
   try {
-    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
+    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
   } catch (err) {
     throw new PlanError(`${err.message.split('.')[0]}.\n${USAGE}`);
   }
@@ -779,7 +801,7 @@ async function main() {
     to = Number(values.to);
     if (!Number.isInteger(to) || to < 2) throw new PlanError(`--to takes an Angular major version such as 22, not "${values.to}".`);
   }
-  const plan = await buildPlan({ projectDir, to });
+  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next) });
   process.stdout.write(`${values.json ? JSON.stringify(plan, null, 2) : render(plan)}\n`);
   process.exitCode = plan.status === 'blocked' ? 2 : 0;
 }

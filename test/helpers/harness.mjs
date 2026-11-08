@@ -141,11 +141,12 @@ export function runScript(script, args, { cwd, env = {} } = {}) {
   });
 }
 
-export async function plan(packages, proj, { to, text = false, registryOptions } = {}) {
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
+    if (next) args.push('--next');
     if (!text) args.push('--json');
     const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url } });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null };

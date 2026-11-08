@@ -95,6 +95,13 @@ test('the skill says what to do when the plan warns about a license', () => {
   assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /its license changes/);
 });
 
+test('the skill only aims at a prerelease when someone asks to try one', () => {
+  const rule = skill.split('\n').find((line) => line.includes('`--next`'));
+  assert.ok(rule, 'the skill has to say when to use --next');
+  assert.match(rule, /only then/);
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /--next/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

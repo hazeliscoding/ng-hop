@@ -1036,3 +1036,64 @@ test('a shared package the plan moves gets its license compared too', async () =
   assert.deepEqual(r.plan.licenseChanges, [{ major: 21, name: 'typescript', from: '5.8.3', to: '5.9.3', before: 'Apache-2.0', after: 'BUSL-1.1' }]);
 });
 
+// ---- --next ----------------------------------------------------------------------------------------------------
+
+function nextWorld(nextVersion, ...extra) {
+  const [core, compiler] = angular();
+  const at = '2026-10-30T00:00:00.000Z';
+  core.versions[nextVersion] = { name: '@angular/core', version: nextVersion, peerDependencies: { rxjs: '^6.5.3 || ^7.4.0' }, engines: { node: '>=18.0.0' } };
+  compiler.versions[nextVersion] = { name: '@angular/compiler-cli', version: nextVersion, peerDependencies: { typescript: '>=5.9 <7' } };
+  for (const doc of [core, compiler]) { doc.time[nextVersion] = at; doc['dist-tags'].next = nextVersion; }
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '21.0.0': {}, '22.0.0': {}, '22.2.0': {}, [nextVersion]: {} }, { next: nextVersion });
+  return [core, compiler, cli, typescript(), pkg('rxjs', { '7.8.2': {} }), ...extra];
+}
+const on22 = { deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, lock: { ...lockBase, '@angular/core': '22.2.0', '@angular/cli': '22.2.0' } };
+
+test('--next offers a minor prerelease of the current major as a patch, and says it is one', async () => {
+  const r = await plan(nextWorld('22.3.0-next.4'), app(on22), { next: true });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.status, 'already-there');
+  assert.equal(r.plan.next, '22.3.0-next.4');
+  assert.equal(r.plan.patches.command, 'npx --no-install ng update @angular/core@22.3.0-next.4 @angular/cli@22.3.0-next.4');
+  const text = await plan(nextWorld('22.3.0-next.4'), app(on22), { next: true, text: true });
+  assert.match(text.stdout, /prerelease/);
+});
+
+test('--next takes a prerelease of the next major as a hop of its own, and lets libraries use prereleases too', async () => {
+  const lib = pkg('ui-lib', { '22.0.0': { peer: '^22.0.0', at: '2026-06-01' }, '23.0.0-rc.0': { peer: '^23.0.0-0', at: '2026-10-31' } });
+  const stuck = pkg('old-lib', { '22.0.0': { peer: '^22.0.0', at: '2026-06-01' } });
+  const deps = { ...on22.deps, 'ui-lib': '^22.0.0' };
+  const lock = { ...on22.lock, 'ui-lib': '22.0.0' };
+  const r = await plan(nextWorld('23.0.0-rc.1', lib), app({ deps, lock }), { next: true });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.hops[0].major, 23);
+  assert.equal(r.plan.hops[0].angular, '23.0.0-rc.1');
+  assert.equal(libIn(r, 23, 'ui-lib').to, '23.0.0-rc.0');
+  assert.equal(r.plan.hops[0].command, 'npx --no-install ng update @angular/core@23.0.0-rc.1 @angular/cli@23.0.0-rc.1 ui-lib@23.0.0-rc.0');
+
+  const blocked = await plan(nextWorld('23.0.0-rc.1', lib, stuck), app({ deps: { ...deps, 'old-lib': '^22.0.0' }, lock: { ...lock, 'old-lib': '22.0.0' } }), { next: true });
+  assert.equal(blocked.code, 2);
+  assert.equal(blocked.plan.blockers[0].name, 'old-lib');
+});
+
+test('--next plans the stable majors below a prerelease major from stable releases', async () => {
+  const r = await plan(nextWorld('23.0.0-rc.1'), app({ deps: { ...base, '@angular/core': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0' } }), { next: true });
+  assert.deepEqual(r.plan.hops.map((h) => h.angular), ['22.2.0', '23.0.0-rc.1']);
+});
+
+test('without --next, a major with only a prerelease out says how to try it', async () => {
+  const r = await plan(nextWorld('23.0.0-rc.1'), app(on22), { to: 23 });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /Angular 23 isn't released/);
+  assert.match(r.stderr, /23\.0\.0-rc\.1/);
+  assert.match(r.stderr, /--next/);
+});
+
+test('--next with no prerelease newer than the latest release, or with another --to, makes no plan', async () => {
+  const none = await plan(world(), app({ deps: base, lock: lockBase }), { next: true });
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /no prerelease/);
+  const mismatch = await plan(nextWorld('23.0.0-rc.1'), app(on22), { next: true, to: 22 });
+  assert.equal(mismatch.code, 1);
+  assert.match(mismatch.stderr, /--next/);
+});
