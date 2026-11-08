@@ -59,6 +59,7 @@ Everything else gets ordinary care, but none of these three gets traded away for
 - **A scope with a registry of its own marks a library as the team's (2026-11-08).** *Why:* that's how a company publishes its packages (`@acme:registry=...`), and npm's own config already says it, so the plan keeps no list. *Gave up:* a company that serves everything, its own packages too, from one default registry gets no such hint.
 - **The skill raises a Node pin the repo carries (2026-11-08).** A dev container, `.nvmrc`, `engines` field or CI workflow below the new Angular's range is raised in that major's commit. *Why:* those are the team's machines, and the upgrade would pass here and fail there. M7's dev container pins Node 22.12, which Angular 22 refuses. *Gave up:* a change outside the app's code that nobody asked for, so it's named under hand fixes.
 - **The enterprise example lives in `examples/enterprise/`, as templates a setup script copies out (2026-11-08).** *Why:* the tutorial needs two repositories and a registry, which can't sit as git repositories inside this one, and anyone can rerun it from a clone. *Gave up:* the evals don't run it yet. A case could, with the registry started in CI.
+- **The video's source is in the repo, and the video isn't (2026-11-08).** `docs/video/enterprise/` keeps the narration, the scenes and the build scripts, and leaves out the voice, the timings and the render, which they make again. *Why:* being able to fix a line or a scene and render again is why it's built this way, and an eight-minute video would weigh down every clone. *Gave up:* making it again needs FFmpeg and a local Kokoro voice, and a render loads GSAP from a CDN.
 - **No unit test running stops the run, like a failing build (2026-11-08).** *Why:* on readme-wizard, one spec that didn't compile stopped Karma before any of its 20 specs ran, at the start and after all four majors, and the report called it one failing test. *Gave up:* one more question, on apps whose tests were already broken.
 
 ## Shipped
@@ -113,7 +114,7 @@ A company's app is rarely one package. This release takes one built like the rea
   - pnpm 12 holds back a release younger than its minimum release age, 24 hours by default, so the libraries' new 22.0.0 couldn't be installed at first. Claude Code's own safety check stopped the agent from relaxing that, and it asked. The troubleshooting guide covers it now.
   - Even exempted, the release still failed `ng update`, which applies the same age rule in its own resolver and ignores the exemptions. The agent found that in the Angular CLI's source, installed the exempted releases first and then updated Angular, with approval. The guide covers that too.
   - The agent missed the dev container's `FROM node:22.12.0`, and the container then refused Angular 22. The plan now names the repo's own Node pins below a major's range, wherever the repo keeps them.
-- [ ] Make a video tutorial from that run.
+- [x] Make a video tutorial from that run. It runs 7:52 in eight chapters, with captions and asides for newer developers and for team leads. Its source is in `docs/video/enterprise/`.
 
 **Done when:** the skill takes the libraries and then the app to Angular 22 from the Windows host, the dev container still builds and serves the app afterwards, and the video is made.
 
