@@ -55,12 +55,28 @@ test('a page that answers with an error fails', async () => {
   assert.equal(result.http, 500);
 });
 
+test('positive control: a module Vite cannot resolve on the first request fails, though the server was ready', async () => {
+  // Angular 22 with ngx-markdown: the page came back, rendered nothing, and the reason was only in the server's log.
+  const vite = `http.createServer((q, r) => { console.log('11:32:01 PM [vite] Pre-transform error: Failed to resolve import "marked-katex-extension" from "node_modules/.vite/deps/ngx-markdown.js". Does the file exist?'); r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root></app-root></body></html>'); }).listen(port, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + port + '/'));`;
+  const { code, result } = await check(fakeApp(vite), '--no-browser');
+  assert.equal(code, 1);
+  assert.equal(result.serve, 'ready');
+  assert.match(result.serverErrors.join(), /Failed to resolve import "marked-katex-extension"/);
+});
+
 test('the dev server gets the port through PORT too, which Angular 22 prefers to --port', async () => {
   const angular22 = "const at = Number(process.env.PORT || port);\nhttp.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root>hi</app-root></body></html>'); }).listen(at, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + at + '/'));";
   const p = fakeApp(angular22);
   const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir, env: { PORT: String(port + 500) } });
   assert.equal(r.code, 0, r.stdout);
   assert.equal(JSON.parse(r.stdout).http, 200);
+});
+
+test('a failed page with no error line shows the server\'s last lines instead', async () => {
+  const { code, result } = await check(fakeApp("http.createServer((q, r) => { console.log('something the patterns do not know went wrong'); r.writeHead(500); r.end('nope'); }).listen(port, '127.0.0.1', () => console.log('Compiled successfully.'));"), '--no-browser');
+  assert.equal(code, 1);
+  assert.deepEqual(result.serverErrors, []);
+  assert.match(result.serverLog.join('\n'), /something the patterns do not know went wrong/);
 });
 
 test('a project with no install says what to do', async () => {
