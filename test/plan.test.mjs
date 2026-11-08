@@ -969,3 +969,70 @@ test('a tag from the registry can\'t forge a line of the plan', async () => {
   const r = await plan(world(lib), app({ deps: { ...base, 'old-lib': '^20.0.0' }, lock: { ...lockBase, 'old-lib': '20.0.0' } }), { to: 21, text: true });
   assert.ok(!forgedLine(r.stdout), r.stdout);
 });
+
+// ---- Deprecated framework packages -------------------------------------------------------------------------------
+
+const ANIMATIONS_GONE = 'Use `animate.enter` and `animate.leave` instead.';
+const animations = (deprecatedFrom) => pkg('@angular/animations', Object.fromEntries(['20.0.0', '20.2.0', '21.0.0', '21.2.0', '22.0.0', '22.2.0'].map((v) => [v, deprecatedFrom && v >= deprecatedFrom ? { deprecated: ANIMATIONS_GONE } : {}])));
+const withAnimations = { deps: { ...base, '@angular/animations': '^20.0.0' }, lock: { ...lockBase, '@angular/animations': '20.0.0' } };
+
+test('a framework package the app uses that npm marks deprecated is named once, at the first major that installs it', async () => {
+  // @angular/animations is deprecated from 20.2 on, and ng update keeps moving it, so nothing else would say so.
+  const r = await plan(world(animations('20.2.0')), app(withAnimations));
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.plan.deprecations, [{ major: 21, name: '@angular/animations', version: '21.2.0', message: ANIMATIONS_GONE }]);
+  const text = await plan(world(animations('20.2.0')), app(withAnimations), { text: true });
+  const note = text.stdout.split('\n').find((l) => l.startsWith('Note:') && l.includes('@angular/animations'));
+  assert.ok(note && note.includes('deprecated') && note.includes('animate.enter'), text.stdout);
+  assert.ok(text.stdout.indexOf(note) < text.stdout.indexOf('Run:'));
+});
+
+test('a framework package that is not deprecated, or that the app does not use, says nothing and costs nothing', async () => {
+  const hits = [];
+  const r = await plan(world(animations(null)), app(withAnimations), { registryOptions: { hits } });
+  assert.deepEqual(r.plan.deprecations, []);
+  const none = [];
+  const unused = await plan(world(animations('20.2.0')), app({ deps: base, lock: lockBase }), { registryOptions: { hits: none } });
+  assert.deepEqual(unused.plan.deprecations, []);
+  assert.ok(!none.some((h) => h.includes('animations')), 'no request for a package the app does not declare');
+});
+
+// ---- What a moved library brings with it ------------------------------------------------------------------------
+
+const prime = (deps21, extra = {}) => pkg('primeng', {
+  '20.0.0': { peer: '^20.0.0', at: '2025-06-01', license: 'MIT', deps: { tslib: '^2.3.0', '@primeuix/styles': '^2.0.0' } },
+  '21.0.0': { peer: '^21.0.0', at: '2025-12-01', license: 'MIT', deps: deps21, ...extra },
+});
+const primeApp = { deps: { ...base, primeng: '^20.0.0' }, lock: { ...lockBase, primeng: '20.0.0' } };
+const brought = (r) => r.plan.licenseChanges.filter((c) => c.via);
+
+test('a new dependency under a license that is not a common open-source one is named, as PrimeNG 22 brings its license manager', async () => {
+  const manager = pkg('@primeui/license-manager', { '1.0.0': { license: 'SEE LICENSE IN LICENSE.md' }, '1.1.0': { license: 'SEE LICENSE IN LICENSE.md' } });
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', '@primeui/license-manager': '^1.0.0' }), manager, styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(brought(r), [{ major: 21, name: '@primeui/license-manager', via: 'primeng', from: null, to: '1.1.0', before: null, after: 'SEE LICENSE IN LICENSE.md' }]);
+  const text = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', '@primeui/license-manager': '^1.0.0' }), manager, styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21, text: true });
+  assert.match(text.stdout, /Note: .*primeng.*@primeui\/license-manager.*SEE LICENSE IN LICENSE\.md/);
+});
+
+test('a dependency whose range moves gets its license compared, like the library itself', async () => {
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' }, '3.1.0': { license: 'SEE LICENSE IN LICENSE.md' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^3.0.0' }), styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21 });
+  assert.deepEqual(brought(r), [{ major: 21, name: '@primeuix/styles', via: 'primeng', from: '2.0.3', to: '3.1.0', before: 'MIT', after: 'SEE LICENSE IN LICENSE.md' }]);
+});
+
+test('dependencies that keep their range, or arrive under a permissive license, say nothing and cost nothing', async () => {
+  const hits = [];
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', 'left-pad': '^1.3.0' }), styles, pkg('tslib', { '2.8.1': { license: '0BSD' } }), pkg('left-pad', { '1.3.0': { license: '(MIT OR Apache-2.0)' } })), app(primeApp), { to: 21, registryOptions: { hits } });
+  assert.deepEqual(brought(r), []);
+  assert.ok(!hits.some((h) => h.startsWith('tslib') || h.startsWith('@primeuix/styles')), `unchanged ranges are not looked up: ${hits.join(' ')}`);
+});
+
+test('a shared package the plan moves gets its license compared too', async () => {
+  const ts = pkg('typescript', { '5.8.3': { license: 'Apache-2.0' }, '5.9.3': { license: 'BUSL-1.1' }, '6.0.3': { license: 'Apache-2.0' } });
+  const r = await plan([...angular(), ts, pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase }), { to: 21 });
+  assert.deepEqual(r.plan.licenseChanges, [{ major: 21, name: 'typescript', from: '5.8.3', to: '5.9.3', before: 'Apache-2.0', after: 'BUSL-1.1' }]);
+});
+

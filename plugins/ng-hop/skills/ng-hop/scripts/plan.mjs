@@ -79,15 +79,25 @@ function registryClient(config, cwd) {
     }
   }
 
-  async function fetchOnce(name, full) {
-    const url = baseFor(name) + name.replace('/', '%2F');
-    const accept = full ? 'application/json' : 'application/vnd.npm.install-v1+json';
+  async function viaNpmRelease(name, version) {
+    try {
+      const { stdout } = await runNpm(['view', `${name}@${version}`, '--json'], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      const found = [].concat(stdout.trim() ? JSON.parse(stdout) : []);
+      return found[found.length - 1] || null;
+    } catch (err) {
+      const text = `${err.stdout || ''}${err.message || ''}`;
+      if (/E404/.test(text)) return null;
+      throw new PlanError(`Could not read ${name}@${version} from the registry through npm: ${text.split('\n')[0].slice(0, 200)}`);
+    }
+  }
+
+  async function fetchOnce(url, accept, onAuthFailure) {
     let lastError;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const res = await fetch(url, { headers: { accept } });
         if (res.status === 404) return null;
-        if (res.status === 401 || res.status === 403) return viaNpm(name);
+        if (res.status === 401 || res.status === 403) return onAuthFailure();
         if (res.ok) return await res.json();
         lastError = new Error(`HTTP ${res.status}`);
       } catch (err) {
@@ -97,12 +107,14 @@ function registryClient(config, cwd) {
     throw new PlanError(`Could not reach ${url}: ${lastError?.cause?.code || lastError?.message}. A plan needs the registry, so none was made.`);
   }
 
-  const get = (name, full = false) => {
-    const key = `${name}|${full}`;
-    if (!cache.has(key)) cache.set(key, fetchOnce(name, full));
+  const cached = (key, load) => {
+    if (!cache.has(key)) cache.set(key, load());
     return cache.get(key);
   };
-  return { get };
+  const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
+  // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
+  const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
+  return { get, release };
 }
 
 async function mapLimited(items, fn) {
@@ -355,18 +367,55 @@ async function readLicenseFile(manifest) {
 
 // npm doesn't warn about this, and the build, tests and page all still pass. PrimeNG went from MIT to a commercial
 // license with "SEE LICENSE IN LICENSE.md" as its field on both sides, so that form needs the files themselves.
-async function licenseChange(doc, { name, from, to }) {
-  const [before, after] = [doc?.versions?.[from], doc?.versions?.[to]];
+async function licenseChange({ name, from, to }, before, after) {
   if (!before || !after) return { name, unread: true };
   const fields = [before, after].map(licenseField);
   const comparable = (text) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (comparable(fields[0]) !== comparable(fields[1])) return { name, from, to, before: plainLine(fields[0]) || 'none', after: plainLine(fields[1]) || 'none' };
+  if (comparable(fields[0]) !== comparable(fields[1])) {
+    // A field that only points at a file says nothing on its own, so the file's title stands in for it.
+    const shown = async (manifest, field) => (/^see license/i.test(field) && licenseTitle((await readLicenseFile(manifest).catch(() => null)) || '')) || plainLine(field) || 'none';
+    return { name, from, to, before: await shown(before, fields[0]), after: await shown(after, fields[1]) };
+  }
   if (!/^see license/i.test(fields[1])) return null;
   const files = await Promise.all([before, after].map((manifest) => readLicenseFile(manifest).catch(() => null)));
   if (!files[0] || !files[1]) return { name, unread: true };
   // Letters only, so a new copyright year isn't a new license.
   const words = (text) => text.toLowerCase().replace(/[^a-z]/g, '');
   return words(files[0]) === words(files[1]) ? null : { name, from, to, before: licenseTitle(files[0]), after: licenseTitle(files[1]) };
+}
+
+// SPDX ids for permissive licenses. A new dependency under anything else gets named, copyleft included, because that
+// comes with obligations of its own.
+const PERMISSIVE = new Set(['mit', 'mit-0', 'isc', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', '0bsd', 'unlicense', 'cc0-1.0', 'blueoak-1.0.0', 'zlib', 'python-2.0', 'cc-by-3.0', 'cc-by-4.0']);
+const permissive = (field) => {
+  const ids = field.split(/\s+(?:or|and|with)\s+|[()\s]+/i).filter(Boolean).map((id) => id.toLowerCase());
+  return ids.length > 0 && (/\band\b/i.test(field) ? ids.every((id) => PERMISSIVE.has(id)) : ids.some((id) => PERMISSIVE.has(id)));
+};
+
+// A moved library can bring packages under licenses of their own: PrimeNG 22 newly depends on a commercial license
+// manager. Only new dependencies and ones whose range changed get looked up, and there are usually none.
+async function broughtLicenses(registry, lib, before, after) {
+  const was = before?.dependencies || {};
+  const now = after?.dependencies || {};
+  const changed = Object.keys(now).filter((dep) => VALID_NAME.test(dep) && was[dep] !== now[dep] && semver.validRange(now[dep]));
+  return mapLimited(changed, async (dep) => {
+    try {
+      const doc = await registry.get(dep);
+      const stable = doc ? stableOnly(Object.keys(doc.versions)) : [];
+      const to = semver.maxSatisfying(stable, now[dep]);
+      const from = was[dep] && semver.validRange(was[dep]) ? semver.maxSatisfying(stable, was[dep]) : null;
+      if (!to) return { name: dep, via: lib.name, unread: true };
+      if (from === to) return null;
+      const [old, next] = await Promise.all([from ? registry.release(dep, from) : null, registry.release(dep, to)]);
+      if (from) { const change = await licenseChange({ name: dep, from, to }, old, next); return change && { ...change, via: lib.name }; }
+      const field = licenseField(next);
+      if (permissive(field)) return null;
+      const file = /^see license/i.test(field) ? await readLicenseFile(next).catch(() => null) : null;
+      return { name: dep, via: lib.name, from: null, to, before: null, after: (file && licenseTitle(file)) || plainLine(field) || 'none' };
+    } catch {
+      return { name: dep, via: lib.name, unread: true };
+    }
+  });
 }
 
 // ---- The plan ---------------------------------------------------------------------------------------------------
@@ -401,7 +450,7 @@ async function buildPlan({ projectDir, to }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [],
+    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
 
@@ -599,14 +648,39 @@ async function buildPlan({ projectDir, to }) {
     if (blockedAt === null) {
       plan.hops.push(hop);
       plan.reachable = major;
-      // shortcut: only the libraries the plan moves, which already have full registry documents. Shared packages such as
-      // TypeScript would need a very large download each. Check those too if a shared package ever changes its license.
-      const compared = await mapLimited(moved.filter((lib) => lib.from), (lib) => licenseChange(docs.get(lib.name), lib));
-      for (const change of compared.filter(Boolean)) {
-        if (change.unread) { plan.unchecked.push({ name: change.name, reason: 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' }); continue; }
+      const releases = async (name, from, to) => Promise.all([registry.release(name, from), registry.release(name, to)]).catch(() => [null, null]);
+      const compared = await Promise.all([
+        ...moved.filter((lib) => lib.from).map(async (lib) => {
+          const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+          return [await licenseChange(lib, before, after), ...await broughtLicenses(registry, lib, before, after)];
+        }),
+        ...changes.filter((s) => s.from).map(async (s) => [await licenseChange(s, ...await releases(s.name, s.from, s.to))]),
+      ]);
+      const brought = new Map();
+      for (const change of compared.flat().filter(Boolean)) {
+        if (change.unread) {
+          plan.unchecked.push({ name: change.name, reason: change.via ? `${change.via} brings it, and its license could not be read` : 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' });
+          continue;
+        }
         plan.licenseChanges.push({ major, ...change });
-        plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
+        if (change.via) brought.set(change.via, [...(brought.get(change.via) || []), change]);
+        else plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
       }
+      // One line per library, however many packages it brings, so the plan stays readable.
+      for (const [via, list] of brought) {
+        const each = list.map((c) => `${c.name} ${c.to} under "${c.after}"${c.before ? ` (${c.from} was "${c.before}")` : ''}`).join(', ');
+        plan.notes.push(`Angular ${major} moves ${via}, which brings packages whose license changed or isn't a common open-source one: ${each}. Read those too, and ask before going to Angular ${major}.`);
+      }
+
+      // ng update moves every framework package along with core, so a deprecation shows nowhere unless the plan says so.
+      const framework = Object.keys(project.deps).filter((name) => isFramework(name) && VALID_NAME.test(name) && !plan.deprecations.some((d) => d.name === name));
+      const manifests = await mapLimited(framework, (name) => registry.release(name, frameworkVersion).catch(() => null));
+      framework.forEach((name, i) => {
+        const message = manifests[i]?.deprecated;
+        if (!message) return;
+        plan.deprecations.push({ major, name, version: frameworkVersion, message: String(message).slice(0, 300) });
+        plan.notes.push(`Angular ${major} still installs ${name}, which npm marks deprecated: "${String(message).slice(0, 200)}" ng update moves it anyway, so nothing breaks now, but it's worth planning to move off it.`);
+      });
     }
   }
 
