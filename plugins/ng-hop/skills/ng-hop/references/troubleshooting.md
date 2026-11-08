@@ -119,7 +119,7 @@ This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versi
 `smoke.mjs` exists for this. Read its `server error` lines, or its `server log` lines when no error line matched.
 
 - **`Failed to resolve import "marked-katex-extension"` from Vite, or `Could not resolve "marked-katex-extension"` from esbuild (or `mermaid`, `katex`, `clipboard`):** the page comes back but renders nothing, with a 500 for `main.js` in the console. `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
-- **The server starts, but nothing answers on its port:** from Angular 22, `@angular/build`'s dev server takes the `PORT` environment variable over `--port`. `smoke.mjs` sets both. When you run `ng serve` yourself, unset `PORT` or give it the same port.
+- **The server starts, but nothing answers on its port:** from Angular 22, `@angular/build`'s dev server takes the `PORT` environment variable over `--port`, and says `Environment variable "PORT" detected. Using port <n>.` `smoke.mjs` sets both. When you run `ng serve` yourself, unset `PORT` or give it the same port.
 - **Anything else:** check whether the same error appears in the `smoke.mjs` result from before this major. If it does, it isn't from this upgrade.
 
 ## `No matching export in "node_modules/@angular/cdk/fesm2022/collections.mjs" for import "_VIEW_REPEATER_STRATEGY"`
@@ -161,7 +161,7 @@ A migration can also reformat whole files. Angular 21's control-flow migration r
 - **`CHROME_BIN`:** set it if Chrome isn't found.
 - **A spec that fails to compile because of an API change** is the upgrade's to fix. A spec that already failed in step 3 isn't.
 - **`Unknown argument: watch`:** the project has no `test` target in `angular.json`. Run what its `package.json` scripts and CI run instead, at the git root too in a monorepo, and say which in your report.
-- **The suite stops before any spec runs,** as with Karma's `Found 1 load error` from one spec that doesn't compile: no unit test gives any signal, before or after the upgrade. `SKILL.md` step 3 treats that like a failing build, so ask the person before going on.
+- **The suite stops before any spec runs,** as with Karma's `Found 1 load error` from one spec that doesn't compile: no unit test gives any signal, before or after the upgrade. `SKILL.md` step 3 treats that like a failing build, so ask the person before going on. Read the lines above the load error first: `Cannot load browser` points to the `--browsers` flag, not to a spec.
 
 ## Resuming after an interruption
 

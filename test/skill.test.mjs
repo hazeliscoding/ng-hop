@@ -95,6 +95,14 @@ test('the skill says what to do when the plan warns about a license', () => {
   assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /its license changes/);
 });
 
+test('the skill stops to ask when no unit test can run, as the roadmap decided', () => {
+  // On readme-wizard one spec that didn't compile kept Karma from running any of 20, and the report called it one failure.
+  const rule = skill.split('\n').find((line) => line.includes('If no test can run at all'));
+  assert.ok(rule, 'step 3 has to say what to do when no test can run');
+  assert.match(rule, /like a failing build: say so and ask/);
+  assert.match(rule, /Found 1 load error/);
+});
+
 test('the skill only aims at a prerelease when someone asks to try one', () => {
   const rule = skill.split('\n').find((line) => line.includes('`--next`'));
   assert.ok(rule, 'the skill has to say when to use --next');

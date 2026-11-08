@@ -37,14 +37,14 @@ It reads `package.json`, the lockfile and npm, and changes nothing. Exit 0 means
 Show the person the result in a few lines: where they can get to, what blocks anything further, and which libraries are unconfirmed.
 
 - **If they only asked a question** ("how far can I go?", "does PrimeNG support 22?", "is this upgrade safe?"), answer from the plan and stop. Change nothing.
-- **If it's already on the target major with patch releases available,** and they asked to upgrade, install dependencies as in step 3, run the command it prints, check it as in step 4f, and commit. That's the whole job.
+- **If it's already on the target major with patch releases available,** and they asked to upgrade, create the branch as the paragraph below says, install dependencies as in step 3, run the command it prints, check it as in step 4f, and commit. That's the whole job.
 - **If the plan is blocked,** carry on up to the highest reachable major, then stop as step 5 describes. Say that's what you're doing.
 - **A note that a library's license changes on a major,** or that a library brings packages under a license that changed or isn't a common open-source one: the build, tests and app check all pass after a change like this, so the plan is the only warning they'll get, and it can cost them money. Read both license files (`npm pack <package>@<version>` in a temporary folder, then unpack it with `tar`). If only names or dates differ, say so and carry on. If the terms differ, go as far as the major before it and stop, even if they asked for the later one, because they can't have agreed to a license they haven't seen. Quote the new license's own words, and ask whether to accept it, stay where they are, or replace the library. If they accept, carry on with that major. Don't add a key or look for a way around the license's check. Check the library's companion packages too, such as `@primeuix/themes` with PrimeNG, because the plan only compares what it moves. If they only asked a question, tell them in your answer.
 - **`Node: too-old` on a major:** `ng` will refuse to run. Stop before that major and ask them to switch Node. Don't switch it yourself, since `nvm use` changes it for the whole machine on Windows. `unsupported` means Node is newer than Angular lists: mention it and carry on while the checks pass.
 - **An Nx workspace:** the plan says so. Use `nx migrate` for the framework packages, and the plan for the library facts.
 - **They asked to try a prerelease** (an RC, Angular's `next`, or a major the plan says has a prerelease out): plan with `--next`, and only then, because nothing else should land on a version that isn't meant for production. The rest works the same way, one committed major at a time. Say in your report that it's a prerelease, and which libraries only accept it through a prerelease of their own.
 
-Before changing anything, if you're on the default branch, create `upgrade/angular-<major>` for the major this run will reach: the target, or the ceiling when the plan is blocked. On any other branch, stay there. Never push.
+Before changing anything, if you're on the default branch, create `upgrade/angular-<major>`, named for the last major this run will commit: the target, or where the plan's ceiling, a license change or Node stops it. On any other branch, stay there. Never push.
 
 ## 3. Record the starting point
 
@@ -58,7 +58,7 @@ node $SCRIPTS/smoke.mjs          # runs the dev server, and renders the page in 
 
 Keep the exact results. Anything failing now isn't caused by the upgrade, so it stays out of the upgrade: don't fix it, and don't count it against a major. Report it at the end. If the build itself fails here, stop and ask, because nothing after this point could be told apart from what was already broken.
 
-With no `test` target in `angular.json`, `ng test` stops with `Unknown argument: watch`: run what the project's `package.json` scripts and CI run instead, at the git root too in a monorepo, and say which. If no test can run at all, because there are none or the suite stops before any spec runs (Karma's `Found 1 load error`), the upgrade would go untested. Treat that like a failing build: say so, and ask whether to fix it first in its own commit or go on with the build and app check only.
+With no `test` target in `angular.json`, `ng test` stops with `Unknown argument: watch`. Run the test command the project's `package.json` scripts or CI use instead, at the git root too in a monorepo, through `npm test`, `npm run <script>` or `npx --no-install`, never a deploy or publish step, and say which. If no test can run at all, because there are none or the suite stops before any spec runs (Karma's `Found 1 load error`), the upgrade would go untested, so treat it like a failing build: say so and ask. When one broken spec stops the suite, they can have it fixed first in its own commit, the one exception to leaving what fails here alone. Otherwise they can have you go on with the build and app check only.
 
 ## 4. Upgrade one major at a time
 
@@ -81,7 +81,7 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 **d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error. If `git diff --stat` shows a migration re-indented whole files, read its "Whole files show as changed" section now, before any hand fix lands in them.
 
 **e. Finish the major:**
-- Install anything the re-run plan lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
+- Install anything the plan from step (a) lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
 - Do the guide's remaining steps that apply.
 - Read what each library's new major changed, even if nothing broke: its changelog in `node_modules/<package>`, or when it ships none, the release notes or `CHANGELOG.md` in the repository the plan names, for every major crossed. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report, and so does a library `ng update` took to a later major than the plan named.
 - Fix what the upgrade broke. When a library's own major change breaks your code, read that library's changelog or migration guide instead of guessing at its API.
@@ -119,7 +119,7 @@ Keep it short and lead with the result:
 An upgrade diff is already hard to review, and changes nobody asked for are the hardest part of it. Each of these looks helpful in the moment and costs the reviewer later:
 
 - **No optional migrations** (`ng update --name ...`) and no moving to signals, standalone or new control flow, unless the major can't build without it. List them in the report instead.
-- **Tests stay as they are** unless the upgrade itself broke them. Never delete a test or loosen an assertion to get to green. If you do change a spec because an API changed, say so under hand fixes.
+- **Tests stay as they are** unless the upgrade itself broke them or the person asks. Never delete a test or loosen an assertion to get to green. If you do change a spec because an API changed, say so under hand fixes.
 - **No unrelated bumps or cleanups:** no `npm audit fix`, no newer versions of libraries the plan leaves alone, no reformatting.
 - **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions`, `peerDependencyRules` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
 - **No approving a package's install script** without the person's approval. It runs that package's code on every install.
