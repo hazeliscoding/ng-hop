@@ -107,9 +107,12 @@ Met on 2026-11-08. With the skill: yarn 16/16, bun 16/16 and the catalog 14/14, 
 A company's app is rarely one package. This release takes one built like the real thing from Angular 21 to 22, and turns the run into a tutorial. The video is for developers who are new to agentic coding but not to development, and should still work for juniors and seniors.
 
 - [x] A fixture: an Angular 21 app on the pnpm toolchain, with internal UI libraries whose peer ranges stop at Angular 21, so they have to reach 22 before the app can. It's `examples/enterprise/`: `acme-ui`, `acme-portal` and a local registry.
-- [ ] Set up for a dev container, and upgraded from the Windows host, not inside the container. The portal has one, pinned to Node 22.12; the upgrade from the host is next.
+- [x] Set up for a dev container, and upgraded from the Windows host, not inside the container. Rebuilt afterwards, the container runs Node 22.23.4, builds the app and serves it.
 - [x] When a blocking library belongs to the person, offer to upgrade it first, in dependency order, besides waiting, replacing or forcing.
-- [ ] Take it to Angular 22 with the skill: the libraries first, then the app.
+- [x] Take it to Angular 22 with the skill: the libraries first, then the app. Claude Code did it in six turns from the Windows host, for $7.62. What it ran into, and what the skill learned from it:
+  - pnpm 12 holds back a release younger than its minimum release age, 24 hours by default, so the libraries' new 22.0.0 couldn't be installed at first. Claude Code's own safety check stopped the agent from relaxing that, and it asked. The troubleshooting guide covers it now.
+  - Even exempted, the release still failed `ng update`, which applies the same age rule in its own resolver and ignores the exemptions. The agent found that in the Angular CLI's source, installed the exempted releases first and then updated Angular, with approval. The guide covers that too.
+  - The agent missed the dev container's `FROM node:22.12.0`, and the container then refused Angular 22. The plan now names the repo's own Node pins below a major's range, wherever the repo keeps them.
 - [ ] Make a video tutorial from that run.
 
 **Done when:** the skill takes the libraries and then the app to Angular 22 from the Windows host, the dev container still builds and serves the app afterwards, and the video is made.
