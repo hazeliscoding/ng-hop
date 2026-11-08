@@ -150,7 +150,9 @@ Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js
 
 ## Whole files show as changed
 
-Migrations can rewrite a file with different line endings, mostly on Windows. Compare `git diff --stat` with `git diff --ignore-cr-at-eol --stat`. If the second is much smaller, restore the original endings before committing, because otherwise real changes get buried. Follow `.gitattributes` if the repo has one.
+Migrations and package managers write their own line endings on any OS, and can drop a file's final newline, so a repo that commits CRLF gets whole files back in LF. Compare `git diff --stat` with `git diff --ignore-cr-at-eol --stat`. If the second is much smaller, run `eol.mjs`: it puts back each changed file's endings and final newline as git checks the file out, following `.gitattributes`, and changes nothing else.
+
+A migration can also reformat whole files. Angular 21's control-flow migration re-indents every template it converts, because its `format` option is on by default. Don't rebuild the files from the previous version by hand, since a reviewer has nothing to check that against. Restore those templates from the last commit and run `npx --no-install ng generate @angular/core:control-flow --format=false` in the same major, which converts them without re-indenting. For a migration with no such option, keep its output. Either way, tell reviewers to read the diff with `git diff -w`.
 
 ## Tests that won't run
 

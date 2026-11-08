@@ -88,7 +88,7 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 
 If a failure won't yield to a reasonable effort, stop and ask. Say what you tried, and don't commit a broken major, since every commit in this history has to be safe to stop on.
 
-**g. Review your own diff.** Run `git diff --stat`, and look for files you didn't mean to touch and for whole-file changes from line endings. Keep the diff to what this major needed.
+**g. Review your own diff.** Run `node $SCRIPTS/eol.mjs`, which puts back each changed file's line endings and final newline as the repo has them, then `git diff --stat`. Look for files you didn't mean to touch, and keep the diff to what this major needed. Keep migration output as the migration wrote it, because a hand rewrite leaves the reviewer nothing to check it against. If a migration reformatted whole files, read `references/troubleshooting.md`.
 
 **h. Commit,** following the repo's commit convention, with one commit per major. For example `chore(deps): upgrade to Angular 21`, with a body listing the versions moved and any fixes made by hand, since reviewers skim tool output but need to read hand fixes. Then go back to (a).
 
