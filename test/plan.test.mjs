@@ -798,6 +798,10 @@ test('an app already on the target still hears about a Node pin below its range'
   assert.deepEqual(r.plan.nodePins, { range: A22, pins: [{ file: '.devcontainer/Dockerfile', value: 'node:22.12.0-bookworm' }] });
   const text = await plan(nodeWorld(22), app(options), { to: 22, text: true });
   assert.ok(text.stdout.includes(`\n  Node pins below what Angular 22 needs (${A22}), in the repo: .devcontainer/Dockerfile (node:22.12.0-bookworm)\n`), text.stdout);
+  // A dev container on a Node inside the range has nothing to raise.
+  const fits = await plan(nodeWorld(22), app({ ...options, files: { ...git, '.devcontainer/Dockerfile': 'FROM node:24-bookworm\n' } }), { to: 22 });
+  assert.equal(fits.plan.status, 'already-there');
+  assert.equal(fits.plan.nodePins, undefined);
 });
 
 test('an app below the repo root gets the pins kept at the root too', async () => {
