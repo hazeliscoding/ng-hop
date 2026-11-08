@@ -183,6 +183,14 @@ test('the skill raises the Node pins the plan names when the app is already on t
   assert.match(already, /Node pins/);
 });
 
+test('the skill looks for Node pins past the files the plan reads', () => {
+  // The plan reads a fixed set of files, and passes over a version it can't read, such as lts/iron in .nvmrc. An agent
+  // that took its list as complete would repeat the enterprise run's missed dev container.
+  assert.match(step('e'), /Raise each Node pin the plan lists/, 'positive control: this is the step that raises pins');
+  assert.match(step('e'), /search the repo for other pins/);
+  assert.match(step('e'), /where you looked/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
