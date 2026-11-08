@@ -72,7 +72,7 @@ With no `test` target in `angular.json`, `ng test` stops with `Unknown argument:
 node $SCRIPTS/guide.mjs --from <N-1> --to <N>
 ```
 
-Most steps won't apply to this app. Search the code for what each one mentions instead of assuming. Do the "before" steps that apply. If the script can't reach the guide, read the page it names and say so in your report.
+Most steps won't apply to this app. Search the code for what each one mentions instead of assuming, and check which builder `angular.json` uses, since some steps are for `@angular/build` or the older `@angular-devkit/build-angular` only. Do the "before" steps that apply. If the script can't reach the guide, read the page it names and say so in your report.
 
 **c. Run the plan's `Run:` command exactly as printed.** It names Angular and every library that has to move, because `ng update` checks peers against everything it's about to install. Naming them together is what makes `--force` unnecessary. The earlier commit means the tree is clean, so `--allow-dirty` isn't needed either.
 
