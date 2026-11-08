@@ -369,16 +369,20 @@ function describeBlocker(doc, name, floor, major, frameworkVersion, angularRelea
 
 // ---- Peers shared across the hop: TypeScript, RxJS, and packages a library needs alongside it ----------------
 
-function minimalBump(doc, ranges, floor) {
+// Stable releases that aren't deprecated or past `latest`, inside every range and from `floor` up, oldest first.
+function usableReleases(doc, ranges, floor) {
   const latest = doc['dist-tags']?.latest;
-  const pool = stableOnly(Object.keys(doc.versions)).filter((v) => {
+  return stableOnly(Object.keys(doc.versions)).filter((v) => {
     if (doc.versions[v].deprecated) return false;
     if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest)) return false;
+    if (floor && semver.lt(v, floor)) return false;
     return ranges.every((r) => semver.satisfies(v, r, { includePrerelease: true }));
   }).sort(semver.compare);
-  const usable = floor ? pool.filter((v) => semver.gte(v, floor)) : pool;
+}
+
+// The lowest minor that works, at its newest patch: the smallest move that gets its fixes.
+function minimalBump(usable) {
   if (usable.length === 0) return null;
-  // The lowest minor that works, at its newest patch: the smallest move that gets its fixes.
   const lowest = usable[0];
   const sameMinor = usable.filter((v) => semver.major(v) === semver.major(lowest) && semver.minor(v) === semver.minor(lowest));
   return sameMinor[sameMinor.length - 1];
@@ -402,10 +406,14 @@ async function resolveShared({ project, registry, requirements, current, coupled
     if (!declared && peer === 'rxjs') continue;
     if (have && ranges.every((r) => semver.satisfies(have, r, { includePrerelease: true }))) continue;
     const doc = await registry.get(peer);
-    const pick = doc ? minimalBump(doc, ranges, have) : null;
+    const usable = doc ? usableReleases(doc, ranges, have) : [];
+    const pick = minimalBump(usable);
     if (!pick) { conflicts.push({ name: peer, have, wants }); continue; }
-    // ng update takes the newest release in these ranges, so `to` is the smallest move and anything in them fits.
-    changes.push({ name: peer, from: have, to: pick, ranges: [...new Set(ranges)], neededBy: [...new Set(wants.map((w) => w.by))] });
+    // ng update takes the newest release in these ranges, so `to` is the smallest move, `newest` what ng update may
+    // install instead, and anything in the ranges fits. A shared package can cross a major, so it names its repository.
+    const newest = usable[usable.length - 1];
+    const repository = repositoryUrl(await registry.release(peer, pick).catch(() => null));
+    changes.push({ name: peer, from: have, to: pick, ...(newest !== pick ? { newest } : {}), ranges: [...new Set(ranges)], ...(repository ? { repository } : {}), neededBy: [...new Set(wants.map((w) => w.by))] });
     current[peer] = pick;
   }
   return { changes, conflicts };
@@ -771,7 +779,11 @@ async function buildPlan({ projectDir, to, next = false }) {
           const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
           return [await licenseChange(lib, before, after), ...await broughtLicenses(registry, lib, before, after)];
         }),
-        ...changes.filter((s) => s.from).map(async (s) => [await licenseChange(s, ...await releases(s.name, s.from, s.to))]),
+        ...changes.filter((s) => s.from).map(async (s) => {
+          const change = await licenseChange(s, ...await releases(s.name, s.from, s.to));
+          // ng update may install the newest release that fits instead of the plan's pick, so that one is compared too.
+          return [change ?? (s.newest ? await licenseChange({ ...s, to: s.newest }, ...await releases(s.name, s.from, s.newest)) : null)];
+        }),
       ]);
       const brought = new Map();
       for (const change of compared.flat().filter(Boolean)) {

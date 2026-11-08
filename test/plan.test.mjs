@@ -357,14 +357,28 @@ test('TypeScript that already fits stays put', async () => {
 
 test('a library needing an extra package brings it along when the project declares it', async () => {
   const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0 || ^18.0.0' } } });
-  const marked = pkg('marked', { '15.0.0': {}, '17.0.0': {}, '17.0.2': {}, '18.0.0': {} });
+  // The registry leaves `repository` out of a package's summary, so the shared line has to read it from the release.
+  const repository = { type: 'git', url: 'git+https://github.com/markedjs/marked.git' };
+  const marked = pkg('marked', { '15.0.0': { repository }, '17.0.0': { repository }, '17.0.2': { repository }, '18.0.0': { repository } });
   const options = { deps: { ...base, 'ngx-markdown': '^20.0.0', marked: '^15.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0', marked: '15.0.0' } };
   const r = await plan(world(md, marked), app(options), { to: 21 });
-  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === 'marked').to, '17.0.2');
+  const line = r.plan.hops[0].shared.find((s) => s.name === 'marked');
+  assert.equal(line.to, '17.0.2');
   // On readme-wizard, ng update put marked on 18 where the plan said 17: both fit, and the line says so.
-  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === 'marked').ranges, ['^17.0.0 || ^18.0.0']);
+  assert.deepEqual(line.ranges, ['^17.0.0 || ^18.0.0']);
+  assert.equal(line.newest, '18.0.0', 'what ng update may install instead');
   const text = await plan(world(md, marked), app(options), { to: 21, text: true });
-  assert.match(text.stdout, /marked: 15\.0\.0 -> 17\.0\.2, fits \^17\.0\.0 \|\| \^18\.0\.0; needed by ngx-markdown/);
+  assert.match(text.stdout, /marked: 15\.0\.0 -> 17\.0\.2, fits \^17\.0\.0 \|\| \^18\.0\.0; needed by ngx-markdown; repository: https:\/\/github\.com\/markedjs\/marked$/m);
+});
+
+test('a license change at the newest release that fits is caught, though the plan picks an older one', async () => {
+  // ng update installs the newest release in the peer range, and the skill keeps it, so the plan's own pick can't be
+  // the only one compared.
+  const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0 || ^18.0.0' } } });
+  const marked = pkg('marked', { '15.0.0': { license: 'MIT' }, '17.0.2': { license: 'MIT' }, '18.0.0': { license: 'BUSL-1.1' } });
+  const r = await plan(world(md, marked), app({ deps: { ...base, 'ngx-markdown': '^20.0.0', marked: '^15.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0', marked: '15.0.0' } }), { to: 21 });
+  assert.equal(r.plan.hops[0].shared.find((s) => s.name === 'marked').to, '17.0.2');
+  assert.ok(r.plan.licenseChanges.some((c) => c.name === 'marked' && c.to === '18.0.0' && c.after === 'BUSL-1.1'), JSON.stringify(r.plan.licenseChanges));
 });
 
 test('a peer two libraries newly need gets a version that fits both, whichever comes first', async () => {
