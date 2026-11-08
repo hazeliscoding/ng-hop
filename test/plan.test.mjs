@@ -217,7 +217,7 @@ test('a deprecated library that npm still lets through stays unconfirmed, and th
   assert.match(text.stdout, /DEPRECATED on npm: "This package has been deprecated"/);
 });
 
-test('a blocker from a scope with a registry of its own is likely the team\'s, so the plan gives the order to upgrade it in', async () => {
+test('a blocker from a scope with a registry of its own may be the team\'s, so the plan gives the order to upgrade it in', async () => {
   // Acme's libraries come from the company registry and stop at Angular 20, so the app is waiting on its own team.
   // forms needs theme, so theme goes first, though forms comes first by name.
   const theme = pkg('@acme/theme', { '20.4.0': { peer: '^20.0.0', at: '2025-09-01' } });
@@ -229,8 +229,8 @@ test('a blocker from a scope with a registry of its own is likely the team\'s, s
   assert.ok(r.plan.blockers.every((b) => /^http:\/\/127\.0\.0\.1:\d+\/$/.test(b.ownRegistry)), JSON.stringify(r.plan.blockers));
 
   const text = (await plan(world(), app(options), { to: 21, text: true, own: { scope: '@acme', packages: [theme, forms] } })).stdout;
-  assert.match(text, /Note: @acme\/theme and @acme\/forms come from your own registry\. If they are your team's, each can be upgraded first, with a release that accepts Angular 21, in this order: @acme\/theme, then @acme\/forms, which needs @acme\/theme\./);
-  assert.match(text, /@acme\/forms: no stable release .*; it comes from your own registry, http:\/\/127\.0\.0\.1:\d+\/\./);
+  assert.match(text, /Note: @acme\/theme and @acme\/forms come from the registry your npm config sets for @acme\. If they are your team's, each can be upgraded first, with a release that accepts Angular 21, in this order: @acme\/theme, then @acme\/forms, which needs @acme\/theme\./);
+  assert.match(text, /@acme\/forms: no stable release .*; your npm config sets a registry for @acme, http:\/\/127\.0\.0\.1:\d+\/\./);
 
   // The same libraries on the default registry, as a company-wide mirror would serve them, say nothing about owners.
   const mirrored = await plan(world(theme, forms), app(options), { to: 21 });
@@ -238,6 +238,16 @@ test('a blocker from a scope with a registry of its own is likely the team\'s, s
   assert.deepEqual(mirrored.plan.blockers.map((b) => b.name), ['@acme/forms', '@acme/theme']);
   assert.equal(mirrored.plan.ownBlockers, undefined);
   assert.ok(mirrored.plan.blockers.every((b) => !b.ownRegistry));
+});
+
+test('a licensed vendor sets up its registry the same way, so the plan says only what the npm config shows', async () => {
+  // Infragistics serves its licensed Angular packages from a registry set for @infragistics, as a team serves its own.
+  const ignite = pkg('@infragistics/igniteui-angular', { '20.1.0': { peer: '^20.0.0', at: '2025-09-01' } });
+  const deps = { '@infragistics/igniteui-angular': '20.1.0' };
+  const r = await plan(world(), app({ deps: { ...base, ...deps }, lock: { ...lockBase, ...deps } }), { to: 21, own: { scope: '@infragistics', packages: [ignite] } });
+  assert.match(r.plan.blockers[0].reason, /; your npm config sets a registry for @infragistics, http:\/\/127\.0\.0\.1:\d+\/$/);
+  // One library has no order to give.
+  assert.equal(r.plan.notes.at(-1), "@infragistics/igniteui-angular comes from the registry your npm config sets for @infragistics. If it is your team's, it can be upgraded first, with a release that accepts Angular 21.");
 });
 
 test('libraries that need each other are named as such, and one that only needs them comes after one of them', async () => {

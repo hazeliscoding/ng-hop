@@ -132,8 +132,9 @@ function registryClient(config, dirs) {
   const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
   // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
   const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
-  // A scope with a registry of its own, apart from the default one, is how a company publishes its packages. A mirror
-  // set as the default registry for everything says nothing about who owns a package, so only a scope's own counts.
+  // A scope with a registry of its own, apart from the default one, is how a company publishes its packages, and how a
+  // vendor ships licensed ones. A mirror set as the default registry for everything says nothing about who owns a
+  // package, so only a scope's own counts.
   const own = (name) => {
     const scope = name.startsWith('@') ? name.split('/')[0] : null;
     const base = (url) => (url.endsWith('/') ? url : `${url}/`);
@@ -961,11 +962,12 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
   }
 
-  // A blocker from the person's own registry is likely their team's library, so it can be upgraded first rather than
-  // waited for. When several are, one can need another, and the one it needs has to be published first.
+  // A blocker from a scope the npm config gives a registry of its own may be the team's library, which can be upgraded
+  // first rather than waited for. A licensed vendor's registry is set up the same way, so the plan says only what the
+  // config shows. When several are the team's, one can need another, and the one it needs has to be published first.
   const own = plan.blockers.filter((b) => b.major === blockedAt && registry.own(b.name));
   if (own.length) {
-    for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; it comes from your own registry, ${b.ownRegistry}`; }
+    for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; your npm config sets a registry for ${b.name.split('/')[0]}, ${b.ownRegistry}`; }
     const names = new Set(own.map((b) => b.name));
     // An optional peer is one a library works with, not one it needs.
     const needs = new Map(own.map((b) => {
@@ -987,7 +989,9 @@ async function buildPlan({ projectDir, to, next = false }) {
     const each = order.map((n) => (needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
     // A library that needs one listed after it needs it back, directly or through others.
     const late = order.flatMap((n, i) => needs.get(n).filter((d) => order.indexOf(d) > i).map((d) => `${n} and ${d}`));
-    plan.notes.push(`${order.length > 1 ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from your own registry. If ${order.length > 1 ? 'they are' : 'it is'} your team's, ${order.length > 1 ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}, in this order: ${each.join(', then ')}.${late.length ? ` ${late.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
+    const scopes = [...new Set(order.map((n) => n.split('/')[0]))];
+    const several = order.length > 1;
+    plan.notes.push(`${several ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from the ${scopes.length > 1 ? 'registries' : 'registry'} your npm config sets for ${scopes.join(' and ')}. If ${several ? 'they are' : 'it is'} your team's, ${several ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}${several ? `, in this order: ${each.join(', then ')}` : ''}.${late.length ? ` ${late.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
   }
   if (blockedAt !== null) plan.status = 'blocked';
   else if (target === currentMajor) {
