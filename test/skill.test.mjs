@@ -172,6 +172,17 @@ test('installing what ng update left behind watches for an exemption pnpm writes
   assert.match(step('e'), /minimumReleaseAgeExclude/);
 });
 
+test('the skill raises the Node pins the plan names when the app is already on the target', () => {
+  // On Angular 22 with a dev container still on node:22.12.0, the plan named the pin under "Nothing to upgrade", and the
+  // skill's already-there path ended with "That's the whole job".
+  const label = skill.split('\n').find((line) => line.includes('Node pins below what Angular'));
+  assert.ok(label, 'the skill has to answer the line plan.mjs prints');
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /Node pins below what Angular/);
+  const already = skill.split('\n').find((line) => line.includes("If it's already on the target major"));
+  assert.ok(already, 'positive control: step 2 has an already-there path');
+  assert.match(already, /Node pins/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
