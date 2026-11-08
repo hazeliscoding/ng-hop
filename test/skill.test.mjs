@@ -157,6 +157,21 @@ test('a release-age exemption waits for the person, like an override', () => {
   assert.match(rule, /minimumReleaseAgeExclude/);
 });
 
+// One lettered step of the upgrade loop in SKILL.md, from its bold label to the next one.
+function step(letter) {
+  const start = skill.indexOf(`**${letter}. `);
+  assert.ok(start >= 0, `SKILL.md has a step ${letter}`);
+  const next = skill.indexOf(`**${String.fromCharCode(letter.charCodeAt(0) + 1)}. `, start);
+  return skill.slice(start, next < 0 ? undefined : next);
+}
+
+test('installing what ng update left behind watches for an exemption pnpm writes on its own', () => {
+  // pnpm 12.16.1's `pnpm add` of a release under a day old wrote one into pnpm-workspace.yaml without asking, and
+  // taking out only that entry left the release in the lockfile.
+  assert.match(step('e'), /Install anything the plan/, 'positive control: this is the step that installs');
+  assert.match(step('e'), /minimumReleaseAgeExclude/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
