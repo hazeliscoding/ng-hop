@@ -32,6 +32,17 @@ function verifyResult(projectDir) {
   return result;
 }
 
+// The @angular/core version at a commit, given a reader for that commit's files. With a pnpm catalog, package.json
+// only says `catalog:`, and the version is in pnpm-workspace.yaml.
+// shortcut: takes the first @angular/core entry in the YAML, so a named catalog beside the default could be misread;
+// parse the YAML if a fixture ever has both.
+export function angularAt(show) {
+  const pkg = JSON.parse(show('package.json'));
+  const spec = { ...pkg.devDependencies, ...pkg.dependencies }['@angular/core'];
+  if (!String(spec).startsWith('catalog:')) return spec;
+  return /['"]@angular\/core['"]:\s*['"]?([^'"\s#]+)/.exec(show('pnpm-workspace.yaml'))?.[1] ?? spec;
+}
+
 export async function grade(c, { config, facts, parsed, projectDir, runDir, verify }) {
   const pkgPath = join(projectDir, 'package.json');
   const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf8')) : null;

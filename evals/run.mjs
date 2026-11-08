@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CASES } from './cases.mjs';
 import { developerEnv, installCommand, PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
-import { grade } from './grade.mjs';
+import { angularAt, grade } from './grade.mjs';
 import { parseTranscript } from './transcripts.mjs';
 
 const { values } = parseArgs({ options: {
@@ -135,10 +135,7 @@ function capture(projectDir, runDir, base, parsed, realApp = false) {
     changedFiles: git(`diff ${base} --name-only --ignore-cr-at-eol`).trim().split('\n').filter(Boolean),
   };
   for (const commit of facts.commits) {
-    try {
-      const pkg = JSON.parse(git(`show ${commit.sha}:package.json`));
-      commit.angular = { ...pkg.devDependencies, ...pkg.dependencies }['@angular/core'];
-    } catch { commit.angular = null; }
+    try { commit.angular = angularAt((file) => git(`show ${commit.sha}:${file}`)); } catch { commit.angular = null; }
   }
   writeFileSync(join(runDir, 'facts.json'), JSON.stringify(facts, null, 2));
   writeFileSync(join(outputs, 'final-message.md'), parsed.finalText || '(no final message)');

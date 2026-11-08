@@ -6,9 +6,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CASES, check as checks } from '../evals/cases.mjs';
-import { grade } from '../evals/grade.mjs';
+import { angularAt, grade } from '../evals/grade.mjs';
 
 const check = (caseName, text) => CASES.find((c) => c.name === caseName).assertions.find((a) => a.text === text);
+
+test('a commit on a pnpm catalog counts at its major, read from pnpm-workspace.yaml', () => {
+  // The catalog run's one commit, "upgrade to Angular 21", was graded as landing on no major at all.
+  const catalog = { 'package.json': JSON.stringify({ dependencies: { '@angular/core': 'catalog:' } }), 'pnpm-workspace.yaml': "packages:\n  - '.'\ncatalog:\n  '@angular/common': ^21.2.0\n  '@angular/core': ^21.2.0 # pinned with the rest\n" };
+  assert.equal(angularAt((file) => catalog[file]), '^21.2.0');
+  const plain = { 'package.json': JSON.stringify({ devDependencies: { '@angular/core': '~20.3.0' } }) };
+  assert.equal(angularAt((file) => plain[file]), '~20.3.0');
+});
 const says = (assertion, finalText) => assertion.run({ finalText, around: (m) => m[0] })[0];
 
 test('"21 is the furthest" accepts the ways agents really say it, and not an answer that goes further', () => {
