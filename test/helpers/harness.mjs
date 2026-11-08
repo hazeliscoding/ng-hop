@@ -146,8 +146,12 @@ export function runScript(script, args, { cwd, env = {} } = {}) {
   });
 }
 
-export async function plan(packages, proj, { to, next = false, text = false, registryOptions } = {}) {
+// own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
+// .npmrc the way a team sets it up.
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null } = {}) {
   const registry = await startRegistry(packages, registryOptions);
+  const company = own && await startRegistry(own.packages);
+  if (company) writeFileSync(join(proj.dir, '.npmrc'), `${own.scope}:registry=${company.url}\n`);
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
@@ -157,5 +161,6 @@ export async function plan(packages, proj, { to, next = false, text = false, reg
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null };
   } finally {
     await registry.close();
+    if (company) await company.close();
   }
 }

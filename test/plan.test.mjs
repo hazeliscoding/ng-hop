@@ -217,6 +217,27 @@ test('a deprecated library that npm still lets through stays unconfirmed, and th
   assert.match(text.stdout, /DEPRECATED on npm: "This package has been deprecated"/);
 });
 
+test('a blocker from a scope with a registry of its own is likely the team\'s, so the plan gives the order to upgrade it in', async () => {
+  // Acme's libraries come from the company registry and stop at Angular 20, so the app is waiting on its own team.
+  // forms needs theme, so theme goes first, though forms comes first by name.
+  const theme = pkg('@acme/theme', { '20.4.0': { peer: '^20.0.0', at: '2025-09-01' } });
+  const forms = pkg('@acme/forms', { '20.4.0': { peers: { '@angular/core': '^20.0.0', '@acme/theme': '^20.4.0' }, at: '2025-09-01' } });
+  const options = { deps: { ...base, '@acme/forms': '^20.4.0', '@acme/theme': '^20.4.0' }, lock: { ...lockBase, '@acme/forms': '20.4.0', '@acme/theme': '20.4.0' } };
+  const r = await plan(world(), app(options), { to: 21, own: { scope: '@acme', packages: [theme, forms] } });
+  assert.equal(r.plan.status, 'blocked');
+  assert.deepEqual(r.plan.ownBlockers, ['@acme/theme', '@acme/forms']);
+  assert.ok(r.plan.blockers.every((b) => /^http:\/\/127\.0\.0\.1:\d+\/$/.test(b.ownRegistry)), JSON.stringify(r.plan.blockers));
+
+  const text = (await plan(world(), app(options), { to: 21, text: true, own: { scope: '@acme', packages: [theme, forms] } })).stdout;
+  assert.match(text, /Note: @acme\/theme and @acme\/forms come from your own registry\. If they are your team's, each can be upgraded first, with a release that accepts Angular 21, in this order: @acme\/theme, then @acme\/forms, which needs @acme\/theme\./);
+  assert.match(text, /@acme\/forms: no stable release .*; it comes from your own registry, http:\/\/127\.0\.0\.1:\d+\/\./);
+
+  // The same libraries on the default registry, as a company-wide mirror would serve them, say nothing about owners.
+  const mirrored = await plan(world(theme, forms), app(options), { to: 21 });
+  assert.equal(mirrored.plan.ownBlockers, undefined);
+  assert.ok(mirrored.plan.blockers.every((b) => !b.ownRegistry));
+});
+
 // ---- Things npm cannot answer ---------------------------------------------------------------------------------------
 
 test('a library with no Angular peer is reported as unchecked and does not block', async () => {

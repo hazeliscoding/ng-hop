@@ -118,7 +118,16 @@ function registryClient(config, cwd) {
   const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
   // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
   const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
-  return { get, release };
+  // A scope with a registry of its own, apart from the default one, is how a company publishes its packages. A mirror
+  // set as the default registry for everything says nothing about who owns a package, so only a scope's own counts.
+  const own = (name) => {
+    const scope = name.startsWith('@') ? name.split('/')[0] : null;
+    const base = (url) => (url.endsWith('/') ? url : `${url}/`);
+    const url = scope && config[`${scope}:registry`];
+    return url && base(url) !== base(config.registry || 'https://registry.npmjs.org/') ? base(url) : null;
+  };
+
+  return { get, release, own };
 }
 
 async function mapLimited(items, fn) {
@@ -853,6 +862,26 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
   }
 
+  // A blocker from the person's own registry is likely their team's library, so it can be upgraded first rather than
+  // waited for. When several are, one can need another, and the one it needs has to be published first.
+  const own = plan.blockers.filter((b) => b.major === blockedAt && registry.own(b.name));
+  if (own.length) {
+    for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; it comes from your own registry, ${b.ownRegistry}`; }
+    const names = new Set(own.map((b) => b.name));
+    const needs = new Map(own.map((b) => {
+      const manifest = docs.get(b.name)?.versions?.[b.installed || b.latest] || {};
+      return [b.name, Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies }).filter((n) => names.has(n) && n !== b.name)];
+    }));
+    const order = [];
+    while (order.length < names.size) {
+      const ready = [...names].filter((n) => !order.includes(n) && needs.get(n).every((d) => order.includes(d))).sort();
+      // Libraries that need each other can't be ordered, so they keep the plan's order.
+      order.push(...(ready.length ? ready : [...names].filter((n) => !order.includes(n))));
+    }
+    plan.ownBlockers = order;
+    const each = order.map((n, i) => (i && needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
+    plan.notes.push(`${order.length > 1 ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from your own registry. If ${order.length > 1 ? 'they are' : 'it is'} your team's, ${order.length > 1 ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}, in this order: ${each.join(', then ')}.`);
+  }
   if (blockedAt !== null) plan.status = 'blocked';
   else if (target === currentMajor) {
     plan.status = 'already-there';
