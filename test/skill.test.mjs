@@ -250,6 +250,15 @@ test('the team\'s libraries go only to the major the app needs next, since the a
   assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /to the Angular major the plan names/);
 });
 
+test('the team\'s libraries that need each other are upgraded and published together, as the plan says', () => {
+  // A cycle has no order to follow, and the plan names every library in it.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /need each other/, 'positive control: the plan says so');
+  const first = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8').split('\n').find((line) => line.startsWith('**Upgrade it first.**'));
+  assert.ok(first, 'positive control: blocked.md offers to upgrade the team\'s libraries first');
+  assert.match(first, /need each other/);
+  assert.match(first, /upgrade and publish them together/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
