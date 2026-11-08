@@ -138,6 +138,14 @@ export const check = {
 
 const DIRTY_LINE = "// my half-finished work: do not lose this";
 
+// A real app may stop short of the latest for a good reason, so its commits are checked up to wherever it stopped.
+const upToWhereItStopped = (from) => (ctx) => { const end = ctx.major(ctx.deps['@angular/core']) ?? from; return Array.from({ length: Math.max(0, end - from) }, (_, i) => from + 1 + i); };
+const realApp = ({ tests }) => [
+  check.skillFired(), check.reachesMajor(22), check.commitPerMajor(upToWhereItStopped(18)), check.cleanTree(), check.notOnMain(),
+  check.noForcing(), check.noOverrides(), check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+  check.installs(), check.builds(), ...(tests ? [check.testsPass()] : []), check.appRuns(),
+];
+
 function bumpToAngular21(dir) {
   const path = join(dir, 'package.json');
   const pkg = JSON.parse(readFileSync(path, 'utf8'));
@@ -423,6 +431,17 @@ should I just use --force?`,
       { text: 'The catalog itself is on Angular 21', run: (ctx) => { const m = /'@angular\/core':\s*['"]?[\^~]?(\d+)/.exec(ctx.read('pnpm-workspace.yaml') || ''); return [m?.[1] === '21', m ? `pnpm-workspace.yaml has @angular/core at ${m[1]}` : 'No @angular/core entry in pnpm-workspace.yaml']; } },
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
+  },
+  // ---- The owner's own apps, which nobody built for a test. Only run by name, since each is a long, real upgrade. ----
+  {
+    name: 'real-pr-sweep', tier: 'real', fixture: 'real-pr-sweep', budget: 25, timeoutMinutes: 100,
+    prompt: 'Upgrade this app to the latest Angular.',
+    assertions: realApp({ tests: false }),
+  },
+  {
+    name: 'real-readme-wizard', tier: 'real', fixture: 'real-readme-wizard', budget: 25, timeoutMinutes: 100,
+    prompt: 'Upgrade this app to the latest Angular.',
+    assertions: realApp({ tests: true }),
   },
 ];
 

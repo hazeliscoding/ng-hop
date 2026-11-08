@@ -95,7 +95,7 @@ function parseTranscript(runDir) {
   return { result, commands, tools, skills, finalText: result?.result || lastText };
 }
 
-function capture(projectDir, runDir, base, parsed) {
+function capture(projectDir, runDir, base, parsed, realApp = false) {
   const outputs = join(runDir, 'outputs');
   mkdirSync(outputs, { recursive: true });
   const git = (cmd) => { try { return sh(`git ${cmd}`, projectDir); } catch (err) { return String(err.message); } };
@@ -136,6 +136,9 @@ for (const c of cases) {
         if (!existsSync(join(runDir, 'transcript.jsonl'))) continue;
         const parsed = parseTranscript(runDir);
         // Results from CI come without .git: an install script could have written its config, and git would run that.
+  // A real app's commits are worth keeping: a bundle carries them without a .git, uncompressed, so the check for the
+  // login before an upload can still read every byte of it.
+  if (realApp) git(`-c pack.compression=0 -c core.compression=0 -c pack.window=0 bundle create "${join(outputs, 'history.bundle')}" --all`);
         const saved = JSON.parse(readFileSync(join(runDir, 'facts.json'), 'utf8'));
         const facts = existsSync(join(projectDir, '.git')) ? capture(projectDir, runDir, saved.baseCommit, parsed) : saved;
         const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: false });
@@ -157,11 +160,11 @@ for (const c of cases) {
       const usage = parsed.result?.usage || {};
       const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
       writeFileSync(join(runDir, 'timing.json'), JSON.stringify({ total_tokens: tokens, duration_ms: Math.round(seconds * 1000), total_duration_seconds: seconds, cost_usd: parsed.result?.total_cost_usd ?? null, exit_code: code }, null, 2));
-      const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: c.tier === 'upgrade' });
+      const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: c.tier !== 'plan' });
       const failed = g.expectations.filter((e) => !e.passed).map((e) => e.text);
       console.log(`${c.name} ${config}: ${g.summary.passed}/${g.summary.total} in ${Math.round(seconds)}s, $${(parsed.result?.total_cost_usd ?? 0).toFixed(2)}${failed.length ? `\n   failed: ${failed.join(' | ').slice(0, 700)}` : ''}`);
       // Real projects are large, and only the graded results and transcript are needed afterwards.
-      if (c.tier === 'upgrade') rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
+      if (c.tier !== 'plan') rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
     }
   }
 }
