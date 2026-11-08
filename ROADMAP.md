@@ -94,6 +94,20 @@ Each of these is a place where the skill stops or says less than it could today.
 
 **Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest, `--next` plans a real prerelease, and the app check fails on a plain `console.error`.
 
+### M7: 0.4.0, an enterprise upgrade, on video
+
+A company's app is rarely one package. This release takes one built like the real thing from Angular 21 to 22, and turns the run into a tutorial.
+
+- [ ] A fixture: an Angular 21 app on the pnpm toolchain, with internal UI libraries whose peer ranges stop at Angular 21, so they have to reach 22 before the app can.
+- [ ] Set up for a dev container, and upgraded from the Windows host, not inside the container.
+- [ ] When a blocking library belongs to the person, offer to upgrade it first, in dependency order, besides waiting, replacing or forcing.
+- [ ] Take it to Angular 22 with the skill: the libraries first, then the app.
+- [ ] Make a video tutorial from that run.
+
+To decide when it starts: whether the libraries live in the pnpm workspace or come from a private registry, and the video's format.
+
+**Done when:** the skill takes the libraries and then the app to Angular 22 from the Windows host, the dev container still builds and serves the app afterwards, and the video is made.
+
 ## Later
 
 - Run the skill for real in GitHub Copilot. So far it's checked from Copilot's docs only.
