@@ -1,5 +1,5 @@
 name: Evals
-run-name: "Evals: ${{ inputs.cases || 'every case' }} on ${{ inputs.model }}"
+run-name: "Evals: ${{ inputs.cases || (github.event_name == 'schedule' && 'the weekly questions') || 'every case' }} on ${{ inputs.model || 'claude-opus-5-5' }}"
 
 # Runs the eval cases on a batch of GitHub's machines instead of one person's. Evals cost usage, so this never runs on
 # its own. They also install real npm packages, so the login reaches only Claude Code: see .github/actions/eval-machine
@@ -12,6 +12,10 @@ run-name: "Evals: ${{ inputs.cases || 'every case' }} on ${{ inputs.model }}"
 # After:  gh run download <run id> --dir ../ng-hop-workspace/ci
 
 on:
+  # Once a week, the question cases with the skill, about $1.50 of usage. The cases read the live registry, so this is
+  # how a library catching up shows: a check fails, the run fails, and GitHub emails whoever last changed this file.
+  schedule:
+    - cron: '23 7 * * 1'
   workflow_dispatch:
     inputs:
       cases:
@@ -65,7 +69,7 @@ jobs:
       - name: Try to reach the login from an install script
         env:
           LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MODEL: ${{ inputs.model }}
+          MODEL: ${{ inputs.model || 'claude-opus-5-5' }}
         run: printf '%s' "$LOGIN" | as-evals env NG_HOP_LOGIN_ON_STDIN=1 node evals/canary.mjs --model "$MODEL"
 
   # This job installs third-party packages with no secret anywhere on its machine.
@@ -86,12 +90,13 @@ jobs:
         env:
           CASES: ${{ inputs.cases }}
           TRIGGERS: ${{ inputs.triggers }}
+          WEEKLY: ${{ github.event_name == 'schedule' }}
         run: |
           node --input-type=module -e "
             import { CASES } from './evals/cases.mjs';
             const wanted = process.env.CASES.split(',').map((name) => name.trim()).filter(Boolean);
             for (const name of wanted) if (!CASES.some((c) => c.name === name)) throw new Error('No case named ' + name);
-            const cases = CASES.filter((c) => !wanted.length || wanted.includes(c.name));
+            const cases = CASES.filter((c) => process.env.WEEKLY === 'true' ? c.tier === 'plan' : !wanted.length || wanted.includes(c.name));
             console.log('cases=' + JSON.stringify(cases.map((c) => c.name)));
             console.log('fixtures=' + (process.env.TRIGGERS === 'true' ? 'plain-20' : [...new Set(cases.map((c) => c.fixture))].join(' ')));
           " >> "$GITHUB_OUTPUT"
@@ -137,7 +142,7 @@ jobs:
       - name: Run the queries
         env:
           LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MODEL: ${{ inputs.model }}
+          MODEL: ${{ inputs.model || 'claude-opus-5-5' }}
         run: |
           set -o pipefail
           printf '%s' "$LOGIN" | as-evals env NG_HOP_LOGIN_ON_STDIN=1 node evals/trigger.mjs --iteration ci --runs 3 --concurrency 4 --model "$MODEL" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -150,7 +155,7 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      max-parallel: ${{ fromJSON(inputs.parallel || '4') }}
       matrix:
         case: ${{ fromJSON(needs.prepare.outputs.cases) }}
     steps:
@@ -170,9 +175,9 @@ jobs:
         env:
           LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CASE: ${{ matrix.case }}
-          CONFIG: ${{ inputs.config }}
-          MODEL: ${{ inputs.model }}
-          RUNS: ${{ inputs.runs }}
+          CONFIG: ${{ inputs.config || 'with_skill' }}
+          MODEL: ${{ inputs.model || 'claude-opus-5-5' }}
+          RUNS: ${{ inputs.runs || '1' }}
         run: |
           args=()
           [ "$CONFIG" = both ] || args=(--config "$CONFIG")
@@ -233,3 +238,8 @@ jobs:
             node evals/summary.mjs --iteration ci
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail the weekly run if a check failed with the skill
+        if: github.event_name == 'schedule'
+        env:
+          NG_HOP_WORKSPACE: ${{ runner.temp }}/ws
+        run: node evals/summary.mjs --iteration ci --fail-on with_skill

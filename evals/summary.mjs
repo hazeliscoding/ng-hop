@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Prints one iteration's results: a line per case and setup, with every failed check under it.
-// Usage: node evals/summary.mjs --iteration 1 [--case name] [--failures-only]
+// Usage: node evals/summary.mjs --iteration 1 [--case name] [--failures-only] [--fail-on with_skill]
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { WORKSPACE } from './common.mjs';
 
-const { values } = parseArgs({ options: { iteration: { type: 'string', default: '1' }, case: { type: 'string' }, 'failures-only': { type: 'boolean' } } });
+const { values } = parseArgs({ options: { iteration: { type: 'string', default: '1' }, case: { type: 'string' }, 'failures-only': { type: 'boolean' }, 'fail-on': { type: 'string' } } });
 const dir = join(WORKSPACE, `iteration-${values.iteration}`);
 const totals = {};
 for (const evalName of readdirSync(dir).filter((d) => d.startsWith('eval-')).sort()) {
@@ -31,4 +31,12 @@ for (const evalName of readdirSync(dir).filter((d) => d.startsWith('eval-')).sor
 console.log('');
 for (const [config, t] of Object.entries(totals)) {
   console.log(`${config.padEnd(14)} ${t.passed}/${t.total} checks (${t.total ? Math.round((100 * t.passed) / t.total) : 0}%), ${t.runs} runs, ${Math.round(t.seconds / 60)} min, $${t.cost.toFixed(2)}`);
+}
+// For the weekly run: a failed check with the skill fails the run, so it shows up as a failed workflow.
+if (values['fail-on']) {
+  const t = totals[values['fail-on']];
+  if (!t || t.passed < t.total) {
+    console.log(`\n${values['fail-on']}: ${t ? `${t.total - t.passed} failed check(s)` : 'no results'}, listed above.`);
+    process.exitCode = 1;
+  }
 }

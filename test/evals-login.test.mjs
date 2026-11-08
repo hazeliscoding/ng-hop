@@ -183,10 +183,15 @@ test('the canary finds no login when it comes in on stdin', { skip: process.plat
   if (process.platform === 'darwin') assert.equal(result.status, 0, output);
 });
 
-test('evals only run when someone starts them, and only the jobs that need the login name it', () => {
+test('evals run when someone starts them or on the weekly schedule, which covers only the cheap cases, and only the jobs that need the login name it', () => {
   const triggers = /^on:\n([\s\S]*?)^permissions:/m.exec(WORKFLOW)[1];
   assert.match(triggers, /workflow_dispatch/);
-  assert.doesNotMatch(triggers, /^\s{2}(push|pull_request|pull_request_target|schedule):/m);
+  assert.doesNotMatch(triggers, /^\s{2}(push|pull_request|pull_request_target):/m, 'nothing a stranger can trigger');
+  // A full batch costs about $32, so the schedule has to stay on the question cases, with the skill only.
+  assert.match(triggers, /^\s{2}schedule:\n\s{4}- cron: '[^']+'$/m);
+  assert.match(WORKFLOW, /process\.env\.WEEKLY === 'true' \? c\.tier === 'plan'/);
+  assert.match(WORKFLOW, /CONFIG: \$\{\{ inputs\.config \|\| 'with_skill' \}\}/);
+  assert.match(WORKFLOW, /RUNS: \$\{\{ inputs\.runs \|\| '1' \}\}/);
 
   const jobs = WORKFLOW.slice(WORKFLOW.indexOf('\njobs:'));
   const job = (name) => new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  \\w+:\\n|$(?![\\s\\S]))`, 'm').exec(jobs)[0];
