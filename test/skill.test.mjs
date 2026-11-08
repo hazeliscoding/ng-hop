@@ -207,6 +207,17 @@ test('the publish question says the code is unpushed, and where a dry run says i
   assert.match(publish, /pushed/);
 });
 
+test('a blocker whose scope has a registry of its own is confirmed as the team\'s before upgrading it first', () => {
+  // Infragistics and Font Awesome Pro have customers give their scope a registry of its own, which the plan flags the
+  // same way, and for a vendor's maintained library waiting is the usual advice.
+  const blocked = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8');
+  const own = blocked.split('\n').find((line) => line.startsWith("- **Whether it's the person's own.**"));
+  assert.ok(own, 'positive control: blocked.md asks whether a blocker is theirs');
+  assert.match(own, /vendor/);
+  assert.match(own, /npm view <package> repository\.url author/);
+  assert.doesNotMatch(skill, /when the plan says it comes from their own registry/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

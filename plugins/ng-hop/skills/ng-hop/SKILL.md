@@ -100,7 +100,7 @@ If a failure won't yield to a reasonable effort, stop and ask. Say what you trie
 
 ## 5. Stop at the ceiling and ask
 
-When the plan is blocked, the highest reachable major is the end of this run, however close the next one looks. Read `references/blocked.md`, gather the facts it lists, and put the choice to the person: **wait** for the library, **replace** it, or **force** past it, or, when the plan says it comes from their own registry, **upgrade it first**, with your recommendation and why. End your message with that question.
+When the plan is blocked, the highest reachable major is the end of this run, however close the next one looks. Read `references/blocked.md`, gather the facts it lists, and put the choice to the person: **wait** for the library, **replace** it, or **force** past it, or, when it's their own library, **upgrade it first**, with your recommendation and why. End your message with that question.
 
 Don't try a prerelease, an `overrides` entry or `--force` to see if it works. These change what the project depends on in ways that are easy to miss in review, so the person decides first.
 

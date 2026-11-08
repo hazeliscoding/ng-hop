@@ -10,11 +10,11 @@ For each blocker, from the plan and a quick search:
 - **How much the app uses it:** count the files that import it (for example `git grep -l "<package>" -- src`). Three files and three hundred are different decisions.
 - **Whether it's used at all.** If nothing imports it, removing it clears the blocker, and that's your recommendation. Search for its imports and selectors across `src` instead of reading a few files, because a template can sit inside a component's `.ts` file.
 - **Any sign of support on the way:** a prerelease in the plan's output, or an open issue or pull request on its repository. Say what you found, and say so if you didn't look.
-- **Whether it's the person's own.** The plan says when a blocker comes from their own registry, and in which order to upgrade several. Its source is usually in a repository of its own, so ask where.
+- **Whether it's the person's own.** The plan says when a blocker's scope has a registry of its own in their npm config, and in which order to upgrade several. That's how a company publishes its own libraries, but it's also how a vendor ships a paid one: Font Awesome Pro's customers point `@fortawesome` at Font Awesome's registry, and Infragistics' point `@infragistics` at theirs. So confirm it's the team's before recommending they upgrade it first: its repository and author (`npm view <package> repository.url author`) should be theirs, and if that doesn't settle it, ask. Their own library's source is usually in a repository of its own, so ask where.
 
 ## The choices
 
-**Upgrade it first.** When the plan says a blocker comes from the person's own registry, it's most likely their team's library, and waiting would only wait on themselves. Work in that library's repository, with this skill and `references/libraries.md`, in the order the plan gives, and publish once they say so. Then come back to the app and run the plan again. Recommend this for their own libraries, and say which needs which.
+**Upgrade it first.** When the blocker is the team's own library, waiting would only wait on themselves. Work in that library's repository, with this skill and `references/libraries.md`, in the order the plan gives, and publish once they say so. Then come back to the app and run the plan again. Recommend this for their own libraries, once you've confirmed they are, and say which needs which. A vendor's library behind a registry of its own is a maintained library like any other, so for one of those, waiting is usually right.
 
 **Wait.** Stay on the ceiling, with the work committed, and run the plan again later. It costs nothing and the app is already further along than it was. This is the usual recommendation for a maintained library, especially when the Angular major is recent.
 
