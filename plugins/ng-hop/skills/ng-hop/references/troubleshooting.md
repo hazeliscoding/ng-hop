@@ -30,7 +30,7 @@ Something in the project needs an older Angular, and it isn't in the command.
 - Re-run `plan.mjs`. If it names `x` with a version, you ran an out-of-date command, so run the new one.
 - If `x` isn't a direct dependency, it's pulled in by one. Find the parent with `npm ls x` (`pnpm why x` on pnpm) and treat the parent as the library to move.
 - If no release of `x` supports this major, it's a blocker: go to `blocked.md`.
-- If the command names `x` at a release that does support this major, and the error still quotes the old release's peers, `ng update` is most likely skipping a release less than a day old, as Angular CLI 22.1 and newer do on pnpm 11 or newer, or yarn 4: see the next section.
+- If the command names `x` at a release that does support this major, and the error still quotes the old release's peers, `ng update` is most likely skipping a release less than a day old, as Angular CLI 22.1 and newer do on pnpm 11 or newer, or yarn 4.15 or newer: see the next section.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
 
@@ -40,7 +40,7 @@ Don't reach for `--force`. It only skips this check, and the same mismatch comes
 Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5").
 ```
 
-This shows when the command names a release that does accept the new Angular, such as `@acme/ui-core@22.0.0`, while that release is less than a day old. From Angular CLI 22.1, `ng update` skips any release younger than the package manager's minimum release age, a guard against a compromised release, so it keeps the installed release and quotes that one's peers. pnpm 11 and newer set that age to 1440 minutes by default, and `pnpm config get minimumReleaseAge` prints `undefined` for the default, so confirm the cause with the release's age from `npm view <package> time`. yarn 4 does the same with `npmMinimalAgeGate`, also 1440 minutes by default, which `yarn config get npmMinimalAgeGate` does print.
+This shows when the command names a release that does accept the new Angular, such as `@acme/ui-core@22.0.0`, while that release is less than a day old. From Angular CLI 22.1, `ng update` skips any release younger than the package manager's minimum release age, a guard against a compromised release, so it keeps the installed release and quotes that one's peers. pnpm 11 and newer set that age to 1440 minutes by default, and `pnpm config get minimumReleaseAge` prints `undefined` for the default, so confirm the cause with the release's age from `npm view <package> time`. yarn does the same with `npmMinimalAgeGate`, which defaults to a day from yarn 4.15, and `yarn config get npmMinimalAgeGate` does print it, in minutes.
 
 `ng update` reads no exemption list, so an exemption alone doesn't get the release past it. The package managers behave differently:
 

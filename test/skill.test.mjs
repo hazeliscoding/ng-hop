@@ -129,15 +129,16 @@ test('a release too young for ng update is blamed on its own filter, with a chec
   assert.match(section, /npm view <package> time/);
 });
 
-test('a release too young for ng update is covered on yarn 4 too', () => {
-  // yarn 4.18.1 gates releases for 1440 minutes by default and refuses one itself until .yarnrc.yml preapproves it.
+test('a release too young for ng update is covered on yarn 4.15 and newer too', () => {
+  // yarn 4.10.1 added npmMinimalAgeGate at 0, and 4.15.0 made it a day by default. 4.18.1 printed 1440 for it and
+  // refused a release itself until .yarnrc.yml preapproved it.
   const section = troubleSection(youngRelease);
   assert.match(section, /npmPreapprovedPackages/);
   assert.match(section, /YN0016/);
   const pointer = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8').split('\n').find((line) => line.includes("still quotes the old release's peers"));
   assert.ok(pointer, 'the peer-error section has to point here');
-  assert.match(pointer, /yarn 4/);
-  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4/);
+  assert.match(pointer, /yarn 4\.15 or newer/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4\.15 or newer/);
 });
 
 test('a release too young for ng update goes in first through update.mjs, never with --allow-dirty by hand', () => {
