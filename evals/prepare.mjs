@@ -37,8 +37,9 @@ for (const name of names) {
   mkdirSync(dir, { recursive: true });
   const started = Date.now();
   try {
-    const pnpm = fixture.packageManager === 'pnpm';
-    run(`npx -y @angular/cli@${fixture.angular} new fixture-app --directory=. --defaults --skip-git --skip-install --ssr=false --style=css --routing=true${pnpm ? ' --package-manager=pnpm' : ''}`, dir);
+    const manager = fixture.packageManager || 'npm';
+    const pnpm = manager === 'pnpm';
+    run(`npx -y @angular/cli@${fixture.angular} new fixture-app --directory=. --defaults --skip-git --skip-install --ssr=false --style=css --routing=true${manager === 'npm' ? '' : ` --package-manager=${manager}`}`, dir);
     for (const [path, content] of Object.entries(fixture.files)) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
       writeFileSync(join(dir, path), content);
@@ -61,6 +62,15 @@ for (const name of names) {
         moveAngularToCatalog(dir);
         run('pnpm install', dir);
       }
+    } else if (manager === 'yarn') {
+      // yarn 2 and newer default to Plug'n'Play, which Angular apps turn off in practice.
+      writeFileSync(join(dir, '.yarnrc.yml'), 'nodeLinker: node-modules\n');
+      appendFileSync(join(dir, '.gitignore'), '\n.yarn/\n');
+      run('yarn install', dir);
+      if (fixture.install.length) run(`yarn add --exact ${fixture.install.join(' ')}`, dir);
+    } else if (manager === 'bun') {
+      run('bun install', dir);
+      if (fixture.install.length) run(`bun add --exact ${fixture.install.join(' ')}`, dir);
     } else {
       run('npm install --no-audit --no-fund', dir);
       if (fixture.install.length) run(`npm install --no-audit --no-fund --save-exact ${fixture.install.join(' ')}`, dir);

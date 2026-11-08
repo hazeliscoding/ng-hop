@@ -45,6 +45,9 @@ export function testCommand(dir) {
 }
 
 // Reinstalls with the checks on, the same way someone cloning the result would.
-export const installCommand = (dir) => (existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm install --frozen-lockfile' : 'npm ci --no-audit --no-fund');
+export const installCommand = (dir) => (existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm install --frozen-lockfile'
+  : existsSync(join(dir, 'yarn.lock')) ? 'yarn install --immutable'
+  : existsSync(join(dir, 'bun.lock')) ? 'bun install --frozen-lockfile'
+  : 'npm ci --no-audit --no-fund');
 
 export const exists = existsSync;
