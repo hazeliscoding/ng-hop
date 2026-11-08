@@ -89,9 +89,11 @@ In your report, list what you declined and say that `pnpm approve-builds <packag
 
 ## `Package @angular/core was not found on the registry. Skipping.`
 
-Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps. The plan refuses to start on either. If you see this line anyway, put the tree back with `git restore .`.
+Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps.
 
-A catalog is shared across the workspace, so report it and ask. There are two ways forward: give the Angular packages plain versions in this app's `package.json` and plan again, or update the catalog by hand, run `pnpm install`, then run `pnpm exec ng update <package> --migrate-only --from <old version>` for each package.
+The plan's pnpm command handles this: `update.mjs` copies the catalog's versions into `package.json`, lets `ng update` run as usual, then writes the new versions back into the catalog, puts `package.json` back on `catalog:`, and runs `pnpm install`. If an update fails, `package.json` goes back on its catalog entries and the catalog is left as it was. So if you see this line, someone ran a plain `ng update`: put the tree back with `git restore .` and run the plan's command instead.
+
+A catalog is shared across the workspace. When the plan says other projects use the same entries, moving the catalog moves them too, without their migrations, so ask before going ahead.
 
 ## `Found 0 dependencies` and `Package '@angular/core' is not a dependency`
 

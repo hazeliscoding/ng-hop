@@ -167,6 +167,24 @@ function readPnpmLock(root, dir) {
   return versions;
 }
 
+// Other projects in the workspace whose entries for these packages say `catalog:`, from the lockfile's importers.
+function catalogUsers(root, dir, names) {
+  const own = relative(root, dir).replace(/\\/g, '/') || '.';
+  const unquote = (text) => text.replace(/^['"]|['"]$/g, '');
+  const users = new Set();
+  let inImporters = false, importer = null, name = null;
+  for (const line of readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8').split(/\r?\n/)) {
+    if (/^\S/.test(line)) { inImporters = line === 'importers:'; continue; }
+    if (!inImporters) continue;
+    const key = /^ {2}(\S.*?):( \{\})?$/.exec(line);
+    if (key) { importer = unquote(key[1]); continue; }
+    const dep = /^ {6}(\S.*?):$/.exec(line);
+    if (dep) { name = unquote(dep[1]); continue; }
+    if (importer !== own && names.includes(name) && /^ {8}specifier: ['"]?catalog:/.test(line)) users.add(importer);
+  }
+  return [...users].sort();
+}
+
 // yarn.lock lists each version under the ranges that resolve to it, in yarn 1's format or yarn 2's, where a range
 // reads "npm:^20.0.0". When a package is in the tree at more than one version, the app's own range picks the right one.
 function readYarnLock(dir, deps) {
@@ -243,7 +261,7 @@ function readProject(dir) {
     }
     return null;
   };
-  return { dir, pkg, deps, packageManager, installed, nx: existsSync(join(dir, 'nx.json')) };
+  return { dir, pkg, deps, packageManager, installed, pnpmRoot, nx: existsSync(join(dir, 'nx.json')) };
 }
 
 // ---- Judging one release against one Angular major ------------------------------------------------------------
@@ -475,11 +493,8 @@ async function buildPlan({ projectDir, to, next = false }) {
   const registry = registryClient(JSON.parse(configText), projectDir);
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
-  // still exits 0. Angular 22's stops with an error instead.
+  // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.
   const catalogued = Object.keys(project.deps).filter((n) => String(project.deps[n]).startsWith('catalog:') && (isFramework(n) || n === 'typescript'));
-  if (catalogued.length) {
-    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Either give these packages plain versions in package.json, commit that, and plan again, or update the catalog by hand, run pnpm install, then run ng update <package> --migrate-only --from <old version> for each package. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
-  }
 
   const currentCore = project.installed('@angular/core');
   if (!currentCore) throw new PlanError(`Could not work out the installed @angular/core version from "${project.deps['@angular/core']}".`);
@@ -509,6 +524,12 @@ async function buildPlan({ projectDir, to, next = false }) {
     latestAngular, target, next: next ? prerelease : null, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
+  if (catalogued.length) {
+    const sharedWith = project.pnpmRoot ? catalogUsers(project.pnpmRoot, projectDir, catalogued) : [];
+    plan.catalog = { packages: catalogued, sharedWith };
+    plan.notes.push(`${catalogued.join(', ')} come from a pnpm catalog, which Angular's CLI can't change. The pnpm runner in each command moves the catalog's entries itself and puts package.json back on them.`);
+    if (sharedWith.length) plan.notes.push(`The catalog is also used by ${sharedWith.join(', ')}, so moving it moves them too, without their migrations. Ask before going ahead.`);
+  }
   if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
   const cliDoc = next ? await registry.get('@angular/cli') : null;
   const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';

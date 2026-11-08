@@ -737,19 +737,44 @@ test('pnpm: an npm lockfile beside the app beats a pnpm workspace above it', asy
   assert.equal(r.plan.project.angular, '20.0.0');
 });
 
-// `ng update` prints "Package @angular/core was not found on the registry. Skipping." for these and exits 0.
+// Through Angular 21's CLI, `ng update` prints "Package @angular/core was not found on the registry. Skipping." for
+// these and exits 0, so the pnpm runner moves the catalog itself, and the plan says that's what will happen.
 for (const [name, spec] of [['@angular/core', 'catalog:'], ['@angular/router', 'catalog:angular'], ['typescript', 'catalog:']]) {
-  test(`pnpm: ${name} from a catalog (${spec}) stops the plan, because ng update would skip it and still exit 0`, async () => {
-    const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21 });
-    assert.equal(r.code, 1);
-    assert.match(r.stderr, /catalog/);
-    assert.match(r.stderr, /plain versions/);
-    assert.match(r.stderr, /--migrate-only/, 'both ways forward, so the person gets a real choice');
-    assert.ok(r.stderr.includes(name));
-    assert.match(r.stderr, /ng update/);
-    assert.equal(r.stdout, '');
+  test(`pnpm: ${name} from a catalog (${spec}) gets a plan through the pnpm runner, which moves the catalog`, async () => {
+    const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21, text: true });
+    assert.equal(r.code, 0, r.stderr);
+    const note = r.stdout.split('\n').find((l) => l.startsWith('Note:') && l.includes('catalog'));
+    assert.ok(note && note.includes(name), r.stdout);
+    assert.match(r.stdout, /Run: pnpm exec node .*update\.mjs.* @angular\/core@21/);
   });
 }
+
+const catalogImporter = (name) => `  ${name}:
+    dependencies:
+      '@angular/core':
+        specifier: 'catalog:'
+        version: 20.2.0(rxjs@7.8.2)
+    devDependencies:
+      '@angular/cli':
+        specifier: 'catalog:'
+        version: 20.2.0
+`;
+
+test('pnpm: a catalog other projects in the workspace use is named, because moving it moves them too', async () => {
+  const p = app({ deps: { ...base, '@angular/core': 'catalog:', '@angular/cli': 'catalog:' }, files: {
+    'pnpm-workspace.yaml': "packages:\n  - '.'\n  - 'apps/*'\ncatalog:\n  '@angular/core': ^20.0.0\n",
+    'pnpm-lock.yaml': pnpmLock(catalogImporter('.'), catalogImporter('apps/admin'), pnpmImporter('apps/plain')),
+  } });
+  const r = await plan(world(), p, { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.project.angular, '20.2.0', 'the version still comes from the lockfile');
+  assert.deepEqual(r.plan.catalog, { packages: ['@angular/core', '@angular/cli'], sharedWith: ['apps/admin'] });
+  assert.ok(r.plan.notes.some((n) => n.includes('apps/admin') && /ask/i.test(n)), r.plan.notes.join('\n'));
+
+  const alone = await plan(world(), app({ deps: { ...base, '@angular/core': 'catalog:', '@angular/cli': 'catalog:' }, files: { 'pnpm-workspace.yaml': "catalog:\n  '@angular/core': ^20.0.0\n", 'pnpm-lock.yaml': pnpmLock(catalogImporter('.')) } }), { to: 21 });
+  assert.deepEqual(alone.plan.catalog.sharedWith, []);
+  assert.ok(!alone.plan.notes.some((n) => /ask/i.test(n)));
+});
 
 test('pnpm: a catalog that holds nothing the upgrade moves does not stop the plan', async () => {
   const r = await plan(world(pkg('date-fns', { '4.0.0': {} })), app({ deps: { ...base, 'date-fns': 'catalog:' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } }), { to: 21 });
