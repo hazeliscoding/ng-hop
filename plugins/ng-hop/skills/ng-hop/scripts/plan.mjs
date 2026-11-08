@@ -835,11 +835,12 @@ const SUPPORT = {
   stale: 'UNCONFIRMED: this release is older than the Angular major and only accepts it through an open-ended range, check the running app',
 };
 
-// Where a library's changelog or release notes are, since many packages don't ship them. Only a web address is kept.
+// Where a library's changelog or release notes are, since many packages don't ship them. Only a short https address
+// made of URL-safe characters is kept, because the package's author writes it and an agent may paste it into a shell.
 function repositoryUrl(manifest) {
   const raw = typeof manifest?.repository === 'string' ? manifest.repository : manifest?.repository?.url;
   const url = String(raw || '').replace(/^git\+/, '').replace(/^(git|ssh):\/\/(git@)?/, 'https://').replace(/\.git$/, '');
-  return /^https:\/\/[\w.-]+\/\S+$/.test(url) ? url : null;
+  return url.length <= 200 && /^https:\/\/[\w.-]+(\/[\w.~-]+)+\/?$/.test(url) ? url : null;
 }
 
 function render(plan) {
