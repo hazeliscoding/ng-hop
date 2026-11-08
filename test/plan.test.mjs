@@ -234,8 +234,25 @@ test('a blocker from a scope with a registry of its own is likely the team\'s, s
 
   // The same libraries on the default registry, as a company-wide mirror would serve them, say nothing about owners.
   const mirrored = await plan(world(theme, forms), app(options), { to: 21 });
+  assert.equal(mirrored.plan.status, 'blocked');
+  assert.deepEqual(mirrored.plan.blockers.map((b) => b.name), ['@acme/forms', '@acme/theme']);
   assert.equal(mirrored.plan.ownBlockers, undefined);
   assert.ok(mirrored.plan.blockers.every((b) => !b.ownRegistry));
+});
+
+test('a scope pointed at the default registry, as a mirror is set up, says nothing about owners and still blocks', async () => {
+  const theme = pkg('@acme/theme', { '20.4.0': { peer: '^20.0.0', at: '2025-09-01' } });
+  const registry = await startRegistry(world(theme));
+  const p = app({ deps: { ...base, '@acme/theme': '^20.4.0' }, lock: { ...lockBase, '@acme/theme': '20.4.0' }, files: { '.npmrc': `@acme:registry=${registry.url}\n` } });
+  try {
+    const r = await runScript(PLAN, ['--project', p.dir, '--to', '21', '--json'], { cwd: p.dir, env: { npm_config_registry: registry.url } });
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.status, 'blocked');
+    assert.deepEqual(result.blockers.map((b) => b.name), ['@acme/theme']);
+    assert.equal(result.ownBlockers, undefined);
+  } finally {
+    await registry.close();
+  }
 });
 
 // ---- Things npm cannot answer ---------------------------------------------------------------------------------------
@@ -604,22 +621,70 @@ test('pnpm bootstrap: the printed Run command selects the target CLI, not the lo
 
 // A test project is a repo of its own, so the search for the repo's root stops there, whatever the folders above it hold.
 const git = { '.git/HEAD': 'ref: refs/heads/main\n' };
+// Angular 22's real Node range, on the major a test aims at: 20 is below it, a bare 22 or 24 floats into it, and 24.0 is
+// refused.
+const A22 = '^22.22.3 || ^24.15.0 || >=26.0.0';
+const nodeWorld = (major = 21) => {
+  const [core, compiler] = angular();
+  core.versions[`${major}.2.0`].engines = { node: A22 };
+  return [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })];
+};
+const setupNode = (version) => `jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '${version}'\n`;
 
 test('the repo\'s own Node pins below a major\'s range are named under it, wherever the repo keeps them', async () => {
   // The enterprise run's agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
-  const [core, compiler] = angular();
-  core.versions['21.2.0'].engines = { node: '^22.22.3 || ^24.15.0 || >=26.0.0' };
   const files = {
     ...git,
     '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\nRUN corepack enable\n',
     '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" }, "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm" }',
     '.nvmrc': '22\n',
-    '.github/workflows/ci.yml': "jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n",
+    '.github/workflows/ci.yml': setupNode('20'),
   };
-  const r = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase, files }), { to: 21 });
+  const r = await plan(nodeWorld(), app({ deps: base, lock: lockBase, files }), { to: 21 });
   assert.deepEqual(r.plan.hops[0].node.pins, [{ file: '.devcontainer/Dockerfile', value: 'node:22.12.0-bookworm' }, { file: '.github/workflows/ci.yml', value: '20' }]);
-  const text = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase, files }), { to: 21, text: true });
+  const text = await plan(nodeWorld(), app({ deps: base, lock: lockBase, files }), { to: 21, text: true });
   assert.match(text.stdout, /Node pins below that, in the repo: \.devcontainer\/Dockerfile \(node:22\.12\.0-bookworm\), \.github\/workflows\/ci\.yml \(20\)/);
+});
+
+test('every place the plan reads a Node pin names it when it is below the range', async () => {
+  // Each source holds a value below the range, so a source the plan stopped reading would be missing here.
+  const files = {
+    ...git,
+    'package.json': JSON.stringify({ name: 'app', dependencies: base, engines: { node: '>=20' }, volta: { node: '20.18.0' } }),
+    '.nvmrc': '20\n',
+    '.node-version': '20.11.0\n',
+    '.tool-versions': 'nodejs 20.18.0\n',
+    '.devcontainer/Dockerfile': 'FROM node:20-bookworm\n',
+    '.devcontainer/devcontainer.json': '{ "image": "mcr.microsoft.com/devcontainers/javascript-node:5.2.5-20-bookworm", "features": { "ghcr.io/devcontainers/features/node:1": { "version": "20" } } }',
+    '.github/workflows/ci.yml': setupNode('20'),
+  };
+  const r = await plan(nodeWorld(), app({ lock: lockBase, files }), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].node.pins, [
+    { file: '.nvmrc', value: '20' }, { file: '.node-version', value: '20.11.0' }, { file: '.tool-versions', value: '20.18.0' },
+    { file: '.devcontainer/Dockerfile', value: 'node:20-bookworm' },
+    { file: '.devcontainer/devcontainer.json', value: 'mcr.microsoft.com/devcontainers/javascript-node:5.2.5-20-bookworm' },
+    { file: '.devcontainer/devcontainer.json', value: '20' },
+    { file: 'package.json', value: '>=20' }, { file: 'package.json', value: '20.18.0' },
+    { file: '.github/workflows/ci.yml', value: '20' },
+  ]);
+});
+
+test('an app already on the target still hears about a Node pin below its range', async () => {
+  const deps = { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' };
+  const options = { deps, lock: { ...lockBase, '@angular/core': '22.2.0' }, files: { ...git, '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\n' } };
+  const r = await plan(nodeWorld(22), app(options), { to: 22 });
+  assert.equal(r.plan.status, 'already-there');
+  assert.deepEqual(r.plan.nodePins, { range: A22, pins: [{ file: '.devcontainer/Dockerfile', value: 'node:22.12.0-bookworm' }] });
+  const text = await plan(nodeWorld(22), app(options), { to: 22, text: true });
+  assert.ok(text.stdout.includes(`\n  Node pins below what Angular 22 needs (${A22}), in the repo: .devcontainer/Dockerfile (node:22.12.0-bookworm)\n`), text.stdout);
+});
+
+test('an app below the repo root gets the pins kept at the root too', async () => {
+  const lock = JSON.stringify({ lockfileVersion: 3, packages: Object.fromEntries(Object.entries(lockBase).map(([n, version]) => [`node_modules/${n}`, { version }])) });
+  const repo = app({ files: { ...git, 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: base }), 'apps/web/package-lock.json': lock, '.github/workflows/ci.yml': setupNode('20') } });
+  const r = await plan(nodeWorld(), { dir: join(repo.dir, 'apps', 'web') }, { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.plan.hops[0].node.pins, [{ file: '../../.github/workflows/ci.yml', value: '20' }]);
 });
 
 test('Node outside a major\'s range is reported on that major', async () => {
