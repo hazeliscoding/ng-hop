@@ -144,3 +144,85 @@ test('pnpm updater: executable shims are resolved without running a command shel
   assert.equal(r.code, 0, r.stderr || r.stdout);
   assert.equal(f.read().dispatch, 'true');
 });
+
+// ---- pnpm catalogs ------------------------------------------------------------------------------------------------
+
+// Stands in for pnpm. On `dlx … update` it plays ng update, which moves whatever versions it finds in package.json.
+const catalogDriver = `const fs = require('node:fs');
+const log = fs.existsSync(process.env.TEST_LOG) ? JSON.parse(fs.readFileSync(process.env.TEST_LOG, 'utf8')) : [];
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+log.push({ args: process.argv.slice(2), deps: { ...pkg.dependencies } });
+fs.writeFileSync(process.env.TEST_LOG, JSON.stringify(log));
+if (process.argv[2] === 'dlx') {
+  for (const name of Object.keys(pkg.dependencies)) if (name.startsWith('@angular/')) pkg.dependencies[name] = '^21.2.26';
+  if (pkg.dependencies.primeng) pkg.dependencies.primeng = '21.1.10';
+  fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
+  if (process.env.TEST_UPDATE_FAILS) process.exitCode = 2;
+}
+`;
+
+function catalogFixture(workspaceYaml, deps) {
+  const root = mkdtempSync(join(tmpdir(), 'ng-hop catalog-')); made.push(root);
+  const project = join(root, 'app'); mkdirSync(project);
+  const driver = join(root, 'pnpm.cjs'), log = join(root, 'log.json');
+  writeFileSync(driver, catalogDriver);
+  writeFileSync(join(project, 'package.json'), `${JSON.stringify({ private: true, dependencies: deps }, null, 2)}\n`);
+  writeFileSync(join(project, 'pnpm-workspace.yaml'), workspaceYaml);
+  writeFileSync(join(project, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n');
+  const git = (args) => { const r = spawnSync('git', args, { cwd: project, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  git(['init', '--initial-branch=main']); git(['add', '--all']);
+  git(['-c', 'user.name=Test fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'Fixture']);
+  return {
+    project, logFile: log, env: { npm_execpath: driver, TEST_LOG: log },
+    log: () => JSON.parse(readFileSync(log, 'utf8')),
+    read: (file) => readFileSync(join(project, file), 'utf8'),
+  };
+}
+
+const CATALOGS = "packages:\n  - '.'\n\ncatalog:\n  '@angular/core': ^20.3.0\n  rxjs: ~7.8.0 # shared with the docs site\ncatalogs:\n  angular:\n    \"@angular/common\": '^20.3.0'\n";
+const catalogDeps = { '@angular/core': 'catalog:', '@angular/common': 'catalog:angular', rxjs: 'catalog:', primeng: '20.4.0' };
+const hop21 = ['@angular/core@21', '@angular/cli@21', 'primeng@21.1.10'];
+
+test('pnpm updater: a catalog\'s versions go into package.json for the update, and the new ones go back into the catalog', async () => {
+  // Through Angular 21's CLI, ng update skips a catalog: package and still exits 0, having moved nothing.
+  const f = catalogFixture(CATALOGS, catalogDeps);
+  const r = await runScript(UPDATE, ['--json', ...hop21], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  const [update, install, ...more] = f.log();
+  assert.deepEqual(update.deps, { '@angular/core': '^20.3.0', '@angular/common': '^20.3.0', rxjs: '~7.8.0', primeng: '20.4.0' }, 'ng update saw plain versions');
+  assert.deepEqual(update.args, ['dlx', '@angular/cli@21', 'update', ...hop21, '--allow-dirty'], 'the only change it allows is its own, made after the tree was found clean');
+  assert.deepEqual(install.args, ['install', '--no-frozen-lockfile']);
+  assert.equal(more.length, 0);
+  assert.deepEqual(JSON.parse(f.read('package.json')).dependencies, { '@angular/core': 'catalog:', '@angular/common': 'catalog:angular', rxjs: 'catalog:', primeng: '21.1.10' });
+  assert.equal(f.read('pnpm-workspace.yaml'), CATALOGS.replace("'@angular/core': ^20.3.0", "'@angular/core': ^21.2.26").replace(`"@angular/common": '^20.3.0'`, `"@angular/common": '^21.2.26'`), 'only the entries that moved change, with their quoting and comments kept');
+  assert.deepEqual(JSON.parse(r.stdout).catalog.map((c) => `${c.name} ${c.from} ${c.to}`), ['@angular/core ^20.3.0 ^21.2.26', '@angular/common ^20.3.0 ^21.2.26']);
+});
+
+test('pnpm updater: a failed update puts package.json back on its catalog entries, and leaves the catalog alone', async () => {
+  const f = catalogFixture(CATALOGS, catalogDeps);
+  const r = await runScript(UPDATE, ['--json', ...hop21], { cwd: f.project, env: { ...f.env, TEST_UPDATE_FAILS: '1' } });
+  assert.equal(r.code, 2);
+  assert.equal(f.log().length, 1, 'no install after a failed update');
+  const deps = JSON.parse(f.read('package.json')).dependencies;
+  for (const name of ['@angular/core', '@angular/common', 'rxjs']) assert.equal(deps[name], catalogDeps[name]);
+  assert.equal(f.read('pnpm-workspace.yaml'), CATALOGS);
+});
+
+test('pnpm updater: a catalog it cannot edit safely is refused before anything runs', async () => {
+  for (const [yaml, why] of [["catalog: { '@angular/core': ^20.3.0 }\n", 'one line'], ["catalog:\n  '@angular/cdk': ^20.0.0\n", 'no entry']]) {
+    const f = catalogFixture(yaml, { '@angular/core': 'catalog:' });
+    const r = await runScript(UPDATE, ['--json', '@angular/core@21', '@angular/cli@21'], { cwd: f.project, env: f.env });
+    assert.equal(r.code, 1, why);
+    assert.match(JSON.parse(r.stdout).error, /catalog/, why);
+    assert.match(JSON.parse(r.stdout).error, /Nothing was changed/, why);
+    assert.equal(existsSync(f.logFile), false, why);
+    assert.deepEqual(JSON.parse(f.read('package.json')).dependencies, { '@angular/core': 'catalog:' }, why);
+  }
+});
+
+test('pnpm updater: a project with no catalog is updated exactly as before', async () => {
+  const f = catalogFixture("packages:\n  - '.'\n", { '@angular/core': '20.3.0' });
+  const r = await runScript(UPDATE, ['--json', '@angular/core@21', '@angular/cli@21'], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.log().map((c) => c.args), [['dlx', '@angular/cli@21', 'update', '@angular/core@21', '@angular/cli@21']]);
+});
