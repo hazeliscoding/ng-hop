@@ -217,6 +217,16 @@ test('a Node pin outside the app\'s folder is raised only when it builds, tests 
   assert.match(step('e'), /builds, tests or runs this app/);
 });
 
+test('a Node in a gap of Angular\'s range is too old, and a newer release of the same line can fix it', () => {
+  // Angular 22 needs ^22.22.3 || ^24.15.0 || >=26.0.0. CLI 22.2.6 exits on Node 24.14.1, where 24.15 is enough.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /'too-old'/, 'positive control: the plan prints too-old');
+  const rule = skill.split('\n').find((line) => line.includes('`Node: too-old`'));
+  assert.ok(rule, 'the skill has to answer Node: too-old');
+  assert.match(rule, /refuse to run/);
+  assert.match(rule, /newer release of the line they're on/);
+  assert.match(rule, /`unsupported` means Node is newer than every/);
+});
+
 const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');
 
 test('a workspace of several libraries builds with its own scripts, not plain ng build', () => {
