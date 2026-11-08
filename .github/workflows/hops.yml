@@ -34,6 +34,7 @@ jobs:
           - { os: ubuntu-24.04, fixture: clean-path }
           - { os: ubuntu-24.04, fixture: yarn-clean }
           - { os: ubuntu-24.04, fixture: bun-clean }
+          - { os: ubuntu-24.04, fixture: pnpm-catalog }
     env:
       NG_HOP_WORKSPACE: ${{ github.workspace }}/../ws
       NG_CLI_ANALYTICS: 'false'
