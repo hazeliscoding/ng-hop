@@ -191,6 +191,13 @@ test('the skill looks for Node pins past the files the plan reads', () => {
   assert.match(step('e'), /where you looked/);
 });
 
+const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');
+
+test('a workspace of several libraries builds with its own scripts, not plain ng build', () => {
+  // Angular CLI 22.2.6's ng build at the root of acme-ui stopped with this, and step 3 says to stop when the build fails.
+  assert.match(libraries(), /Cannot determine project for command/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
