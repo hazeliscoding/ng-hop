@@ -78,7 +78,7 @@ Most steps won't apply to this app. Search the code for what each one mentions i
 
 For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and for yarn through `node`, where npm's own cache holds the target CLI. This small transport uses pnpm's `dlx` cache for the target CLI and scopes Angular's own version-dispatch control to that child, so it cannot redispatch to the app's old CLI and bootstrap inside the workspace. It still checks a clean Git tree and leaves Angular's peer checks enabled. It does not install a global CLI, provision a package manager, retry, reset or commit anything itself.
 
-**d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error.
+**d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error. If `git diff --stat` shows a migration re-indented whole files, read its "Whole files show as changed" section now, before any hand fix lands in them.
 
 **e. Finish the major:**
 - Install anything the re-run plan lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
@@ -90,7 +90,7 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 
 If a failure won't yield to a reasonable effort, stop and ask. Say what you tried, and don't commit a broken major, since every commit in this history has to be safe to stop on.
 
-**g. Review your own diff.** Run `node $SCRIPTS/eol.mjs`, which puts back each changed file's line endings and final newline as the repo has them, then `git diff --stat`. Look for files you didn't mean to touch, and keep the diff to what this major needed. Keep migration output as the migration wrote it, because a hand rewrite leaves the reviewer nothing to check it against. If a migration reformatted whole files, read `references/troubleshooting.md`.
+**g. Review your own diff.** Run `node $SCRIPTS/eol.mjs`, which puts back each changed file's line endings and final newline as the repo has them, then `git diff --stat`. Look for files you didn't mean to touch, and keep the diff to what this major needed. Keep migration output as the migration wrote it, because a hand rewrite leaves the reviewer nothing to check it against. Don't restore or rerun a migration at this point, since your hand fixes are in those files now: if one reformatted whole files, tell reviewers to read the diff with `git diff -w`.
 
 **h. Commit,** following the repo's commit convention, with one commit per major. For example `chore(deps): upgrade to Angular 21`, with a body listing the versions moved and any fixes made by hand, since reviewers skim tool output but need to read hand fixes. Then go back to (a).
 
