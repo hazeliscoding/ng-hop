@@ -135,6 +135,22 @@ Package '@angular/core' is not a dependency.
 
 This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versions `pnpm list` also returns the workspace root, listed first, and Angular's CLI ends up looking at the root's empty dependencies instead of the app's. Nothing has changed at this point. Check `pnpm --version`: pnpm 12.7 and newer are fine, and a real app went from Angular 20 to 22 inside a workspace on 12.16.1. Updating pnpm changes the person's tool, or their `packageManager` pin, so ask first.
 
+## `✖ Migration failed: 404 Not Found` for the team's own package
+
+```text
+Fetching dependency metadata from registry...
+✖ Migration failed: 404 Not Found - GET https://registry.npmjs.org/@acme%2fui-core - Not found
+```
+
+This is an app below a pnpm workspace root whose `.npmrc` gives the team's scope a registry of its own. Up to Angular CLI 22.0, which runs every hop to Angular 21 or older, `ng update` fetches every dependency's metadata itself, not only the packages in the command. It reads registry settings only from the `.npmrc` in the app's folder, `~/.npmrc` and npm's global config, never from a `.npmrc` above the app, so it asks the public registry for the team's package. pnpm reads the root's `.npmrc`, which is why the install and the plan found it. From CLI 22.1, `ng update` asks pnpm instead. Nothing has changed at this point.
+
+For the hop, put the scope's registry line from the root's `.npmrc` where `ng update` reads it:
+
+- **A `.npmrc` in the app's folder,** committed by itself, because `update.mjs` stops on a tree that isn't clean. It changes no installed package, so it's safe to stop on.
+- **`~/.npmrc`,** which leaves the repo alone but is the person's own file, so ask first.
+
+An auth line for that registry that reads its token from an environment variable, such as `//npm.acme.example/:_authToken=${ACME_TOKEN}`, can be copied as it is. Never copy a token itself into a file git tracks. Then run the plan's command again, and say in the report where the line went.
+
 ## The build and tests pass, but the dev server fails
 
 `smoke.mjs` exists for this. Read its `server error` lines, or its `server log` lines when no error line matched.

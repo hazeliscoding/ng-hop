@@ -166,6 +166,15 @@ test('putting the tree back reaches a pnpm workspace root above the app', () => 
   for (const doc of docs) assert.doesNotMatch(doc, /git restore \.(?:[\s`]|$)/m);
 });
 
+test('a scope registry ng update cannot see goes where it reads, never with a literal token', () => {
+  // Angular CLI 21.2.29, run in an app below a pnpm workspace root, asked the public registry for the team's package:
+  // up to 22.0, ng update reads only the app folder's .npmrc and the user's and global ones.
+  const section = troubleSection('404 Not Found - GET https://registry.npmjs.org/@acme%2fui-core');
+  assert.match(section, /Up to Angular CLI 22\.0/);
+  assert.match(section, /`~\/\.npmrc`/);
+  assert.match(section, /Never copy a token itself into a file git tracks/);
+});
+
 // One lettered step of the upgrade loop in SKILL.md, from its bold label to the next one.
 function step(letter) {
   const start = skill.indexOf(`**${letter}. `);
