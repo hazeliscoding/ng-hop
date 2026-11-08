@@ -260,6 +260,23 @@ test('libraries that need each other are named as such, and one that only needs 
   assert.match(r.plan.notes.find((n) => n.includes('@acme/b')), /in this order: @acme\/x, which needs @acme\/y, then @acme\/b, which needs @acme\/x, then @acme\/y, which needs @acme\/x\. @acme\/x and @acme\/y need each other, so no order works for them: upgrade and publish them together\.$/);
 });
 
+test('a ring of three libraries that need each other is named whole, and apart from another ring', async () => {
+  // x needs y, y needs z and z needs x, so each one's release needs the other two's. b only needs x, so it's no part of
+  // the ring, and c and d are a ring of their own.
+  const lib = (name, needs) => pkg(name, { '20.4.0': { peers: { '@angular/core': '^20.0.0', [needs]: '^20.4.0' }, at: '2025-09-01' } });
+  const ring = [lib('@acme/x', '@acme/y'), lib('@acme/y', '@acme/z'), lib('@acme/z', '@acme/x')];
+  for (const [libs, order, together] of [
+    [ring, ['@acme/x', '@acme/z', '@acme/y'], '@acme/x, @acme/z and @acme/y'],
+    [[lib('@acme/b', '@acme/x'), ...ring], ['@acme/x', '@acme/b', '@acme/z', '@acme/y'], '@acme/x, @acme/z and @acme/y'],
+    [[lib('@acme/c', '@acme/d'), lib('@acme/d', '@acme/c'), ...ring], ['@acme/c', '@acme/d', '@acme/x', '@acme/z', '@acme/y'], '@acme/c and @acme/d, and @acme/x, @acme/z and @acme/y'],
+  ]) {
+    const deps = Object.fromEntries(libs.map((l) => [l.name, '20.4.0']));
+    const r = await plan(world(), app({ deps: { ...base, ...deps }, lock: { ...lockBase, ...deps } }), { to: 21, own: { scope: '@acme', packages: libs } });
+    assert.deepEqual(r.plan.ownBlockers, order);
+    assert.ok(r.plan.notes.at(-1).endsWith(`. ${together} need each other, so no order works for them: upgrade and publish them together.`), r.plan.notes.at(-1));
+  }
+});
+
 test('an optional peer is no need, so it can\'t turn the order around', async () => {
   // theme works with forms if it's there, and forms needs theme.
   const theme = pkg('@acme/theme', { '20.4.0': { peers: { '@angular/core': '^20.0.0', '@acme/forms': '^20.4.0' }, at: '2025-09-01' } });

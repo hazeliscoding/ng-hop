@@ -981,6 +981,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     const order = [];
     // Every library n needs, directly or through others, that isn't in the order yet.
     const reach = (n, seen = new Set()) => { for (const d of needs.get(n)) if (!order.includes(d) && !seen.has(d)) { seen.add(d); reach(d, seen); } return seen; };
+    // Before anything is in the order, that's every library n needs.
+    const all = new Map([...names].map((n) => [n, reach(n)]));
     while (order.length < names.size) {
       const ready = [...names].filter((n) => !order.includes(n) && needs.get(n).every((d) => order.includes(d))).sort();
       if (ready.length) { order.push(...ready); continue; }
@@ -990,11 +992,12 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
     plan.ownBlockers = order;
     const each = order.map((n) => (needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
-    // A library that needs one listed after it needs it back, directly or through others.
-    const late = order.flatMap((n, i) => needs.get(n).filter((d) => order.indexOf(d) > i).map((d) => `${n} and ${d}`));
+    // Libraries that need each other, directly or through others, go out together, however many there are.
+    const groupOf = (n) => order.filter((m) => all.get(n).has(m) && all.get(m).has(n));
+    const together = order.filter((n) => groupOf(n)[0] === n).map(groupOf).map((g) => `${g.slice(0, -1).join(', ')} and ${g.at(-1)}`);
     const scopes = [...new Set(order.map((n) => n.split('/')[0]))];
     const several = order.length > 1;
-    plan.notes.push(`${several ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from the ${scopes.length > 1 ? 'registries' : 'registry'} your npm config sets for ${scopes.join(' and ')}. If ${several ? 'they are' : 'it is'} your team's, ${several ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}${several ? `, in this order: ${each.join(', then ')}` : ''}.${late.length ? ` ${late.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
+    plan.notes.push(`${several ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from the ${scopes.length > 1 ? 'registries' : 'registry'} your npm config sets for ${scopes.join(' and ')}. If ${several ? 'they are' : 'it is'} your team's, ${several ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}${several ? `, in this order: ${each.join(', then ')}` : ''}.${together.length ? ` ${together.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
   }
   if (blockedAt !== null) plan.status = 'blocked';
   else if (target === currentMajor) {
