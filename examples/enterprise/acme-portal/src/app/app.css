@@ -26,6 +26,12 @@
   gap: 0.5rem;
 }
 
+.requests li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
 .requests span {
   color: var(--acme-muted);
 }
