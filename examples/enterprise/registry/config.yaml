@@ -8,4 +8,5 @@ packages:
     access: $all
     publish: $all
 listen: 127.0.0.1:4873
-log: { type: stdout, format: pretty, level: warn }
+# At info it prints its address and "server started" once it's ready, then a line for each request.
+log: { type: stdout, format: pretty, level: info }
