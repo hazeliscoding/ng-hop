@@ -27,7 +27,7 @@ To start over, stop the registry, delete `examples/enterprise/registry/storage/`
 
 ## What should happen
 
-1. The plan says the portal is blocked by `@acme/ui-core` and `@acme/ui-forms`, that both come from your own registry, and that ui-core goes first.
+1. The plan says the portal is blocked by `@acme/ui-core` and `@acme/ui-forms`, that both come from the registry your npm config sets for `@acme`, and that, if they're your team's, ui-core goes first.
 2. Asked where they live, you point the agent at `<folder>/acme-ui`. It upgrades that workspace to Angular 22, moves each library's peer ranges and version, builds and tests them, and asks before publishing.
 3. Back in the portal, the plan is clear. But the libraries' 22.0.0 is only minutes old, and pnpm holds a release back for its first day (its minimum release age). So the agent asks before exempting the two releases, the way `pnpm-workspace.yaml` already exempts 21.4.0. `ng update` applies the same rule itself and ignores the exemption, so, with your go-ahead, the agent installs the two releases before it updates Angular. If you'd rather not exempt them, wait a day. Then the agent takes the app to 22, raises the dev container's Node to one Angular 22 accepts, and checks the build, the tests and the running app.
 
