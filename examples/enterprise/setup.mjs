@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const REGISTRY = 'http://localhost:4873/';
+const START_REGISTRY = 'npx verdaccio@7.0.2 --config examples/enterprise/registry/config.yaml';
 const target = process.argv[2] && resolve(process.argv[2]);
 
 function run(cmd, args, cwd) {
@@ -31,7 +32,11 @@ async function versions(name) {
 
 async function main() {
   if (!target) throw new Error('Usage: node examples/enterprise/setup.mjs <folder>');
-  try { await fetch(`${REGISTRY}-/ping`); } catch { throw new Error(`No registry answers at ${REGISTRY}. Start it first:\n  npx verdaccio@7.0.2 --config examples/enterprise/registry/config.yaml`); }
+  const ping = await fetch(`${REGISTRY}-/ping`).catch(() => { throw new Error(`No registry answers at ${REGISTRY}. Start it first:\n  ${START_REGISTRY}`); });
+  if (!ping.ok) throw new Error(`The server at ${REGISTRY} answered ${ping.status} to a ping. Stop whatever holds port 4873, then start the example's registry:\n  ${START_REGISTRY}`);
+  // 4873 is Verdaccio's default port, so another registry may answer there, and setup would publish Acme's libraries to
+  // it. The example's has only @acme packages, so one that serves a public package such as react isn't it.
+  if ((await fetch(`${REGISTRY}react`)).ok) throw new Error(`The registry at ${REGISTRY} serves react, so it isn't the example's, which has only @acme packages. Stop it or move it to another port, then start the example's:\n  ${START_REGISTRY}`);
   // The registry keeps what earlier runs published, and a later release there would leave the portal nothing to wait for.
   for (const name of ['@acme/ui-core', '@acme/ui-forms']) {
     const later = (await versions(name)).find((v) => !v.startsWith('21.'));
