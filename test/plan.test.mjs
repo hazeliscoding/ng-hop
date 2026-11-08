@@ -693,14 +693,14 @@ test('every place the plan reads a Node pin names it when it is below the range'
     '.node-version': '20.11.0\n',
     '.tool-versions': 'nodejs 20.18.0\n',
     '.devcontainer/Dockerfile': 'FROM node:20-bookworm\n',
-    '.devcontainer/devcontainer.json': '{ "image": "mcr.microsoft.com/devcontainers/javascript-node:5.2.5-20-bookworm", "features": { "ghcr.io/devcontainers/features/node:1": { "version": "20" } } }',
+    '.devcontainer/devcontainer.json': '{ "image": "mcr.microsoft.com/devcontainers/javascript-node:4.0.10-20-bookworm", "features": { "ghcr.io/devcontainers/features/node:1": { "version": "20" } } }',
     '.github/workflows/ci.yml': setupNode('20'),
   };
   const r = await plan(nodeWorld(), app({ lock: lockBase, files }), { to: 21 });
   assert.deepEqual(r.plan.hops[0].node.pins, [
     { file: '.nvmrc', value: '20' }, { file: '.node-version', value: '20.11.0' }, { file: '.tool-versions', value: '20.18.0' },
     { file: '.devcontainer/Dockerfile', value: 'node:20-bookworm' },
-    { file: '.devcontainer/devcontainer.json', value: 'mcr.microsoft.com/devcontainers/javascript-node:5.2.5-20-bookworm' },
+    { file: '.devcontainer/devcontainer.json', value: 'mcr.microsoft.com/devcontainers/javascript-node:4.0.10-20-bookworm' },
     { file: '.devcontainer/devcontainer.json', value: '20' },
     { file: 'package.json', value: '>=20' }, { file: 'package.json', value: '20.18.0' },
     { file: '.github/workflows/ci.yml', value: '20' },
