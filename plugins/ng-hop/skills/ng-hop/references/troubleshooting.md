@@ -30,7 +30,7 @@ Something in the project needs an older Angular, and it isn't in the command.
 - Re-run `plan.mjs`. If it names `x` with a version, you ran an out-of-date command, so run the new one.
 - If `x` isn't a direct dependency, it's pulled in by one. Find the parent with `npm ls x` (`pnpm why x` on pnpm) and treat the parent as the library to move.
 - If no release of `x` supports this major, it's a blocker: go to `blocked.md`.
-- If the command names `x` at a release that does support this major, and the error still quotes the old release's peers, the package manager isn't letting the new release in. On pnpm, see the next section.
+- If the command names `x` at a release that does support this major, and the error still quotes the old release's peers, `ng update` is most likely skipping a release less than a day old, as Angular CLI 22.1 and newer do on pnpm 11 or newer, or yarn 4: see the next section.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
 
@@ -40,11 +40,19 @@ Don't reach for `--force`. It only skips this check, and the same mismatch comes
 Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5").
 ```
 
-This shows right after the team publishes a release that does accept the new Angular, such as `@acme/ui-core@22.0.0`, while the command names it. pnpm 11 and newer won't resolve a version younger than `minimumReleaseAge`, a guard against a compromised release, so it still sees the old one and `ng update` quotes that one's peers. Confirm it with `pnpm config get minimumReleaseAge` and the release's age from `npm view <package> time`, or by adding the package in a scratch copy of the project. `pnpm add` exempts a version it was asked for by name, which is how per-version entries end up in `pnpm-workspace.yaml` under `minimumReleaseAgeExclude`.
+This shows when the command names a release that does accept the new Angular, such as `@acme/ui-core@22.0.0`, while that release is less than a day old. From Angular CLI 22.1, `ng update` skips any release younger than the package manager's minimum release age, a guard against a compromised release, so it keeps the installed release and quotes that one's peers. pnpm 11 and newer set that age to 1440 minutes by default, and `pnpm config get minimumReleaseAge` prints `undefined` for the default, so confirm the cause with the release's age from `npm view <package> time`. yarn 4 does the same with `npmMinimalAgeGate`, also 1440 minutes by default, which `yarn config get npmMinimalAgeGate` does print.
 
-Exempting a release relaxes a safeguard, so it's the person's call, even for their own package: ask. They can wait until the release is old enough, or exempt it as its own commit, the way the file already lists earlier releases, or exempt the team's whole scope (`'@acme/*'`) once, if they trust their registry.
+`ng update` reads no exemption list, so an exemption alone doesn't get the release past it. The package managers behave differently:
 
-An exemption gets the release past pnpm, but not past `ng update`. Angular CLI 22 applies the same age rule in its own resolver, with pnpm's `minimum-release-age` (24 hours by default from pnpm 11) or yarn 4's `npmMinimalAgeGate`, and it doesn't read `minimumReleaseAgeExclude`. So for its first day, the new release still fails the peer check. Either wait the day out, or, with the person's go-ahead, install the exempted releases first (`pnpm add <package>@<version>`), then run the plan's update for Angular with `--allow-dirty`, all in the one commit for that major. Say in the report that the update ran that way, and why.
+- **pnpm** installs a release it's asked for by name, and writes the exemption into `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` itself, creating the file if it has to: `Added 1 entry to minimumReleaseAgeExclude in pnpm-workspace.yaml`. With `minimumReleaseAgeStrict: true` it stops with `ERR_PNPM_NO_MATURE_MATCHING_VERSION` instead.
+- **yarn** refuses the release, with `YN0016: │ @acme/ui-core@npm:^22.0.0: All versions satisfying "^22.0.0" are quarantined`, until `.yarnrc.yml` lists it under `npmPreapprovedPackages`.
+
+Exempting a release relaxes that guard, so it's the person's call, even for their own package: ask. They have two ways on.
+
+- **Wait** until the release is a day old, then re-run the plan and its command. It costs a day and nothing else.
+- **Install it first,** only for a library the plan doesn't mark `ships migrations`. `ng update` skips migrations for a version `package.json` already claims, so for a library that ships them, wait. With their go-ahead, add each release to the exemption list (`- '@acme/ui-core@22.0.0'` under `minimumReleaseAgeExclude`, or under `npmPreapprovedPackages`), or the team's whole scope (`'@acme/*'`) once if they trust their registry, and commit that by itself. It changes no installed package, so it's safe to stop on. Then run the plan's `Run:` command with `--install-first <package>` for each of those libraries. `update.mjs` installs them first, in the form `package.json` gives them now, checks that only `package.json` and the lockfile changed, and then updates the rest, all in the one commit for that major. Say in the report that the update ran that way, and why.
+
+If `update.mjs` stops with `Installing first also changed pnpm-workspace.yaml`, pnpm wrote an exemption the list didn't cover, such as one for a release newer than the one approved. Put the tree back (`git restore .`, and delete `pnpm-workspace.yaml` if `git status` shows it as untracked), reinstall with `pnpm install --frozen-lockfile`, and ask about that release.
 
 ## The plan rejects angular-eslint with "requires no Angular version"
 
@@ -64,7 +72,7 @@ Read which two requirements conflict. Usually a shared package such as `marked` 
 
 ## `Repository is not clean`
 
-Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above.
+Something changed since the last commit. Finish and commit the major in progress, or find out what changed. `--allow-dirty` belongs only to the `--migrate-only` case above. `update.mjs --install-first` passes it to `ng update` itself, once it has checked that its own install changed only `package.json` and the lockfile.
 
 If the repository was clean immediately before pnpm printed this sequence from a plain `pnpm exec ng update`:
 

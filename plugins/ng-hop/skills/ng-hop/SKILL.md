@@ -126,3 +126,4 @@ An upgrade diff is already hard to review, and changes nobody asked for are the 
 - **No unrelated bumps or cleanups:** no `npm audit fix`, no newer versions of libraries the plan leaves alone, no reformatting.
 - **No `--force`, `--legacy-peer-deps`, `overrides`, `resolutions`, `peerDependencyRules` or prereleases** without the person's approval. They hide the conflict the plan exists to surface.
 - **No approving a package's install script** without the person's approval. It runs that package's code on every install.
+- **No release-age exemption** (`minimumReleaseAgeExclude`, `npmPreapprovedPackages`) without the person's approval. It lets in a release too new for a compromise to have been caught.

@@ -110,6 +110,53 @@ test('the skill only aims at a prerelease when someone asks to try one', () => {
   assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /--next/);
 });
 
+// The section of troubleshooting.md that holds this text, which is also the positive control that it's still there.
+function troubleSection(text) {
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  const at = trouble.indexOf(text);
+  assert.ok(at >= 0, `troubleshooting.md has to keep ${text}`);
+  const end = trouble.indexOf('\n## ', at);
+  return trouble.slice(trouble.lastIndexOf('\n## ', at), end < 0 ? undefined : end);
+}
+const youngRelease = 'Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5")';
+
+test('a release too young for ng update is blamed on its own filter, with a check that works', () => {
+  // pnpm 12.16.1 let a release ten minutes old in when asked by name, and wrote the exemption itself. Angular CLI 22.1's
+  // resolver is what skipped it, and `pnpm config get minimumReleaseAge` printed undefined for the one-day default.
+  const section = troubleSection(youngRelease);
+  assert.doesNotMatch(section, /won't resolve a version younger/);
+  assert.match(section, /prints `undefined`/);
+  assert.match(section, /npm view <package> time/);
+});
+
+test('a release too young for ng update is covered on yarn 4 too', () => {
+  // yarn 4.18.1 gates releases for 1440 minutes by default and refuses one itself until .yarnrc.yml preapproves it.
+  const section = troubleSection(youngRelease);
+  assert.match(section, /npmPreapprovedPackages/);
+  assert.match(section, /YN0016/);
+  const pointer = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8').split('\n').find((line) => line.includes("still quotes the old release's peers"));
+  assert.ok(pointer, 'the peer-error section has to point here');
+  assert.match(pointer, /yarn 4/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4/);
+});
+
+test('a release too young for ng update goes in first through update.mjs, never with --allow-dirty by hand', () => {
+  // update.mjs rejects --allow-dirty and refuses a dirty tree, so the old step couldn't run, and installing a library
+  // first skips its migrations.
+  const section = troubleSection(youngRelease);
+  assert.match(section, /--install-first/);
+  assert.match(section, /ships migrations/);
+  assert.doesNotMatch(section, /with `--allow-dirty`/);
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8'), /'install-first'/);
+});
+
+test('a release-age exemption waits for the person, like an override', () => {
+  // It turns off a guard against a compromised release, and pnpm writes one without asking.
+  const rule = skill.split('\n').find((line) => line.includes('npmPreapprovedPackages') && line.includes("without the person's approval"));
+  assert.ok(rule, 'the scope list has to name release-age exemptions');
+  assert.match(rule, /minimumReleaseAgeExclude/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
