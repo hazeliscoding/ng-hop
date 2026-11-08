@@ -30,8 +30,19 @@ Something in the project needs an older Angular, and it isn't in the command.
 - Re-run `plan.mjs`. If it names `x` with a version, you ran an out-of-date command, so run the new one.
 - If `x` isn't a direct dependency, it's pulled in by one. Find the parent with `npm ls x` (`pnpm why x` on pnpm) and treat the parent as the library to move.
 - If no release of `x` supports this major, it's a blocker: go to `blocked.md`.
+- If the command names `x` at a release that does support this major, and the error still quotes the old release's peers, the package manager isn't letting the new release in. On pnpm, see the next section.
 
 Don't reach for `--force`. It only skips this check, and the same mismatch comes back at install time or at runtime.
+
+## A release published minutes ago is held back on pnpm
+
+```
+Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5").
+```
+
+This shows right after the team publishes a release that does accept the new Angular, such as `@acme/ui-core@22.0.0`, while the command names it. pnpm 11 and newer won't resolve a version younger than `minimumReleaseAge`, a guard against a compromised release, so it still sees the old one and `ng update` quotes that one's peers. Confirm it with `pnpm config get minimumReleaseAge` and the release's age from `npm view <package> time`, or by adding the package in a scratch copy of the project. `pnpm add` exempts a version it was asked for by name, which is how per-version entries end up in `pnpm-workspace.yaml` under `minimumReleaseAgeExclude`.
+
+Exempting a release relaxes a safeguard, so it's the person's call, even for their own package: ask. They can wait until the release is old enough, or exempt it as its own commit, the way the file already lists earlier releases, or exempt the team's whole scope (`'@acme/*'`) once, if they trust their registry.
 
 ## The plan rejects angular-eslint with "requires no Angular version"
 
