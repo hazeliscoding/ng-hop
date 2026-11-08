@@ -130,7 +130,8 @@ export const check = {
     },
   }),
   saysNewPeer: () => check.says('Says ng-select now needs @angular/cdk', /cdk/i),
-  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node[^.\n]{0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)[^.\n]{0,120}node/i),
+  // Within a sentence, or from a "Node" heading to the line under it.
+  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node(?:[^.\n]|\n(?!\n)){0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)(?:[^.\n]|\n(?!\n)){0,120}node/i),
   saysLicenseChanges: () => check.says('Tells the person PrimeNG 22 changes its license', /(primeng|primeui)[\s\S]{0,600}licen[sc]e|licen[sc]e[\s\S]{0,600}(primeng|primeui)/i),
   usedPlan: () => ({
     text: 'Used the plan script',

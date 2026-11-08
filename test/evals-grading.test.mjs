@@ -121,7 +121,9 @@ test('facts an upgrade report owes the person, in the words real answers used', 
   const node = check('upgrade-clean-path', 'Says Angular 22 needs a newer Node');
   assert.ok(says(node, '**Node:** Angular 22 needs ^22.22.3, ^24.15.0 or >=26.0.0, so check your CI.'));
   assert.ok(says(node, 'Node has to be at least 22.22 or 24.15 now.'));
+  assert.ok(says(node, '## Node\nAngular 22 needs **`^22.22.3 || ^24.15.0 || >=26.0.0`**. This machine is on 24.20.0, so it\'s fine.'), 'an OpenCode answer');
   assert.ok(!says(node, 'Your Node version is fine.'));
+  assert.ok(!says(node, '## Node\n\nUnchanged.\n\n## Versions\n24.15 of the docs'), 'a heading reaches only the line under it');
 
   const wrong = check('ask-open-range', 'Does not claim 34.3.1 stops working on the newer Angular');
   assert.ok(!says(wrong, "So 34.3.1 won't work past Angular 20, and 36.3.0 is the version to plan around."));
