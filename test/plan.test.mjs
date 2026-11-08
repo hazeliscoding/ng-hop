@@ -684,7 +684,7 @@ const pinsOf = async (files) => {
 };
 const engines = (node) => ({ 'package.json': JSON.stringify({ name: 'app', dependencies: base, engines: { node } }) });
 
-test('the repo\'s own Node pins below a major\'s range are named under it, wherever the repo keeps them', async () => {
+test('the repo\'s own Node pins below a major\'s range are named under it, from the dev container, a Dockerfile, .nvmrc and a CI workflow', async () => {
   // The enterprise run's agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
   const files = {
     ...git,
