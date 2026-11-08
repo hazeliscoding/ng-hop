@@ -196,7 +196,7 @@ fs.writeFileSync(process.env.TEST_LOG, JSON.stringify(log));
 if (process.argv[2] === 'add') {
   if (process.env.TEST_ADD_FAILS) { console.error('ERR_PNPM_NO_MATURE_MATCHING_VERSION'); process.exit(1); }
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  for (const spec of process.argv.slice(3)) {
+  for (const spec of process.argv.slice(3).filter((arg) => !arg.startsWith('-'))) {
     const at = spec.lastIndexOf('@'), name = spec.slice(0, at);
     (pkg.devDependencies?.[name] ? pkg.devDependencies : pkg.dependencies)[name] = spec.slice(at + 1);
   }
@@ -207,12 +207,13 @@ if (process.argv[2] === 'add') {
 }
 `;
 
-function firstFixture(manifest, { yarn = false } = {}) {
+function firstFixture(manifest, { yarn = false, workspace } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'ng-hop install-first-')); made.push(root);
   const project = join(root, 'app'), bin = join(root, 'bin'); mkdirSync(project); mkdirSync(bin);
   const log = join(root, 'log.json');
   writeFileSync(join(project, 'package.json'), `${JSON.stringify({ private: true, ...manifest }, null, 2)}\n`);
   writeFileSync(join(project, yarn ? 'yarn.lock' : 'pnpm-lock.yaml'), '# lockfile\n');
+  if (workspace) writeFileSync(join(project, 'pnpm-workspace.yaml'), workspace);
   writeFileSync(join(project, 'tracked.txt'), 'clean\n');
   const git = (args) => { const r = spawnSync('git', args, { cwd: project, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
   git(['init', '--initial-branch=main']); git(['add', '--all']);
@@ -249,6 +250,20 @@ test('pnpm updater: --install-first installs those libraries first, in the form 
     ['dlx', '@angular/cli@22', 'update', '@angular/core@22', '@angular/cli@22', '--allow-dirty'],
   ], 'the caret stays, an exact pin stays exact, and the update leaves out what is installed already');
   assert.deepEqual(JSON.parse(r.stdout).installedFirst, ['@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0']);
+});
+
+test('pnpm updater: --install-first adds to the app with -w when the app is a workspace root that lists packages', async () => {
+  // pnpm 12.16.1 stopped with ERR_PNPM_ADDING_TO_ROOT in a root that listed two package patterns, until -w said the root
+  // was meant. It took the add as it was in a root with one pattern or with settings only.
+  for (const [workspace, flag, why] of [
+    ["packages:\n  - 'projects/*'\n  - 'libs/*'\n", ['-w'], 'a root that lists packages'],
+    ['minimumReleaseAge: 1440\n', [], 'a root with settings only'],
+  ]) {
+    const f = firstFixture(acme, { workspace });
+    const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
+    assert.equal(r.code, 0, r.stderr || r.stdout);
+    assert.deepEqual(f.log()[0], ['add', ...flag, '@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0'], why);
+  }
 });
 
 test('yarn updater: --install-first installs through the project\'s yarn, and the update still runs through npm', async () => {

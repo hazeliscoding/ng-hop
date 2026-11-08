@@ -202,8 +202,12 @@ function main() {
   const options = { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 };
   if (first.length) {
     // pnpm keeps the lockfile beside pnpm-workspace.yaml, which can be above the app.
-    const lockfile = yarn ? 'yarn.lock' : relative(cwd, join(dirname(findWorkspaceFile(cwd) ?? join(cwd, 'package.json')), 'pnpm-lock.yaml')).replace(/\\/g, '/');
-    const add = spawnSync(installer.file, [...installer.prefix, 'add', ...first], options);
+    const workspace = yarn ? null : findWorkspaceFile(cwd);
+    const lockfile = yarn ? 'yarn.lock' : relative(cwd, join(dirname(workspace ?? join(cwd, 'package.json')), 'pnpm-lock.yaml')).replace(/\\/g, '/');
+    // pnpm refuses an add in a workspace root that lists two or more package patterns, unless -w says the root is
+    // meant, as it is here. Below the root, -w would add to the root instead of the app.
+    const root = workspace === join(cwd, 'pnpm-workspace.yaml') && /^packages\s*:/m.test(readFileSync(workspace, 'utf8'));
+    const add = spawnSync(installer.file, [...installer.prefix, 'add', ...(root ? ['-w'] : []), ...first], options);
     if (add.status !== 0) throw new Error(`Installing ${first.join(' ')} first failed, so no update was run.`);
     // The tree was clean a moment ago, so every change since is the install's. Anything past package.json and the
     // lockfile, such as a release-age exemption pnpm wrote itself, is the person's to approve, not this hop's to carry.
