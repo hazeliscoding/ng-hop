@@ -167,6 +167,46 @@ function readPnpmLock(root, dir) {
   return versions;
 }
 
+// yarn.lock lists each version under the ranges that resolve to it, in yarn 1's format or yarn 2's, where a range
+// reads "npm:^20.0.0". When a package is in the tree at more than one version, the app's own range picks the right one.
+function readYarnLock(dir, deps) {
+  const found = {};
+  let entry = null;
+  for (const line of readFileSync(join(dir, 'yarn.lock'), 'utf8').split(/\r?\n/)) {
+    if (/^[^\s#].*:$/.test(line) && !line.startsWith('__metadata')) {
+      entry = { version: null };
+      for (const descriptor of line.slice(0, -1).split(/,\s*/).map((d) => d.replace(/^"|"$/g, ''))) {
+        const at = descriptor.indexOf('@', 1);
+        if (at > 0) (found[descriptor.slice(0, at)] ||= []).push({ range: descriptor.slice(at + 1).replace(/^npm:/, ''), entry });
+      }
+      continue;
+    }
+    const version = /^ {2}version:? "?([^"\s]+)"?$/.exec(line);
+    if (entry && version) entry.version = version[1];
+  }
+  const versions = {};
+  for (const [name, list] of Object.entries(found)) {
+    const own = list.find((item) => item.range === deps[name]);
+    const all = new Set(list.map((item) => item.entry.version));
+    const version = own ? own.entry.version : all.size === 1 ? [...all][0] : null;
+    if (version) versions[name] = version;
+  }
+  return versions;
+}
+
+// bun.lock is JSON with trailing commas. A top-level key is the hoisted copy, which is the app's own; a nested one,
+// such as "some-lib/@angular/core", belongs to another package.
+function readBunLock(dir) {
+  try {
+    const packages = JSON.parse(readFileSync(join(dir, 'bun.lock'), 'utf8').replace(/,(\s*[}\]])/g, '$1')).packages || {};
+    return Object.fromEntries(Object.entries(packages)
+      .filter(([key, value]) => VALID_NAME.test(key) && Array.isArray(value) && typeof value[0] === 'string')
+      .map(([key, value]) => [key, value[0].slice(value[0].lastIndexOf('@') + 1)]));
+  } catch {
+    return {};
+  }
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -185,8 +225,12 @@ function readProject(dir) {
     : existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bun.lock')) ? 'bun'
     : (pkg.packageManager || 'npm').split('@')[0];
 
+  const otherLock = packageManager === 'yarn' && existsSync(join(dir, 'yarn.lock')) ? readYarnLock(dir, deps)
+    : packageManager === 'bun' && existsSync(join(dir, 'bun.lock')) ? readBunLock(dir)
+    : {};
+
   const installed = (name) => {
-    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name];
+    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name] || otherLock[name];
     if (fromLock && semver.valid(fromLock)) return { version: fromLock, source: 'lockfile' };
     const modPath = join(dir, 'node_modules', name, 'package.json');
     if (existsSync(modPath)) {
