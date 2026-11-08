@@ -159,6 +159,8 @@ A migration can also reformat whole files. Angular 21's control-flow migration r
 - **Karma** needs `--browsers=ChromeHeadless` when there's no display. Upgrading doesn't switch an existing project to Vitest, so don't move test runners as part of this.
 - **`CHROME_BIN`:** set it if Chrome isn't found.
 - **A spec that fails to compile because of an API change** is the upgrade's to fix. A spec that already failed in step 3 isn't.
+- **`Unknown argument: watch`:** the project has no `test` target in `angular.json`. Run what its `package.json` scripts and CI run instead, at the git root too in a monorepo, and say which in your report.
+- **The suite stops before any spec runs,** as with Karma's `Found 1 load error` from one spec that doesn't compile: no unit test gives any signal, before or after the upgrade. `SKILL.md` step 3 treats that like a failing build, so ask the person before going on.
 
 ## Resuming after an interruption
 

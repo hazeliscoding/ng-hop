@@ -58,6 +58,8 @@ node $SCRIPTS/smoke.mjs          # runs the dev server, and renders the page in 
 
 Keep the exact results. Anything failing now isn't caused by the upgrade, so it stays out of the upgrade: don't fix it, and don't count it against a major. Report it at the end. If the build itself fails here, stop and ask, because nothing after this point could be told apart from what was already broken.
 
+With no `test` target in `angular.json`, `ng test` stops with `Unknown argument: watch`: run what the project's `package.json` scripts and CI run instead, at the git root too in a monorepo, and say which. If no test can run at all, because there are none or the suite stops before any spec runs (Karma's `Found 1 load error`), the upgrade would go untested. Treat that like a failing build: say so, and ask whether to fix it first in its own commit or go on with the build and app check only.
+
 ## 4. Upgrade one major at a time
 
 `ng update` refuses to skip majors, and each major's migrations need the previous one's output. For each major up to the target or ceiling:
@@ -110,7 +112,7 @@ Keep it short and lead with the result:
 - **Unconfirmed:** libraries npm couldn't vouch for, and what you checked instead.
 - **Already failing:** anything from step 3, left as it was.
 - **Available but not done:** optional migrations `ng update` offered, and deprecations to plan for.
-- **Not checked:** anything you skipped, including flows the app check can't reach.
+- **Not checked:** anything you skipped or that couldn't run, such as unit tests when none ran, and flows the app check can't reach.
 
 ## Staying in scope
 
