@@ -13,7 +13,7 @@ A workspace of Angular libraries goes up a major the way an app does, through `n
 After the workspace's `ng update`, for each library:
 
 1. **Its Angular peers:** move every `@angular/*` peer range to the new major, such as `^22.0.0`. A library built with Angular 22's compiler isn't promised to work on 21, so move the range rather than widening it.
-2. **Its peers on the team's other libraries:** move them to the releases you're about to publish, such as `"@acme/ui-core": "^22.0.0"`.
+2. **Its peers and dependencies on the team's other libraries:** move them to the releases you're about to publish, such as `"@acme/ui-core": "^22.0.0"`.
 3. **Its version:** a new major, since dropping the old Angular breaks its users. Follow how its history numbers releases (many internal libraries match Angular's major), and ask if that isn't clear.
 4. **Its changelog,** if it keeps one.
 
