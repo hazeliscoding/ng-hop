@@ -192,6 +192,14 @@ test('the skill looks for Node pins past the files the plan reads', () => {
   assert.match(step('e'), /where you looked/);
 });
 
+test('a Node pin outside the app\'s folder is raised only when it builds, tests or runs this app', () => {
+  // The plan also reads the repo root's package.json, Dockerfile and workflows, which in a monorepo can belong to another
+  // service, and this app's checks can't catch what raising its Node does there.
+  assert.match(step('e'), /Raise each Node pin the plan lists/, 'positive control: this is the step that raises pins');
+  assert.match(step('e'), /starts with `\.\.\/`/);
+  assert.match(step('e'), /builds, tests or runs this app/);
+});
+
 const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');
 
 test('a workspace of several libraries builds with its own scripts, not plain ng build', () => {
