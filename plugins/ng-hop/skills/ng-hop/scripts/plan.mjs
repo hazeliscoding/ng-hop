@@ -983,12 +983,19 @@ async function buildPlan({ projectDir, to, next = false }) {
     const reach = (n, seen = new Set()) => { for (const d of needs.get(n)) if (!order.includes(d) && !seen.has(d)) { seen.add(d); reach(d, seen); } return seen; };
     // Before anything is in the order, that's every library n needs.
     const all = new Map([...names].map((n) => [n, reach(n)]));
+    // A library and the ones that need it back go into the order as one group, so one that only needs them comes after
+    // all of them, not between them.
+    const cycle = (n) => [...names].filter((m) => m === n || (all.get(n).has(m) && all.get(m).has(n)));
+    const groups = [];
+    for (const n of [...names].sort()) if (!groups.some((g) => g.includes(n))) groups.push(cycle(n));
     while (order.length < names.size) {
-      const ready = [...names].filter((n) => !order.includes(n) && needs.get(n).every((d) => order.includes(d))).sort();
-      if (ready.length) { order.push(...ready); continue; }
-      // Nothing is ready, so some libraries need each other. One whose every need leads back to it starts, so a library
-      // that only needs them still comes after it.
-      order.push([...names].find((n) => !order.includes(n) && [...reach(n)].every((d) => reach(d).has(n))));
+      for (const g of groups.filter((g) => !order.includes(g[0]) && g.every((m) => needs.get(m).every((d) => order.includes(d) || g.includes(d))))) {
+        while (g.some((m) => !order.includes(m))) {
+          const ready = g.filter((m) => !order.includes(m) && needs.get(m).every((d) => order.includes(d))).sort();
+          // Inside a group nothing may be ready. One whose every need leads back to it starts.
+          order.push(...(ready.length ? ready : [g.find((m) => !order.includes(m) && [...reach(m)].every((d) => reach(d).has(m)))]));
+        }
+      }
     }
     plan.ownBlockers = order;
     const each = order.map((n) => (needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));

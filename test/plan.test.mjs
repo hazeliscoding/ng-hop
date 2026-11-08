@@ -250,24 +250,24 @@ test('a licensed vendor sets up its registry the same way, so the plan says only
   assert.equal(r.plan.notes.at(-1), "@infragistics/igniteui-angular comes from the registry your npm config sets for @infragistics. If it is your team's, it can be upgraded first, with a release that accepts Angular 21.");
 });
 
-test('libraries that need each other are named as such, and one that only needs them comes after one of them', async () => {
-  // b needs x, and x and y need each other, so x goes first, though b comes first by name.
+test('libraries that need each other are named as such, and one that only needs them comes after all of them', async () => {
+  // b needs x, and x and y need each other, so x and y go first, together, though b comes first by name.
   const lib = (name, needs) => pkg(name, { '20.4.0': { peers: { '@angular/core': '^20.0.0', [needs]: '^20.4.0' }, at: '2025-09-01' } });
   const libs = [lib('@acme/b', '@acme/x'), lib('@acme/x', '@acme/y'), lib('@acme/y', '@acme/x')];
   const deps = Object.fromEntries(libs.map((l) => [l.name, '20.4.0']));
   const r = await plan(world(), app({ deps: { ...base, ...deps }, lock: { ...lockBase, ...deps } }), { to: 21, own: { scope: '@acme', packages: libs } });
-  assert.deepEqual(r.plan.ownBlockers, ['@acme/x', '@acme/b', '@acme/y']);
-  assert.match(r.plan.notes.find((n) => n.includes('@acme/b')), /in this order: @acme\/x, which needs @acme\/y, then @acme\/b, which needs @acme\/x, then @acme\/y, which needs @acme\/x\. @acme\/x and @acme\/y need each other, so no order works for them: upgrade and publish them together\.$/);
+  assert.deepEqual(r.plan.ownBlockers, ['@acme/x', '@acme/y', '@acme/b']);
+  assert.match(r.plan.notes.find((n) => n.includes('@acme/b')), /in this order: @acme\/x, which needs @acme\/y, then @acme\/y, which needs @acme\/x, then @acme\/b, which needs @acme\/x\. @acme\/x and @acme\/y need each other, so no order works for them: upgrade and publish them together\.$/);
 });
 
 test('a ring of three libraries that need each other is named whole, and apart from another ring', async () => {
   // x needs y, y needs z and z needs x, so each one's release needs the other two's. b only needs x, so it's no part of
-  // the ring, and c and d are a ring of their own.
+  // the ring and comes after all of it, and c and d are a ring of their own.
   const lib = (name, needs) => pkg(name, { '20.4.0': { peers: { '@angular/core': '^20.0.0', [needs]: '^20.4.0' }, at: '2025-09-01' } });
   const ring = [lib('@acme/x', '@acme/y'), lib('@acme/y', '@acme/z'), lib('@acme/z', '@acme/x')];
   for (const [libs, order, together] of [
     [ring, ['@acme/x', '@acme/z', '@acme/y'], '@acme/x, @acme/z and @acme/y'],
-    [[lib('@acme/b', '@acme/x'), ...ring], ['@acme/x', '@acme/b', '@acme/z', '@acme/y'], '@acme/x, @acme/z and @acme/y'],
+    [[lib('@acme/b', '@acme/x'), ...ring], ['@acme/x', '@acme/z', '@acme/y', '@acme/b'], '@acme/x, @acme/z and @acme/y'],
     [[lib('@acme/c', '@acme/d'), lib('@acme/d', '@acme/c'), ...ring], ['@acme/c', '@acme/d', '@acme/x', '@acme/z', '@acme/y'], '@acme/c and @acme/d, and @acme/x, @acme/z and @acme/y'],
   ]) {
     const deps = Object.fromEntries(libs.map((l) => [l.name, '20.4.0']));
