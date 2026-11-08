@@ -240,6 +240,26 @@ test('a blocker from a scope with a registry of its own is likely the team\'s, s
   assert.ok(mirrored.plan.blockers.every((b) => !b.ownRegistry));
 });
 
+test('libraries that need each other are named as such, and one that only needs them comes after one of them', async () => {
+  // b needs x, and x and y need each other, so x goes first, though b comes first by name.
+  const lib = (name, needs) => pkg(name, { '20.4.0': { peers: { '@angular/core': '^20.0.0', [needs]: '^20.4.0' }, at: '2025-09-01' } });
+  const libs = [lib('@acme/b', '@acme/x'), lib('@acme/x', '@acme/y'), lib('@acme/y', '@acme/x')];
+  const deps = Object.fromEntries(libs.map((l) => [l.name, '20.4.0']));
+  const r = await plan(world(), app({ deps: { ...base, ...deps }, lock: { ...lockBase, ...deps } }), { to: 21, own: { scope: '@acme', packages: libs } });
+  assert.deepEqual(r.plan.ownBlockers, ['@acme/x', '@acme/b', '@acme/y']);
+  assert.match(r.plan.notes.find((n) => n.includes('@acme/b')), /in this order: @acme\/x, which needs @acme\/y, then @acme\/b, which needs @acme\/x, then @acme\/y, which needs @acme\/x\. @acme\/x and @acme\/y need each other, so no order works for them: upgrade and publish them together\.$/);
+});
+
+test('an optional peer is no need, so it can\'t turn the order around', async () => {
+  // theme works with forms if it's there, and forms needs theme.
+  const theme = pkg('@acme/theme', { '20.4.0': { peers: { '@angular/core': '^20.0.0', '@acme/forms': '^20.4.0' }, at: '2025-09-01' } });
+  theme.versions['20.4.0'].peerDependenciesMeta = { '@acme/forms': { optional: true } };
+  const forms = pkg('@acme/forms', { '20.4.0': { peers: { '@angular/core': '^20.0.0', '@acme/theme': '^20.4.0' }, at: '2025-09-01' } });
+  const deps = { '@acme/forms': '20.4.0', '@acme/theme': '20.4.0' };
+  const r = await plan(world(), app({ deps: { ...base, ...deps }, lock: { ...lockBase, ...deps } }), { to: 21, own: { scope: '@acme', packages: [theme, forms] } });
+  assert.deepEqual(r.plan.ownBlockers, ['@acme/theme', '@acme/forms']);
+});
+
 test('a scope pointed at the default registry, as a mirror is set up, says nothing about owners and still blocks', async () => {
   const theme = pkg('@acme/theme', { '20.4.0': { peer: '^20.0.0', at: '2025-09-01' } });
   const registry = await startRegistry(world(theme));

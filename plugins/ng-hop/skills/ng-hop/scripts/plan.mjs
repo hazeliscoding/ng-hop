@@ -967,19 +967,27 @@ async function buildPlan({ projectDir, to, next = false }) {
   if (own.length) {
     for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; it comes from your own registry, ${b.ownRegistry}`; }
     const names = new Set(own.map((b) => b.name));
+    // An optional peer is one a library works with, not one it needs.
     const needs = new Map(own.map((b) => {
       const manifest = docs.get(b.name)?.versions?.[b.installed || b.latest] || {};
-      return [b.name, Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies }).filter((n) => names.has(n) && n !== b.name)];
+      return [b.name, Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })
+        .filter((n) => names.has(n) && n !== b.name && (manifest.dependencies?.[n] || !manifest.peerDependenciesMeta?.[n]?.optional))];
     }));
     const order = [];
+    // Every library n needs, directly or through others, that isn't in the order yet.
+    const reach = (n, seen = new Set()) => { for (const d of needs.get(n)) if (!order.includes(d) && !seen.has(d)) { seen.add(d); reach(d, seen); } return seen; };
     while (order.length < names.size) {
       const ready = [...names].filter((n) => !order.includes(n) && needs.get(n).every((d) => order.includes(d))).sort();
-      // Libraries that need each other can't be ordered, so they keep the plan's order.
-      order.push(...(ready.length ? ready : [...names].filter((n) => !order.includes(n))));
+      if (ready.length) { order.push(...ready); continue; }
+      // Nothing is ready, so some libraries need each other. One whose every need leads back to it starts, so a library
+      // that only needs them still comes after it.
+      order.push([...names].find((n) => !order.includes(n) && [...reach(n)].every((d) => reach(d).has(n))));
     }
     plan.ownBlockers = order;
-    const each = order.map((n, i) => (i && needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
-    plan.notes.push(`${order.length > 1 ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from your own registry. If ${order.length > 1 ? 'they are' : 'it is'} your team's, ${order.length > 1 ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}, in this order: ${each.join(', then ')}.`);
+    const each = order.map((n) => (needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
+    // A library that needs one listed after it needs it back, directly or through others.
+    const late = order.flatMap((n, i) => needs.get(n).filter((d) => order.indexOf(d) > i).map((d) => `${n} and ${d}`));
+    plan.notes.push(`${order.length > 1 ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from your own registry. If ${order.length > 1 ? 'they are' : 'it is'} your team's, ${order.length > 1 ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}, in this order: ${each.join(', then ')}.${late.length ? ` ${late.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
   }
   if (blockedAt !== null) plan.status = 'blocked';
   else if (target === currentMajor) {
