@@ -412,12 +412,15 @@ should I just use --force?`,
   {
     // `ng update` exits 0 here, with the libraries moved and Angular left behind. Finishing by hand is fine too, so
     // the check is on where the app ends up. Only the skill is held to stopping and asking.
+    // Angular's CLI can't change a catalog, so the pnpm runner moves it around the update. Either way, the result has to
+    // keep the catalog: an app that quietly drops it changes how the whole workspace pins Angular.
     name: 'upgrade-pnpm-catalog', tier: 'upgrade', fixture: 'pnpm-catalog',
     prompt: 'Upgrade this app to Angular 21.',
     assertions: [
-      check.skillFired(), check.angularAndLibraryAgree(), check.cleanTree(), check.noForcing(),
-      check.says('Mentions the catalog', /catalog/i),
-      { ...check.endsWithQuestion(), skillOnly: true },
+      check.skillFired(), check.angularAndLibraryAgree(), check.commitPerMajor([21]), check.cleanTree(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.stayedOnPnpm(),
+      { text: "Kept Angular in the workspace's catalog", run: (ctx) => { const plain = Object.entries(ctx.deps).filter(([n, s]) => n.startsWith('@angular/') && !String(s).startsWith('catalog:')).map(([n]) => n); return [plain.length === 0, plain.length ? `Taken out of the catalog: ${plain.join(', ')}` : 'All still catalog:']; } },
+      { text: 'The catalog itself is on Angular 21', run: (ctx) => { const m = /'@angular\/core':\s*['"]?[\^~]?(\d+)/.exec(ctx.read('pnpm-workspace.yaml') || ''); return [m?.[1] === '21', m ? `pnpm-workspace.yaml has @angular/core at ${m[1]}` : 'No @angular/core entry in pnpm-workspace.yaml']; } },
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },

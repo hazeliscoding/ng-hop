@@ -63,6 +63,15 @@ Error: Repository is not clean. Please commit or stash any changes before updati
 
 The installed CLI put its temporary package inside the project (`node_modules`, or `.angular/cache/angular-cli-tmp-packages-*`), where pnpm treats it as another workspace importer and changes the lockfile. It happens from Angular 21's CLI onward, in any project with a `pnpm-workspace.yaml`, and a `packages` list in that file doesn't prevent it. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
 
+## yarn stops at `Installing a temporary Angular CLI`
+
+```text
+The installed Angular CLI version is outdated.
+Installing a temporary Angular CLI versioned 21.2.29 to perform the update.
+```
+
+On yarn 4, a plain `yarn ng update` printed this and stopped, with no error and nothing changed. An older CLI asked to update installs a temporary newer one with the project's package manager, and that install failed silently. The plan's command for a yarn project runs `update.mjs` instead, which has npm run the target CLI from its own cache and keeps it in control, so no temporary CLI is needed. If you see this, run the plan's command.
+
 ## `ERR_PNPM_IGNORED_BUILDS`, or `Unable to install packages` on pnpm
 
 ```
@@ -89,9 +98,11 @@ In your report, list what you declined and say that `pnpm approve-builds <packag
 
 ## `Package @angular/core was not found on the registry. Skipping.`
 
-Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps. The plan refuses to start on either. If you see this line anyway, put the tree back with `git restore .`.
+Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps.
 
-A catalog is shared across the workspace, so report it and ask. There are two ways forward: give the Angular packages plain versions in this app's `package.json` and plan again, or update the catalog by hand, run `pnpm install`, then run `pnpm exec ng update <package> --migrate-only --from <old version>` for each package.
+The plan's pnpm command handles this: `update.mjs` copies the catalog's versions into `package.json`, lets `ng update` run as usual, then writes the new versions back into the catalog, puts `package.json` back on `catalog:`, and runs `pnpm install`. If an update fails, `package.json` goes back on its catalog entries and the catalog is left as it was. So if you see this line, someone ran a plain `ng update`: put the tree back with `git restore .` and run the plan's command instead.
+
+A catalog is shared across the workspace. When the plan says other projects use the same entries, moving the catalog moves them too, without their migrations, so ask before going ahead.
 
 ## `Found 0 dependencies` and `Package '@angular/core' is not a dependency`
 
@@ -123,6 +134,15 @@ A peer range says which versions a library accepts, not that it works with them.
 A library's new major can change its license, and the build, tests and `smoke.mjs` all still pass. PrimeNG 21 is MIT, while PrimeNG 22 is the commercial PrimeUI license with a required key and a free tier for small organizations, and it shows a red badge without a key, in production builds too. No PrimeNG 21 release accepts Angular 22. npm can't warn about this: its `license` field says `SEE LICENSE IN LICENSE.md` on both. The plan compares the files and warns before the major for each library it moves, so you should only land here for a package it doesn't, such as a dependency of one of them.
 
 This can cost the person money, so put it first in your report and ask whether to keep the major, stay on the one before, or replace the library. Commit the major first, like any other that passes its checks: it's on its own branch, going back takes one command, and a stop shouldn't leave work uncommitted. Quote the library's own `LICENSE.md` instead of summarizing from memory, and don't add a key or look for a way around the check.
+
+## `Could not resolve "@angular/cdk/overlay"` after a library's new major
+
+```text
+✘ [ERROR] Could not resolve "@angular/cdk/overlay"
+    node_modules/@ng-select/ng-select/fesm2022/ng-select-ng-select.mjs:3:153:
+```
+
+The library's new major started requiring a peer the app doesn't list: ng-select 24 needs `@angular/cdk`. npm, pnpm and bun install a required peer on their own, and yarn doesn't, so this shows on yarn. The plan lists the peer under the major as `not installed`, with the version to install. Install that version and run the checks again.
 
 ## A file named in `angular.json` no longer exists
 

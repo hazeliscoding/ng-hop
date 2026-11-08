@@ -119,6 +119,20 @@ test('a peer a library newly requires is named, because npm and pnpm add it with
   assert.equal(libIn(listed, 21, '@ng-select/ng-select').newPeers, undefined, 'the app already lists it');
 });
 
+test('a peer a library newly requires is listed to install, with its version, because yarn does not add it', async () => {
+  // On yarn 4, ng-select 24 failed the build with: Could not resolve "@angular/cdk/overlay".
+  const lib = pkg('@ng-select/ng-select', { '23.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '24.0.0': { peers: { '@angular/core': '^21.0.0', '@angular/cdk': '^21.0.0' }, at: '2025-12-01' } });
+  const cdk = pkg('@angular/cdk', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '21.1.0': { peer: '^21.0.0', at: '2026-01-01' } });
+  const options = { deps: { ...base, '@ng-select/ng-select': '^23.0.0' }, lock: { ...lockBase, '@ng-select/ng-select': '23.0.0' } };
+  const r = await plan(world(lib, cdk), app(options), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].shared.find((s) => s.name === '@angular/cdk'), { name: '@angular/cdk', from: null, to: '21.1.0', neededBy: ['@ng-select/ng-select'] });
+  const text = await plan(world(lib, cdk), app(options), { to: 21, text: true });
+  assert.match(text.stdout, /@angular\/cdk: not installed -> 21\.1\.0; needed by @ng-select\/ng-select/);
+
+  const missing = await plan(world(lib), app(options), { to: 21 });
+  assert.ok(missing.plan.unchecked.some((u) => u.name === '@angular/cdk'), 'a peer the registry has no release of is reported, not guessed');
+});
+
 test('a floor that names the major counts as declared, not as open-ended', async () => {
   const lib = pkg('ng2-charts', { '10.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '11.0.0': { peer: '>=22.0.0', at: '2026-06-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ng2-charts': '^10.0.0' }, lock: { ...lockBase, 'ng2-charts': '10.0.0' } }), { to: 22 });
@@ -463,7 +477,7 @@ test('a library that ships migrations is flagged', async () => {
   assert.equal(libIn(r, 21, '@angular/material').migrations, true);
 });
 
-for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', 'yarn ng update', 'yarn'], ['bun.lock', 'bunx --no-install ng update', 'bun']]) {
+for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', `node ${quotePath(UPDATE)}`, 'yarn'], ['bun.lock', 'bunx --no-install ng update', 'bun']]) {
   test(`${manager} projects get ${manager} commands`, async () => {
     const r = await plan(world(), app({ deps: base, files: { [lockfile]: '' } }), { to: 21 });
     assert.equal(r.plan.project.packageManager, manager);
@@ -737,19 +751,44 @@ test('pnpm: an npm lockfile beside the app beats a pnpm workspace above it', asy
   assert.equal(r.plan.project.angular, '20.0.0');
 });
 
-// `ng update` prints "Package @angular/core was not found on the registry. Skipping." for these and exits 0.
+// Through Angular 21's CLI, `ng update` prints "Package @angular/core was not found on the registry. Skipping." for
+// these and exits 0, so the pnpm runner moves the catalog itself, and the plan says that's what will happen.
 for (const [name, spec] of [['@angular/core', 'catalog:'], ['@angular/router', 'catalog:angular'], ['typescript', 'catalog:']]) {
-  test(`pnpm: ${name} from a catalog (${spec}) stops the plan, because ng update would skip it and still exit 0`, async () => {
-    const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21 });
-    assert.equal(r.code, 1);
-    assert.match(r.stderr, /catalog/);
-    assert.match(r.stderr, /plain versions/);
-    assert.match(r.stderr, /--migrate-only/, 'both ways forward, so the person gets a real choice');
-    assert.ok(r.stderr.includes(name));
-    assert.match(r.stderr, /ng update/);
-    assert.equal(r.stdout, '');
+  test(`pnpm: ${name} from a catalog (${spec}) gets a plan through the pnpm runner, which moves the catalog`, async () => {
+    const r = await plan(world(), app({ deps: { ...base, [name]: spec }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')), 'pnpm-workspace.yaml': "catalog:\n  x: '1'\n" } }), { to: 21, text: true });
+    assert.equal(r.code, 0, r.stderr);
+    const note = r.stdout.split('\n').find((l) => l.startsWith('Note:') && l.includes('catalog'));
+    assert.ok(note && note.includes(name), r.stdout);
+    assert.match(r.stdout, /Run: pnpm exec node .*update\.mjs.* @angular\/core@21/);
   });
 }
+
+const catalogImporter = (name) => `  ${name}:
+    dependencies:
+      '@angular/core':
+        specifier: 'catalog:'
+        version: 20.2.0(rxjs@7.8.2)
+    devDependencies:
+      '@angular/cli':
+        specifier: 'catalog:'
+        version: 20.2.0
+`;
+
+test('pnpm: a catalog other projects in the workspace use is named, because moving it moves them too', async () => {
+  const p = app({ deps: { ...base, '@angular/core': 'catalog:', '@angular/cli': 'catalog:' }, files: {
+    'pnpm-workspace.yaml': "packages:\n  - '.'\n  - 'apps/*'\ncatalog:\n  '@angular/core': ^20.0.0\n",
+    'pnpm-lock.yaml': pnpmLock(catalogImporter('.'), catalogImporter('apps/admin'), pnpmImporter('apps/plain')),
+  } });
+  const r = await plan(world(), p, { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.project.angular, '20.2.0', 'the version still comes from the lockfile');
+  assert.deepEqual(r.plan.catalog, { packages: ['@angular/core', '@angular/cli'], sharedWith: ['apps/admin'] });
+  assert.ok(r.plan.notes.some((n) => n.includes('apps/admin') && /ask/i.test(n)), r.plan.notes.join('\n'));
+
+  const alone = await plan(world(), app({ deps: { ...base, '@angular/core': 'catalog:', '@angular/cli': 'catalog:' }, files: { 'pnpm-workspace.yaml': "catalog:\n  '@angular/core': ^20.0.0\n", 'pnpm-lock.yaml': pnpmLock(catalogImporter('.')) } }), { to: 21 });
+  assert.deepEqual(alone.plan.catalog.sharedWith, []);
+  assert.ok(!alone.plan.notes.some((n) => /ask/i.test(n)));
+});
 
 test('pnpm: a catalog that holds nothing the upgrade moves does not stop the plan', async () => {
   const r = await plan(world(pkg('date-fns', { '4.0.0': {} })), app({ deps: { ...base, 'date-fns': 'catalog:' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } }), { to: 21 });
@@ -951,8 +990,9 @@ test('a long list of new peers is cut short', async () => {
   const peers = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`peer-${i}`, '^1.0.0']));
   const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peers: { '@angular/core': '^21.0.0', ...peers }, at: '2025-12-01' } });
   const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21, text: true });
-  assert.match(r.stdout, /peer-7 and 4 more, not in package\.json/);
-  assert.ok(!r.stdout.includes('peer-8'));
+  const line = r.stdout.split('\n').find((l) => l.includes('ui-lib: 20.0.0 -> 21.0.0'));
+  assert.match(line, /peer-7 and 4 more, not in package\.json/);
+  assert.ok(!line.includes('peer-8'), 'the library\'s own line stays short, whatever else the plan lists');
 });
 
 test('a deprecation message can\'t forge a line of the plan', async () => {
@@ -1096,4 +1136,84 @@ test('--next with no prerelease newer than the latest release, or with another -
   const mismatch = await plan(nextWorld('23.0.0-rc.1'), app(on22), { next: true, to: 22 });
   assert.equal(mismatch.code, 1);
   assert.match(mismatch.stderr, /--next/);
+});
+
+// ---- yarn and bun lockfiles ------------------------------------------------------------------------------------
+
+const yarnClassic = `# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.
+# yarn lockfile v1
+
+
+"@angular/cli@^20.0.0":
+  version "20.2.0"
+  resolved "https://registry.yarnpkg.com/@angular/cli/-/cli-20.2.0.tgz#abc"
+
+"@angular/core@^19.0.0":
+  version "19.2.0"
+
+"@angular/core@^20.0.0", "@angular/core@~20.0.0":
+  version "20.2.0"
+
+rxjs@~7.8.0:
+  version "7.8.2"
+
+typescript@~5.8.0:
+  version "5.8.3"
+`;
+const yarnBerry = `# This file is generated by running "yarn install" inside your project.
+
+__metadata:
+  version: 8
+  cacheKey: 10c0
+
+"@angular/cli@npm:^20.0.0":
+  version: 20.2.0
+  resolution: "@angular/cli@npm:20.2.0"
+
+"@angular/core@npm:^19.0.0":
+  version: 19.2.0
+
+"@angular/core@npm:^20.0.0":
+  version: 20.2.0
+  resolution: "@angular/core@npm:20.2.0"
+
+"typescript@npm:~5.8.0":
+  version: 5.8.3
+
+"typescript@patch:typescript@npm%3A~5.8.0#optional!builtin<compat/typescript>":
+  version: 5.8.3
+`;
+const bunLock = `{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "app",
+      "dependencies": { "@angular/core": "^20.0.0", "@angular/cli": "^20.0.0" },
+    },
+  },
+  "packages": {
+    "@angular/cli": ["@angular/cli@20.2.0", "", {}, "sha512-x"],
+    "@angular/core": ["@angular/core@20.2.0", "", { "peerDependencies": { "rxjs": "^6.5.3 || ^7.4.0" } }, "sha512-y"],
+    "some-lib/@angular/core": ["@angular/core@19.2.0", "", {}, "sha512-z"],
+    "typescript": ["typescript@5.8.3", "", {}, "sha512-t"],
+  }
+}
+`;
+
+for (const [name, lockfile, text] of [['yarn 1', 'yarn.lock', yarnClassic], ['yarn 2 and newer', 'yarn.lock', yarnBerry], ['bun', 'bun.lock', bunLock]]) {
+  test(`${name}: installed versions come from the lockfile, matched by the app's own range`, async () => {
+    // Without the lockfile, the plan falls back to the bottom of each range, which says 20.0.0 here.
+    const r = await plan(world(), app({ deps: base, files: { [lockfile]: text } }), { to: 21 });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.plan.project.angular, '20.2.0');
+    assert.equal(r.plan.project.angularSource, 'lockfile');
+  });
+}
+
+test('a lockfile that cannot be read falls back instead of making up a version', async () => {
+  for (const [lockfile, text] of [['yarn.lock', 'not: [a lockfile'], ['bun.lock', '{ "packages": ']]) {
+    const r = await plan(world(), app({ deps: base, files: { [lockfile]: text } }), { to: 21 });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.plan.project.angularSource, 'package.json range');
+  }
 });

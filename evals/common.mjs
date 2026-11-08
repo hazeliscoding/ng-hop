@@ -45,6 +45,17 @@ export function testCommand(dir) {
 }
 
 // Reinstalls with the checks on, the same way someone cloning the result would.
-export const installCommand = (dir) => (existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm install --frozen-lockfile' : 'npm ci --no-audit --no-fund');
+export const installCommand = (dir) => (existsSync(join(dir, 'pnpm-lock.yaml')) ? 'pnpm install --frozen-lockfile'
+  : existsSync(join(dir, 'yarn.lock')) ? 'yarn install --immutable'
+  : existsSync(join(dir, 'bun.lock')) ? 'bun install --frozen-lockfile'
+  : 'npm ci --no-audit --no-fund');
 
 export const exists = existsSync;
+
+// pnpm and yarn refuse to change a lockfile when they think they're in CI, which they read from GITHUB_ACTIONS as well
+// as CI, and that isn't what happens on someone's machine. Fixture builds and scripted upgrades run as if they weren't.
+export function developerEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const name of ['CI', 'GITHUB_ACTIONS', 'CONTINUOUS_INTEGRATION', 'BUILD_ID', 'BUILD_NUMBER', 'RUN_ID']) delete env[name];
+  return env;
+}

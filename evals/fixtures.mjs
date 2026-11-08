@@ -133,6 +133,10 @@ export const FIXTURES = {
 const decidedScripts = "allowBuilds:\n  '@parcel/watcher': true\n  esbuild: true\n  lmdb: true\n  msgpackr-extract: true\n";
 const cleanPath = FIXTURES['clean-path'];
 FIXTURES['pnpm-clean'] = { ...cleanPath, packageManager: 'pnpm', files: { ...cleanPath.files, 'pnpm-workspace.yaml': decidedScripts } };
+// The same app on yarn 4, with the node_modules linker, and on bun. The plan prints their commands, but until these,
+// no real upgrade had run on either.
+FIXTURES['yarn-clean'] = { ...cleanPath, packageManager: 'yarn' };
+FIXTURES['bun-clean'] = { ...cleanPath, packageManager: 'bun' };
 // Nobody has decided about install scripts, so every install exits 1 until someone does.
 FIXTURES['pnpm-undecided'] = { ...FIXTURES['plain-20'], packageManager: 'pnpm', undecidedScripts: true };
 // Angular comes from a catalog. Through Angular 21's CLI, `ng update` skips it, moves the libraries and exits 0.

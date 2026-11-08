@@ -74,12 +74,12 @@ Most steps won't apply to this app. Search the code for what each one mentions i
 
 **c. Run the plan's `Run:` command exactly as printed.** It names Angular and every library that has to move, because `ng update` checks peers against everything it's about to install. Naming them together is what makes `--force` unnecessary. The earlier commit means the tree is clean, so `--allow-dirty` isn't needed either.
 
-For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`. This small transport uses pnpm's `dlx` cache for the target CLI and scopes Angular's own version-dispatch control to that child, so it cannot redispatch to the app's old CLI and bootstrap inside the workspace. It still checks a clean Git tree and leaves Angular's peer checks enabled. It does not install a global CLI, provision a package manager, retry, reset or commit anything itself.
+For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and for yarn through `node`, where npm's own cache holds the target CLI. This small transport uses pnpm's `dlx` cache for the target CLI and scopes Angular's own version-dispatch control to that child, so it cannot redispatch to the app's old CLI and bootstrap inside the workspace. It still checks a clean Git tree and leaves Angular's peer checks enabled. It does not install a global CLI, provision a package manager, retry, reset or commit anything itself.
 
 **d. Read the output, not just the exit code.** Each package should show `Executing migrations of package`. A crash partway leaves the packages installed with some migrations never run, and that looks like success until something breaks later. Read `references/troubleshooting.md` for this and for any other error.
 
 **e. Finish the major:**
-- Install anything the plan lists under the major that `ng update` didn't move (check `package.json`). TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't.
+- Install anything the plan lists under the major that `ng update` didn't move (check `package.json`). TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
 - Do the guide's remaining steps that apply.
 - Read what each library's new major changed, from its changelog or README in `node_modules/<package>`, even if nothing broke. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report.
 - Fix what the upgrade broke. When a library's own major change breaks your code, read that library's changelog or migration guide instead of guessing at its API.

@@ -42,8 +42,12 @@ class PlanError extends Error {}
 // --no-install because npm has an unrelated package named `ng`: plain `npx ng` would download and run it whenever the
 // project's CLI isn't installed. pnpm exec and yarn only run what's installed already.
 const runnerFor = (project) => ({ npm: 'npx --no-install', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx --no-install' }[project.packageManager] || 'npx --no-install');
-// pnpm's runner keeps the selected CLI from redispatching to the app's old CLI and dirtying its lockfile.
-const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)))}` : `${runnerFor(project)} ng update`);
+// The runner keeps the target CLI in control. On pnpm, the app's old CLI would dirty the lockfile installing a temporary
+// one, and on yarn 4 that install stopped with no error.
+const updateScript = () => quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)));
+const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${updateScript()}`
+  : project.packageManager === 'yarn' ? `node ${updateScript()}`
+  : `${runnerFor(project)} ng update`);
 
 // Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
 // read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.
@@ -167,6 +171,64 @@ function readPnpmLock(root, dir) {
   return versions;
 }
 
+// Other projects in the workspace whose entries for these packages say `catalog:`, from the lockfile's importers.
+function catalogUsers(root, dir, names) {
+  const own = relative(root, dir).replace(/\\/g, '/') || '.';
+  const unquote = (text) => text.replace(/^['"]|['"]$/g, '');
+  const users = new Set();
+  let inImporters = false, importer = null, name = null;
+  for (const line of readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8').split(/\r?\n/)) {
+    if (/^\S/.test(line)) { inImporters = line === 'importers:'; continue; }
+    if (!inImporters) continue;
+    const key = /^ {2}(\S.*?):( \{\})?$/.exec(line);
+    if (key) { importer = unquote(key[1]); continue; }
+    const dep = /^ {6}(\S.*?):$/.exec(line);
+    if (dep) { name = unquote(dep[1]); continue; }
+    if (importer !== own && names.includes(name) && /^ {8}specifier: ['"]?catalog:/.test(line)) users.add(importer);
+  }
+  return [...users].sort();
+}
+
+// yarn.lock lists each version under the ranges that resolve to it, in yarn 1's format or yarn 2's, where a range
+// reads "npm:^20.0.0". When a package is in the tree at more than one version, the app's own range picks the right one.
+function readYarnLock(dir, deps) {
+  const found = {};
+  let entry = null;
+  for (const line of readFileSync(join(dir, 'yarn.lock'), 'utf8').split(/\r?\n/)) {
+    if (/^[^\s#].*:$/.test(line) && !line.startsWith('__metadata')) {
+      entry = { version: null };
+      for (const descriptor of line.slice(0, -1).split(/,\s*/).map((d) => d.replace(/^"|"$/g, ''))) {
+        const at = descriptor.indexOf('@', 1);
+        if (at > 0) (found[descriptor.slice(0, at)] ||= []).push({ range: descriptor.slice(at + 1).replace(/^npm:/, ''), entry });
+      }
+      continue;
+    }
+    const version = /^ {2}version:? "?([^"\s]+)"?$/.exec(line);
+    if (entry && version) entry.version = version[1];
+  }
+  const versions = {};
+  for (const [name, list] of Object.entries(found)) {
+    const own = list.find((item) => item.range === deps[name]);
+    const all = new Set(list.map((item) => item.entry.version));
+    const version = own ? own.entry.version : all.size === 1 ? [...all][0] : null;
+    if (version) versions[name] = version;
+  }
+  return versions;
+}
+
+// bun.lock is JSON with trailing commas. A top-level key is the hoisted copy, which is the app's own; a nested one,
+// such as "some-lib/@angular/core", belongs to another package.
+function readBunLock(dir) {
+  try {
+    const packages = JSON.parse(readFileSync(join(dir, 'bun.lock'), 'utf8').replace(/,(\s*[}\]])/g, '$1')).packages || {};
+    return Object.fromEntries(Object.entries(packages)
+      .filter(([key, value]) => VALID_NAME.test(key) && Array.isArray(value) && typeof value[0] === 'string')
+      .map(([key, value]) => [key, value[0].slice(value[0].lastIndexOf('@') + 1)]));
+  } catch {
+    return {};
+  }
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -185,8 +247,12 @@ function readProject(dir) {
     : existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bun.lock')) ? 'bun'
     : (pkg.packageManager || 'npm').split('@')[0];
 
+  const otherLock = packageManager === 'yarn' && existsSync(join(dir, 'yarn.lock')) ? readYarnLock(dir, deps)
+    : packageManager === 'bun' && existsSync(join(dir, 'bun.lock')) ? readBunLock(dir)
+    : {};
+
   const installed = (name) => {
-    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name];
+    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name] || otherLock[name];
     if (fromLock && semver.valid(fromLock)) return { version: fromLock, source: 'lockfile' };
     const modPath = join(dir, 'node_modules', name, 'package.json');
     if (existsSync(modPath)) {
@@ -199,7 +265,7 @@ function readProject(dir) {
     }
     return null;
   };
-  return { dir, pkg, deps, packageManager, installed, nx: existsSync(join(dir, 'nx.json')) };
+  return { dir, pkg, deps, packageManager, installed, pnpmRoot, nx: existsSync(join(dir, 'nx.json')) };
 }
 
 // ---- Judging one release against one Angular major ------------------------------------------------------------
@@ -431,11 +497,8 @@ async function buildPlan({ projectDir, to, next = false }) {
   const registry = registryClient(JSON.parse(configText), projectDir);
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
-  // still exits 0. Angular 22's stops with an error instead.
+  // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.
   const catalogued = Object.keys(project.deps).filter((n) => String(project.deps[n]).startsWith('catalog:') && (isFramework(n) || n === 'typescript'));
-  if (catalogued.length) {
-    throw new PlanError(`${catalogued.join(', ')} come from a pnpm catalog, which \`ng update\` can't change. Through Angular 21's CLI it skips them and still exits 0, so the libraries would move while Angular stays behind with no migrations run. Either give these packages plain versions in package.json, commit that, and plan again, or update the catalog by hand, run pnpm install, then run ng update <package> --migrate-only --from <old version> for each package. Catalogs are shared across a workspace, so that choice belongs to whoever owns it.`);
-  }
 
   const currentCore = project.installed('@angular/core');
   if (!currentCore) throw new PlanError(`Could not work out the installed @angular/core version from "${project.deps['@angular/core']}".`);
@@ -465,6 +528,12 @@ async function buildPlan({ projectDir, to, next = false }) {
     latestAngular, target, next: next ? prerelease : null, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
+  if (catalogued.length) {
+    const sharedWith = project.pnpmRoot ? catalogUsers(project.pnpmRoot, projectDir, catalogued) : [];
+    plan.catalog = { packages: catalogued, sharedWith };
+    plan.notes.push(`${catalogued.join(', ')} come from a pnpm catalog, which Angular's CLI can't change. The pnpm runner in each command moves the catalog's entries itself and puts package.json back on them.`);
+    if (sharedWith.length) plan.notes.push(`The catalog is also used by ${sharedWith.join(', ')}, so moving it moves them too, without their migrations. Ask before going ahead.`);
+  }
   if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
   const cliDoc = next ? await registry.get('@angular/cli') : null;
   const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';
@@ -645,13 +714,25 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    // npm and pnpm install a required peer on their own, so nothing else says the app gained one.
+    // npm, pnpm and bun install a required peer on their own, so nothing else says the app gained one, and yarn doesn't,
+    // so the build can't resolve it. Each new peer is named, and listed to install with the version that fits.
     for (const lib of moved) {
       const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
       const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
       const valid = added.filter((peer) => VALID_NAME.test(peer));
       if (lib.from && valid.length) lib.newPeers = valid;
       if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
+      for (const peer of lib.from ? valid : []) {
+        const range = after.peerDependencies[peer];
+        const listed = changes.find((s) => s.name === peer);
+        if (listed) { if (!listed.neededBy.includes(lib.name)) listed.neededBy.push(lib.name); continue; }
+        const doc = await registry.get(peer).catch(() => null);
+        // A framework package keeps in step with core, as ng update keeps the rest of them.
+        const fits = isFramework(peer) && semver.satisfies(frameworkVersion, range, { includePrerelease: true }) ? frameworkVersion
+          : doc && semver.validRange(range) ? semver.maxSatisfying(eligibleReleases(doc, null), range) : null;
+        if (fits) changes.push({ name: peer, from: null, to: fits, neededBy: [lib.name] });
+        else plan.unchecked.push({ name: peer, reason: `${lib.name} ${lib.to} newly needs ${range}, and the registry has no release to install for it` });
+      }
     }
     // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
     const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;
