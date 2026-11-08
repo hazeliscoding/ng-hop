@@ -100,6 +100,14 @@ export const check = {
     text: 'Stayed on pnpm, with no npm lockfile',
     run: (ctx) => [ctx.exists('pnpm-lock.yaml') && !ctx.exists('package-lock.json'), `pnpm-lock.yaml: ${ctx.exists('pnpm-lock.yaml')}, package-lock.json: ${ctx.exists('package-lock.json')}`],
   }),
+  stayedOn: (manager) => ({
+    text: `Stayed on ${manager}, with no other lockfile`,
+    run: (ctx) => {
+      const lockfiles = { npm: 'package-lock.json', pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock', bun: 'bun.lock' };
+      const present = Object.entries(lockfiles).filter(([, file]) => ctx.exists(file)).map(([name]) => name);
+      return [present.length === 1 && present[0] === manager, `Lockfiles: ${present.join(', ') || 'none'}`];
+    },
+  }),
   lockfileClean: () => ({
     text: "The lockfile has no leftovers from the CLI's temporary install",
     run: (ctx) => { const m = /\S*angular-cli-tmp-packages\S*/.exec(ctx.read('pnpm-lock.yaml') || ''); return [!m, m ? `Found ${m[0]}` : 'None']; },
@@ -403,6 +411,25 @@ should I just use --force?`,
       check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
       check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.saysNewPeer(), check.saysNodeMoved(),
       check.stayedOnPnpm(), check.lockfileClean(), check.noNewApprovals(4),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    // The same app on yarn 4, where a plain `ng update` stops at installing Angular's temporary CLI, with no error.
+    name: 'upgrade-yarn', tier: 'upgrade', fixture: 'yarn-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.stayedOn('yarn'),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    name: 'upgrade-bun', tier: 'upgrade', fixture: 'bun-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.stayedOn('bun'),
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
   },
