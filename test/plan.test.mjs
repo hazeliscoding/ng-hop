@@ -630,13 +630,21 @@ const nodeWorld = (major = 21) => {
   return [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })];
 };
 const setupNode = (version) => `jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '${version}'\n`;
+const pinsOf = async (files) => {
+  const r = await plan(nodeWorld(), app({ deps: base, lock: lockBase, files: { ...git, ...files } }), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  return r.plan.hops[0].node.pins || [];
+};
+const engines = (node) => ({ 'package.json': JSON.stringify({ name: 'app', dependencies: base, engines: { node } }) });
 
 test('the repo\'s own Node pins below a major\'s range are named under it, wherever the repo keeps them', async () => {
   // The enterprise run's agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
   const files = {
     ...git,
     '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\nRUN corepack enable\n',
-    '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" }, "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm" }',
+    // A dev container image's tag can start with the image's own version, 5.2 here, or be only that, as 5-trixie is.
+    '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" }, "image": "mcr.microsoft.com/devcontainers/typescript-node:5.2-24-bookworm" }',
+    Dockerfile: 'FROM mcr.microsoft.com/devcontainers/typescript-node:5-trixie\n',
     '.nvmrc': '22\n',
     '.github/workflows/ci.yml': setupNode('20'),
   };
@@ -667,6 +675,16 @@ test('every place the plan reads a Node pin names it when it is below the range'
     { file: 'package.json', value: '>=20' }, { file: 'package.json', value: '20.18.0' },
     { file: '.github/workflows/ci.yml', value: '20' },
   ]);
+});
+
+test('an engines range is below the range when the lowest Node it allows is one the range refuses', async () => {
+  // ">=24" allows Node 24.0, and Angular's CLI stops on 24.0 to 24.14 when the range starts 24 at 24.15.
+  assert.deepEqual(await pinsOf(engines('>=24')), [{ file: 'package.json', value: '>=24' }]);
+  assert.deepEqual(await pinsOf(engines('>=24.15.0')), []);
+});
+
+test('a pin semver can\'t read, a range nothing meets or a number past 2^53, doesn\'t stop the plan', async () => {
+  assert.deepEqual(await pinsOf({ ...engines('>=22 <20'), '.nvmrc': '99999999999999999\n' }), []);
 });
 
 test('an app already on the target still hears about a Node pin below its range', async () => {

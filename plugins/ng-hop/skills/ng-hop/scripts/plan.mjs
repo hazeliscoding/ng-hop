@@ -279,12 +279,21 @@ function nodePins(dir) {
 // Whether a pin keeps the team on a Node the range accepts. A bare major such as "22" floats to its newest release, so
 // it fits when any release of that major does; a fixed version has to be in the range itself.
 function pinFits(pin, range) {
-  if (pin.kind === 'engines') return !semver.validRange(pin.value) || !semver.lt(semver.minVersion(pin.value), semver.minVersion(range));
-  const version = pin.kind === 'image' ? /(?:^|[/:])(?:node|(?:typescript|javascript)-node):(?:\d+-)?(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
-  if (!version) return true;
-  const parts = version.split('.');
-  const asRange = parts.length === 3 ? version : `${version}.x`;
-  return semver.intersects(asRange, range);
+  try {
+    // ">=24" allows Node 24.0, which Angular 22 refuses, so the lowest Node an engines range allows has to be accepted.
+    if (pin.kind === 'engines') { const min = semver.validRange(pin.value) && semver.minVersion(pin.value); return !min || semver.satisfies(min, range); }
+    // A dev container image's tag can start with the image's own version, as typescript-node:5.2-24-bookworm does, so
+    // the Node in it is the two-digit major after that, and a tag that is only the image's version (5-trixie) says none.
+    // shortcut: an image's own version freezes the Node inside it, so only its major is known from the tag; read the
+    // image's NODE_VERSION if a frozen pin below the range's floor ever matters.
+    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
+    if (!version) return true;
+    const parts = version.split('.');
+    const asRange = parts.length === 3 ? version : `${version}.x`;
+    return semver.intersects(asRange, range);
+  } catch {
+    return true; // a number semver can't hold, past 2^53, says nothing about the team's Node
+  }
 }
 
 // The files angular.json loads straight from node_modules, by package: the scripts and styles of every target and
