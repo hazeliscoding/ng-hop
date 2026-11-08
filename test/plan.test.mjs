@@ -992,6 +992,58 @@ test('pnpm: an app inside a workspace gets pnpm commands and its own entry in th
   assert.ok(r.plan.hops[0].command.startsWith(`pnpm exec node ${quotePath(UPDATE)}`));
 });
 
+// An app in a pnpm workspace that uses its team's @acme/ui-core, which stops at Angular 20.
+const uiCore = () => pkg('@acme/ui-core', { '20.4.0': { peer: '^20.0.0', at: '2025-09-01' } });
+const acmeWorkspace = ({ workspaces, files = {} } = {}) => {
+  const p = app({ files: {
+    'package.json': JSON.stringify({ name: 'mono', private: true, ...(workspaces ? { workspaces } : {}) }),
+    'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n",
+    'pnpm-lock.yaml': pnpmLock('  .: {}\n', pnpmImporter('apps/web')),
+    'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@acme/ui-core': '^20.4.0' } }),
+    ...files,
+  } });
+  return { root: p.dir, dir: join(p.dir, 'apps', 'web') };
+};
+const blockedOnUiCore = (r) => {
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.ownBlockers, ['@acme/ui-core']);
+};
+
+test('pnpm: the workspace root\'s .npmrc gives the team\'s registry and its token, as pnpm reads them there', async () => {
+  // npm reads only the .npmrc beside the app, so the plan asked the default registry for @acme/ui-core, found nothing,
+  // and called the app reachable.
+  const w = acmeWorkspace();
+  blockedOnUiCore(await plan(world(), w, { to: 21, own: { scope: '@acme', packages: [uiCore()], rcDir: w.root, auth: true } }));
+});
+
+test('pnpm: a root that also declares npm workspaces doesn\'t stop the plan', async () => {
+  // npm refuses `config` below a root that declares workspaces, with ENOWORKSPACES.
+  const w = acmeWorkspace({ workspaces: ['apps/*'] });
+  blockedOnUiCore(await plan(world(), w, { to: 21, own: { scope: '@acme', packages: [uiCore()], rcDir: w.root } }));
+});
+
+test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and older lay it over the root\'s', async () => {
+  const w = acmeWorkspace({ workspaces: ['apps/*'] });
+  blockedOnUiCore(await plan(world(), w, { to: 21, own: { scope: '@acme', packages: [uiCore()], auth: true } }));
+});
+
+test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a mirror set at the root stays', async () => {
+  // npm's listing for the app's folder holds every default, the registry included, so laying all of it over the root's
+  // would undo the root's mirror. The user config makes that default a registry nothing answers on.
+  const [mirror, company] = await Promise.all([startRegistry(world()), startRegistry([uiCore()])]);
+  const w = acmeWorkspace({ files: {
+    '.npmrc': `registry=${mirror.url}\n@acme:registry=${company.url}\n`,
+    'apps/web/.npmrc': 'save-exact=true\n',
+    'user.npmrc': 'registry=http://127.0.0.1:9/\n',
+  } });
+  try {
+    const r = await runScript(PLAN, ['--project', w.dir, '--to', '21', '--json'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc') } });
+    blockedOnUiCore({ ...r, plan: r.stdout ? JSON.parse(r.stdout) : null });
+  } finally {
+    await Promise.all([mirror.close(), company.close()]);
+  }
+});
+
 test('pnpm: a lockfile in a parent folder with no workspace file has nothing to do with the app', async () => {
   const p = app({ deps: {}, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('apps/web')), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.0.0' } }) } });
   const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 21 });

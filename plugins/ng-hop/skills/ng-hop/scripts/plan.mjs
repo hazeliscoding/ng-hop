@@ -61,7 +61,8 @@ function runNpm(args, options) {
 
 // ---- Registry access ------------------------------------------------------------------------------------------
 
-function registryClient(config, cwd) {
+// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then the app's own folder.
+function registryClient(config, dirs) {
   const cache = new Map();
   const baseFor = (name) => {
     const scope = name.startsWith('@') ? name.split('/')[0] : null;
@@ -69,10 +70,23 @@ function registryClient(config, cwd) {
     return url.endsWith('/') ? url : `${url}/`;
   };
 
-  // npm holds any private-registry credentials, so an auth failure on the direct path falls back to it.
+  // npm holds any private-registry credentials, so an auth failure on the direct path falls back to it, told the registry
+  // the plan chose. npm reads one folder's .npmrc, and a pnpm workspace's token can be in the root's or the app's, so an
+  // auth failure in one folder tries the next. --workspaces=false keeps npm in the folder it's given.
+  async function npmView(name, spec, maxBuffer) {
+    const scope = name.startsWith('@') ? `${name.split('/')[0]}:` : '';
+    for (const [i, cwd] of dirs.entries()) {
+      try {
+        return await runNpm(['view', spec, '--json', `--${scope}registry=${baseFor(name)}`, '--workspaces=false'], { cwd, maxBuffer });
+      } catch (err) {
+        if (i === dirs.length - 1 || !/E40[13]/.test(`${err.stdout || ''}${err.message || ''}`)) throw err;
+      }
+    }
+  }
+
   async function viaNpm(name) {
     try {
-      const { stdout } = await runNpm(['view', `${name}@>=0.0.0-0`, '--json'], { cwd, maxBuffer: 512 * 1024 * 1024 });
+      const { stdout } = await npmView(name, `${name}@>=0.0.0-0`, 512 * 1024 * 1024);
       const docs = [].concat(JSON.parse(stdout));
       const versions = Object.fromEntries(docs.map((d) => [d.version, d]));
       return { name, versions, time: docs[0]?.time || {}, 'dist-tags': docs[0]?.['dist-tags'] || {} };
@@ -85,7 +99,7 @@ function registryClient(config, cwd) {
 
   async function viaNpmRelease(name, version) {
     try {
-      const { stdout } = await runNpm(['view', `${name}@${version}`, '--json'], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      const { stdout } = await npmView(name, `${name}@${version}`, 64 * 1024 * 1024);
       const found = [].concat(stdout.trim() ? JSON.parse(stdout) : []);
       return found[found.length - 1] || null;
     } catch (err) {
@@ -616,9 +630,19 @@ async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const assets = angularAssets(projectDir);
   const pins = nodePins(projectDir);
-  const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
+  // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10 and older lay the app's own over
+  // it, where npm reads one folder's. So npm is asked at the root, then for the keys the app's own file sets, since its
+  // listing holds every default too. --workspaces=false keeps npm in the app's folder below a root that declares them.
+  const npmConfig = (cwd, args = []) => runNpm(['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
-  const registry = registryClient(JSON.parse(configText), projectDir);
+  const configDir = project.pnpmRoot || projectDir;
+  const config = await npmConfig(configDir);
+  const appRc = join(projectDir, '.npmrc');
+  if (configDir !== projectDir && existsSync(appRc)) {
+    const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
+    for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (key in appConfig) config[key] = appConfig[key];
+  }
+  const registry = registryClient(config, [...new Set([configDir, projectDir])]);
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
   // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.

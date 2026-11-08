@@ -147,11 +147,13 @@ export function runScript(script, args, { cwd, env = {} } = {}) {
 }
 
 // own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
-// .npmrc the way a team sets it up.
+// .npmrc the way a team sets it up. rcDir puts that .npmrc in another folder, such as a pnpm workspace's root, and auth
+// makes the registry want the token the .npmrc then holds.
 export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null } = {}) {
   const registry = await startRegistry(packages, registryOptions);
-  const company = own && await startRegistry(own.packages);
-  if (company) writeFileSync(join(proj.dir, '.npmrc'), `${own.scope}:registry=${company.url}\n`);
+  const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
+  const token = company && own.auth ? `${company.url.replace(/^http:/, '')}:_authToken=test-only\n` : '';
+  if (company) writeFileSync(join(own.rcDir || proj.dir, '.npmrc'), `${own.scope}:registry=${company.url}\n${token}`);
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
