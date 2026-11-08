@@ -412,6 +412,34 @@ test('a library that moves names its repository, where its release notes are whe
   }
 });
 
+test('a file angular.json loads that the next release no longer ships is named under that major', async () => {
+  // marked 16 stopped shipping marked.min.js, which readme-wizard loaded from angular.json, and only the build said so.
+  const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0' } } });
+  const marked = pkg('marked', { '15.0.0': { files: { 'marked.min.js': 'x', 'lib/marked.umd.js': 'x' } }, '17.0.2': { files: { 'lib/marked.umd.js': 'x' } } });
+  const scripts = ['node_modules/marked/marked.min.js', 'node_modules/marked/lib/marked.umd.js'];
+  const files = { 'angular.json': JSON.stringify({ projects: { app: { architect: { build: { options: { scripts, styles: ['src/styles.css'] } } } } } }) };
+  const options = { deps: { ...base, 'ngx-markdown': '^20.0.0', marked: '^15.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0', marked: '15.0.0' }, files };
+  const r = await plan(world(md, marked), app(options), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].dropped, [{ file: 'node_modules/marked/marked.min.js', name: 'marked', version: '17.0.2' }]);
+  const text = await plan(world(md, marked), app(options), { to: 21, text: true });
+  assert.match(text.stdout, /angular\.json: loads node_modules\/marked\/marked\.min\.js, which marked 17\.0\.2 no longer ships/);
+});
+
+test('a file the next release still ships is not named, even on a path long enough for the tarball\'s prefix field', async () => {
+  const deep = `${'a'.repeat(60)}/${'b'.repeat(60)}/theme.css`;
+  const ui = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', files: { [deep]: 'x' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', files: { [deep]: 'x' } } });
+  const styles = [{ input: `node_modules/ui-lib/${deep}`, bundleName: 'theme' }];
+  const files = { 'angular.json': JSON.stringify({ projects: { app: { architect: { build: { configurations: { production: { styles } } } } } } }) };
+  const options = { deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' }, files };
+  const r = await plan(world(ui), app(options), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].dropped, []);
+  assert.deepEqual(r.plan.unchecked, []);
+
+  const unreadable = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', files: 'corrupt' } });
+  const u = await plan(world(unreadable), app(options), { to: 21 });
+  assert.ok(u.plan.unchecked.some((x) => x.name === 'ui-lib' && /angular\.json/.test(x.reason)), 'a release it could not read is said, not passed over');
+});
+
 test('an extra package the project does not declare is left for npm to install', async () => {
   const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0' } } });
   const r = await plan(world(md), app({ deps: { ...base, 'ngx-markdown': '^20.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0' } }), { to: 21 });

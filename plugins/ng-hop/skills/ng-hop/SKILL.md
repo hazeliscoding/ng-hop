@@ -82,6 +82,7 @@ For pnpm, the command runs `$SCRIPTS/update.mjs` through `pnpm exec node`, and f
 
 **e. Finish the major:**
 - Install anything the plan from step (a) lists under this major that `ng update` didn't move (check `package.json`). A shared package's line says which versions fit: if `ng update` already put it on one of them, keep it. TypeScript usually moves on its own. Other shared packages such as `marked` or `ag-grid-community` often don't, and nor does a peer a library newly needs, listed as `not installed`, which yarn won't add for you.
+- For an `angular.json:` line under the major, a file the app loads that the library no longer ships, follow `references/troubleshooting.md` for a file named in `angular.json` that no longer exists.
 - Do the guide's remaining steps that apply.
 - Read what each library's new major changed, even if nothing broke: its changelog in `node_modules/<package>`, or when it ships none, the release notes or `CHANGELOG.md` in the repository the plan names, for every major crossed. A build and tests can't see a dropdown that now renders somewhere else, which is what ng-select 24 did when it started requiring `@angular/cdk`. Anything that touches what this app uses goes in your report, and so does a library `ng update` took to a later major than the plan named.
 - Fix what the upgrade broke. When a library's own major change breaks your code, read that library's changelog or migration guide instead of guessing at its API.

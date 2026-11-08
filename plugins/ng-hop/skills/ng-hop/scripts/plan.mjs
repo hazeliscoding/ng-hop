@@ -229,6 +229,28 @@ function readBunLock(dir) {
   }
 }
 
+// The files angular.json loads straight from node_modules, by package: the scripts and styles of every target and
+// configuration. A library's new major can stop shipping one, as marked 16 did with marked.min.js, and until now only
+// the build said so.
+function angularAssets(dir) {
+  let config;
+  try { config = JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8')); } catch { return new Map(); }
+  const found = new Map();
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      if (!['scripts', 'styles'].includes(key) || !Array.isArray(child)) { visit(child); continue; }
+      for (const entry of child) {
+        const input = String((typeof entry === 'string' ? entry : entry?.input) || '').replace(/\\/g, '/');
+        const [, name, path] = /^(?:\.\/)?node_modules\/((?:@[^/]+\/)?[^/]+)\/(.+)$/.exec(input) || [];
+        if (name && VALID_NAME.test(name)) found.set(name, new Set([...(found.get(name) || []), path]));
+      }
+    }
+  };
+  visit(config?.projects);
+  return found;
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -511,6 +533,7 @@ async function broughtLicenses(registry, lib, before, after) {
 
 async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
+  const assets = angularAssets(projectDir);
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const registry = registryClient(JSON.parse(configText), projectDir);
@@ -773,7 +796,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
     const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;
     const command = [`${updateCommand(project)} ${framework}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
-    const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
+    const hop = { major, angular: frameworkVersion, node, libs, shared: changes, dropped: [], command };
 
     if (blockers.length) {
       plan.blockers.push(...blockers);
@@ -809,6 +832,13 @@ async function buildPlan({ projectDir, to, next = false }) {
       for (const [via, list] of brought) {
         const each = list.map((c) => `${c.name} ${c.to} under "${c.after}"${c.before ? ` (${c.from} was "${c.before}")` : ''}`).join(', ');
         plan.notes.push(`Angular ${major} moves ${via}, which brings packages whose license changed or isn't a common open-source one: ${each}. Read those too, and ask before going to Angular ${major}.`);
+      }
+
+      for (const { name, to } of [...moved, ...changes].filter((m) => assets.has(m.name) && m.to)) {
+        const files = await registry.release(name, to).then((manifest) => manifest && tarball(manifest)).catch(() => null);
+        if (!files) { plan.unchecked.push({ name, reason: `angular.json loads files from it, and ${to} could not be read to check they're still there` }); continue; }
+        const shipped = new Set(files.map((f) => f.name));
+        for (const path of assets.get(name)) if (!shipped.has(path)) hop.dropped.push({ file: `node_modules/${name}/${path}`, name, version: to });
       }
 
       // ng update moves every framework package along with core, so a deprecation shows nowhere unless the plan says so.
@@ -889,6 +919,7 @@ function render(plan) {
       lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}${s.ranges?.length ? `, fits ${s.ranges.join(' and ')}` : ''}; needed by ${s.neededBy.join(', ')}${s.repository ? `; repository: ${s.repository}` : ''}`);
+    for (const d of hop.dropped) lines.push(`  angular.json: loads ${d.file}, which ${d.name} ${d.version} no longer ships. Search the code for what used it, then remove or replace the entry`);
     lines.push(`  Run: ${hop.command}`);
   }
   if (plan.blockers.length) {
