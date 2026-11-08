@@ -12,18 +12,24 @@ const USAGE = 'Usage: update.mjs [--project <dir>] [--json] @angular/core@<versi
 
 // Node cannot exec a Windows .cmd file without a shell. Read only the standard shim's literal script path instead.
 function pnpmCommand(cwd) {
-  const script = [process.env.npm_execpath, process.env.COREPACK_ROOT && join(process.env.COREPACK_ROOT, 'dist', 'pnpm.js')]
-    .find(file => file && /[\\/]pnpm\.c?js$/i.test(file) && existsSync(resolve(cwd, file)));
-  if (script) return { file: process.execPath, prefix: [resolve(cwd, script)] };
+  const execpath = process.env.npm_execpath && resolve(cwd, process.env.npm_execpath);
+  if (execpath && existsSync(execpath)) {
+    if (/[\\/]pnpm[^\\/]*\.[cm]?js$/i.test(execpath)) return { file: process.execPath, prefix: [execpath] };
+    // pnpm 12 ships a native binary, and `pnpm exec` names it here.
+    if (/[\\/]pnpm(?:-[a-z]+)?(?:\.exe)?$/i.test(execpath)) return { file: execpath, prefix: [] };
+  }
+  const corepack = process.env.COREPACK_ROOT && join(process.env.COREPACK_ROOT, 'dist', 'pnpm.js');
+  if (corepack && existsSync(corepack)) return { file: process.execPath, prefix: [corepack] };
   const path = Object.entries(process.env).find(([key]) => key.toLowerCase() === 'path')?.[1] || '';
   const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat'] : [''];
   for (const dir of path.split(delimiter).filter(Boolean)) for (const extension of extensions) {
     const file = resolve(cwd, dir, 'pnpm' + extension);
     if (!existsSync(file)) continue;
     if (!/\.(?:cmd|bat)$/i.test(file)) return { file, prefix: [] };
-    const matches = [...readFileSync(file, 'utf8').matchAll(/"%(?:dp0%|~dp0)[\\/]?([^"\r\n%]*pnpm\.c?js)"/gi)];
-    if (matches.length === 1) {
-      const target = resolve(dirname(file), matches[0][1].replace(/[\\/]/g, '/'));
+    // Corepack's shim names the same script twice, once for each way it finds Node.
+    const targets = new Set([...readFileSync(file, 'utf8').matchAll(/"%(?:dp0%|~dp0)[\\/]?([^"\r\n%]*pnpm\.[cm]?js)"/gi)].map((m) => m[1]));
+    if (targets.size === 1) {
+      const target = resolve(dirname(file), [...targets][0].replace(/[\\/]/g, '/'));
       if (existsSync(target)) return { file: process.execPath, prefix: [target] };
     }
     throw new Error('Cannot resolve this pnpm shim without a shell. Use the existing Corepack or Node-script installation; no fallback was run.');
@@ -156,7 +162,7 @@ function main() {
   const major = Number(cli?.[1]);
   if (!Number.isSafeInteger(major) || major < 2 || (core && semver.coerce(core.slice('@angular/core@'.length))?.major !== major)) throw new Error('The framework requests must name the same target major for @angular/core and @angular/cli.');
   const cwd = resolve(values.project || '.');
-  const pnpm = pnpmCommand(cwd);
+  const runner = pnpmCommand(cwd);
   const status = spawnSync('git', ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all'], { cwd, encoding: 'utf8', windowsHide: true });
   if (status.status !== 0) throw new Error('Could not verify the Git working tree. No update was run.');
   if (status.stdout.trim()) throw new Error('Repository is not clean. Preserve and inspect the changes before another update.');
@@ -168,7 +174,7 @@ function main() {
   // Angular's own temporary runner uses this same child-only dispatch control. It does not bypass Git or peers.
   // With a catalog, the tree was clean a moment ago and the only change since is the one just made above.
   const args = ['dlx', cli[0], 'update', ...positionals, ...(inlined ? ['--allow-dirty'] : [])];
-  const run = (argv) => spawnSync(pnpm.file, [...pnpm.prefix, ...argv], { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 });
+  const run = (argv) => spawnSync(runner.file, [...runner.prefix, ...argv], { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 });
   const result = run(args);
   let exitCode = result.status ?? 1;
   let catalog = null, install = null;

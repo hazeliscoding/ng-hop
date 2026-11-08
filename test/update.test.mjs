@@ -131,6 +131,31 @@ test('pnpm updater: captured JSON redacts secrets from child output', async () =
   assert.match(JSON.parse(r.stdout).stdout, /\[redacted\]/);
 });
 
+test('pnpm updater: pnpm 12\'s native binary, which pnpm exec names in npm_execpath, is run directly', { skip: process.platform === 'win32' && 'a fake native binary needs a POSIX shebang' }, async () => {
+  const f = fixture(), native = join(f.root, 'pnpm-native');
+  writeFileSync(native, '#!' + process.execPath + '\n' + driverSource, { mode: 0o755 });
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: native, COREPACK_ROOT: '' } });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.read().args, ['dlx', '@angular/cli@22', 'update', ...packages]);
+});
+
+test('pnpm updater: a pnpm script in .mjs, as pnpm 12 ships, is run through Node', async () => {
+  const f = fixture(), script = join(f.root, 'pnpm.mjs');
+  writeFileSync(script, driverSource.replace("const fs = require('node:fs');", "import fs from 'node:fs';"));
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: script, COREPACK_ROOT: '' } });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.equal(f.read().dispatch, 'true');
+});
+
+test('pnpm updater: a shim that names its script twice, as corepack writes one, is still read', { skip: process.platform !== 'win32' && 'only Windows runs pnpm through a .cmd shim' }, async () => {
+  const f = fixture(), bin = join(f.root, 'bin'); mkdirSync(bin);
+  writeFileSync(join(bin, 'pnpm.cjs'), driverSource);
+  writeFileSync(join(bin, 'pnpm.cmd'), '@echo off\r\nIF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe" "%~dp0\\pnpm.cjs" %*\r\n) ELSE (\r\n  node "%~dp0\\pnpm.cjs" %*\r\n)\r\n');
+  const pathKey = Object.keys(process.env).find(k => k.toLowerCase() === 'path') || 'PATH';
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: '', COREPACK_ROOT: '', [pathKey]: bin + delimiter + process.env[pathKey] } });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+});
+
 test('pnpm updater: executable shims are resolved without running a command shell', async () => {
   const f = fixture(), bin = join(f.root, 'bin'); mkdirSync(bin);
   if (process.platform === 'win32') {
