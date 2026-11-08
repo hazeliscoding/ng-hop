@@ -714,13 +714,25 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
-    // npm and pnpm install a required peer on their own, so nothing else says the app gained one.
+    // npm, pnpm and bun install a required peer on their own, so nothing else says the app gained one, and yarn doesn't,
+    // so the build can't resolve it. Each new peer is named, and listed to install with the version that fits.
     for (const lib of moved) {
       const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
       const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
       const valid = added.filter((peer) => VALID_NAME.test(peer));
       if (lib.from && valid.length) lib.newPeers = valid;
       if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
+      for (const peer of lib.from ? valid : []) {
+        const range = after.peerDependencies[peer];
+        const listed = changes.find((s) => s.name === peer);
+        if (listed) { if (!listed.neededBy.includes(lib.name)) listed.neededBy.push(lib.name); continue; }
+        const doc = await registry.get(peer).catch(() => null);
+        // A framework package keeps in step with core, as ng update keeps the rest of them.
+        const fits = isFramework(peer) && semver.satisfies(frameworkVersion, range, { includePrerelease: true }) ? frameworkVersion
+          : doc && semver.validRange(range) ? semver.maxSatisfying(eligibleReleases(doc, null), range) : null;
+        if (fits) changes.push({ name: peer, from: null, to: fits, neededBy: [lib.name] });
+        else plan.unchecked.push({ name: peer, reason: `${lib.name} ${lib.to} newly needs ${range}, and the registry has no release to install for it` });
+      }
     }
     // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
     const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;

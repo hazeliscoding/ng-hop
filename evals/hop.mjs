@@ -76,8 +76,9 @@ for (let step = 0; step < 6 && !failures.length; step++) {
   const deps = () => { const p = readPkg(); return { ...p.devDependencies, ...p.dependencies }; };
   for (const item of [...hop.libs.filter((l) => l.from !== l.to), ...hop.shared]) {
     const spec = deps()[item.name];
-    if (!spec || spec.startsWith('catalog:') || (semver.validRange(spec) && semver.satisfies(item.to, spec))) continue;
-    console.log(`  also installing ${item.name}@${item.to}, which the update left at ${spec}`);
+    // Not in package.json at all is a peer the plan lists as newly needed, which yarn won't add on its own.
+    if (spec && (spec.startsWith('catalog:') || (semver.validRange(spec) && semver.satisfies(item.to, spec)))) continue;
+    console.log(`  also installing ${item.name}@${item.to}, ${spec ? `which the update left at ${spec}` : 'which the plan lists as newly needed'}`);
     const added = shell(`${manager()} ${item.name}@${item.to}`);
     if (!added.ok) fail(`installing ${item.name}@${item.to}`, added.out);
   }
