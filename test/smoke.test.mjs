@@ -105,3 +105,34 @@ test('in Chrome: an Angular console.error fails', { skip: !CHROME }, async () =>
   assert.equal(code, 1);
   assert.match(result.consoleErrors.join(), /ERROR/);
 });
+
+test('in Chrome, positive control: a plain console.error fails, which Chrome\'s own log could not tell apart', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root>hi</app-root><script>console.error("oops")</script></body></html>')));
+  assert.equal(code, 1);
+  assert.match(result.consoleErrors.join(), /oops/);
+});
+
+test('in Chrome: warnings and logs are not errors', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root>hi</app-root><script>console.warn("careful"); console.log("ERROR in a log line is still a log")</script></body></html>')));
+  assert.deepEqual(result.consoleErrors, []);
+  assert.equal(code, 0);
+});
+
+test('in Chrome, positive control: an error after the page has loaded still counts', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root>hi</app-root><script>setTimeout(() => console.error("late"), 800)</script></body></html>')));
+  assert.equal(code, 1);
+  assert.match(result.consoleErrors.join(), /late/);
+});
+
+test('in Chrome: an app that renders a moment after loading passes', { skip: !CHROME }, async () => {
+  const { code, result } = await check(fakeApp(server('<html><body><app-root></app-root><script>setTimeout(() => { document.querySelector("app-root").innerHTML = "<h1>ready</h1>"; }, 1500)</script></body></html>')));
+  assert.equal(result.rendered, true);
+  assert.equal(code, 0);
+});
+
+test('in Chrome, positive control: a script that fails to load fails', { skip: !CHROME }, async () => {
+  const missing = `http.createServer((q, r) => { if (q.url !== '/') { r.writeHead(404); return r.end(); } r.writeHead(200, {'content-type':'text/html'}); r.end(${JSON.stringify('<html><body><app-root>hi</app-root><script src="/main-missing.js"></script></body></html>')}); }).listen(port, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + port + '/'));`;
+  const { code, result } = await check(fakeApp(missing));
+  assert.equal(code, 1);
+  assert.match(result.consoleErrors.join(), /404|main-missing|Failed to load/);
+});
