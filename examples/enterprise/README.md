@@ -11,7 +11,7 @@ Acme's portal is on Angular 21 and can't go to 22 on its own. Its UI comes from 
 
 ## Set it up
 
-You need Node 22.22.3 or newer and pnpm 12.
+You need Node 24.15 or newer, pnpm 12 and git. Verdaccio 7 needs Node 24 or newer, and Angular 22, which the upgrade moves to, needs 24.15 or newer on Node 24.
 
 1. Start the registry, and leave it running:
    ```sh
