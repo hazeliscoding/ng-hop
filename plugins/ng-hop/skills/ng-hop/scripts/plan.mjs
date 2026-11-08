@@ -266,12 +266,13 @@ function nodePins(dir) {
     if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
     const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
     if (feature) add(join(base, '.devcontainer', 'devcontainer.json'), feature);
+    // A workspace keeps engines and volta at its root too, and Volta's members extend the root's.
+    try {
+      const pkg = JSON.parse(read(join(base, 'package.json')) || '{}');
+      if (pkg.engines?.node) add(join(base, 'package.json'), pkg.engines.node, 'engines');
+      if (pkg.volta?.node) add(join(base, 'package.json'), pkg.volta.node);
+    } catch { /* a broken package.json pins nothing, and readProject reports the app's */ }
   }
-  try {
-    const pkg = JSON.parse(read(join(dir, 'package.json')) || '{}');
-    if (pkg.engines?.node) add(join(dir, 'package.json'), pkg.engines.node, 'engines');
-    if (pkg.volta?.node) add(join(dir, 'package.json'), pkg.volta.node);
-  } catch { /* readProject reports a broken package.json */ }
   const workflows = join(root, '.github', 'workflows');
   for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)).sort() : []) {
     const text = (read(join(workflows, name)) || '').replace(/\r/g, '').replace(/^[ \t]*#.*$/gm, '');

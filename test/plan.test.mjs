@@ -741,11 +741,21 @@ test('an app already on the target still hears about a Node pin below its range'
 });
 
 test('an app below the repo root gets the pins kept at the root too', async () => {
+  // A workspace keeps engines and volta in the root's package.json, and Volta's members extend it.
   const lock = JSON.stringify({ lockfileVersion: 3, packages: Object.fromEntries(Object.entries(lockBase).map(([n, version]) => [`node_modules/${n}`, { version }])) });
-  const repo = app({ files: { ...git, 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: base }), 'apps/web/package-lock.json': lock, '.github/workflows/ci.yml': setupNode('20') } });
+  const repo = app({ files: {
+    ...git,
+    'package.json': JSON.stringify({ name: 'mono', private: true, engines: { node: '>=20' }, volta: { node: '20.18.0' } }),
+    'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: base, volta: { extends: '../../package.json' } }),
+    'apps/web/package-lock.json': lock,
+    '.github/workflows/ci.yml': setupNode('20'),
+  } });
   const r = await plan(nodeWorld(), { dir: join(repo.dir, 'apps', 'web') }, { to: 21 });
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(r.plan.hops[0].node.pins, [{ file: '../../.github/workflows/ci.yml', value: '20' }]);
+  assert.deepEqual(r.plan.hops[0].node.pins, [
+    { file: '../../package.json', value: '>=20' }, { file: '../../package.json', value: '20.18.0' },
+    { file: '../../.github/workflows/ci.yml', value: '20' },
+  ]);
 });
 
 test('Node outside a major\'s range is reported on that major', async () => {
