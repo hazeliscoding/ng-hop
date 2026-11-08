@@ -65,7 +65,7 @@ for (let step = 0; step < 6 && !failures.length; step++) {
   const planned = node([join(SCRIPTS, 'plan.mjs'), '--project', dir, '--json', ...(values.to ? ['--to', values.to] : [])]);
   if (planned.code === 1) { fail('the plan', planned.out); break; }
   const plan = JSON.parse(planned.stdout);
-  reached = plan.reachable;
+  reached ??= Number(plan.project.angular.split('.')[0]);
   const hop = plan.hops[0];
   if (!hop) { console.log(`Done: Angular ${plan.reachable}, plan status ${plan.status}${plan.blockers.length ? `, blocked by ${plan.blockers.map((b) => b.name).join(', ')}` : ''}.`); break; }
 
@@ -87,7 +87,7 @@ for (let step = 0; step < 6 && !failures.length; step++) {
   const now = checks();
   console.log(`  ${verdicts(now)}`);
   for (const [name, result] of Object.entries(now)) if (baseline[name].ok && !result.ok) fail(`the ${name} at Angular ${hop.major}, which passed at the start`, result.out);
-  reached = hop.major;
+  if (!failures.length) reached = hop.major;
 }
 
 console.log(`\nResult: ${failures.length ? `FAILED (${failures.join('; ')})` : 'PASS'}, reached Angular ${reached}.`);
