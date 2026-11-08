@@ -641,7 +641,7 @@ async function buildPlan({ projectDir, to, next = false }) {
   const appRc = join(projectDir, '.npmrc');
   if (configDir !== projectDir && existsSync(appRc)) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
-    for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (key in appConfig) config[key] = appConfig[key];
+    for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
   }
   const registry = registryClient(config, [...new Set([configDir, projectDir])]);
 
