@@ -42,8 +42,12 @@ class PlanError extends Error {}
 // --no-install because npm has an unrelated package named `ng`: plain `npx ng` would download and run it whenever the
 // project's CLI isn't installed. pnpm exec and yarn only run what's installed already.
 const runnerFor = (project) => ({ npm: 'npx --no-install', pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx --no-install' }[project.packageManager] || 'npx --no-install');
-// pnpm's runner keeps the selected CLI from redispatching to the app's old CLI and dirtying its lockfile.
-const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)))}` : `${runnerFor(project)} ng update`);
+// The runner keeps the target CLI in control. On pnpm, the app's old CLI would dirty the lockfile installing a temporary
+// one, and on yarn 4 that install stopped with no error.
+const updateScript = () => quotePath(fileURLToPath(new URL('./update.mjs', import.meta.url)));
+const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm exec node ${updateScript()}`
+  : project.packageManager === 'yarn' ? `node ${updateScript()}`
+  : `${runnerFor(project)} ng update`);
 
 // Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
 // read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.

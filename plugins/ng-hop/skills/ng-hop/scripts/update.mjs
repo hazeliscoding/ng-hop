@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// pnpm-only execution transport. The plan selects versions; Angular still checks Git and peers and runs migrations.
+// pnpm and yarn execution transport. The plan selects versions; Angular still checks Git and peers and runs migrations.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -35,6 +35,16 @@ function pnpmCommand(cwd) {
     throw new Error('Cannot resolve this pnpm shim without a shell. Use the existing Corepack or Node-script installation; no fallback was run.');
   }
   throw new Error('Could not find pnpm. Run the printed pnpm exec command with the already installed project package manager.');
+}
+
+// For yarn, npm runs the target CLI from its own cache, as pnpm's dlx does for pnpm. Asked to update, an older CLI
+// installs a temporary newer one with the project's manager, and on yarn 4 that stopped with no error. npm comes with
+// Node, and its own script is run directly, with no shell.
+function npmCommand() {
+  const script = [process.env.npm_execpath, join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')]
+    .find((file) => file && /[\\/]npm-cli\.c?js$/i.test(file) && existsSync(file));
+  if (!script) throw new Error('Could not find npm next to Node, which runs the target Angular CLI for a yarn project. No fallback was run.');
+  return { file: process.execPath, prefix: [script] };
 }
 
 // ---- pnpm catalogs ----------------------------------------------------------------------------------------------
@@ -162,7 +172,8 @@ function main() {
   const major = Number(cli?.[1]);
   if (!Number.isSafeInteger(major) || major < 2 || (core && semver.coerce(core.slice('@angular/core@'.length))?.major !== major)) throw new Error('The framework requests must name the same target major for @angular/core and @angular/cli.');
   const cwd = resolve(values.project || '.');
-  const runner = pnpmCommand(cwd);
+  const yarn = existsSync(join(cwd, 'yarn.lock'));
+  const runner = yarn ? npmCommand() : pnpmCommand(cwd);
   const status = spawnSync('git', ['--no-optional-locks', 'status', '--porcelain', '--untracked-files=all'], { cwd, encoding: 'utf8', windowsHide: true });
   if (status.status !== 0) throw new Error('Could not verify the Git working tree. No update was run.');
   if (status.stdout.trim()) throw new Error('Repository is not clean. Preserve and inspect the changes before another update.');
@@ -170,10 +181,10 @@ function main() {
   const controls = { NG_DISABLE_VERSION_CHECK: 'true', NG_CLI_ANALYTICS: 'false', COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', npm_config_manage_package_manager_versions: 'false', npm_config_pm_on_fail: 'error' };
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
-  const inlined = inlineCatalog(cwd);
+  const inlined = yarn ? null : inlineCatalog(cwd);
   // Angular's own temporary runner uses this same child-only dispatch control. It does not bypass Git or peers.
   // With a catalog, the tree was clean a moment ago and the only change since is the one just made above.
-  const args = ['dlx', cli[0], 'update', ...positionals, ...(inlined ? ['--allow-dirty'] : [])];
+  const args = yarn ? ['exec', '--yes', `--package=${cli[0]}`, '--', 'ng', 'update', ...positionals] : ['dlx', cli[0], 'update', ...positionals, ...(inlined ? ['--allow-dirty'] : [])];
   const run = (argv) => spawnSync(runner.file, [...runner.prefix, ...argv], { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 });
   const result = run(args);
   let exitCode = result.status ?? 1;
@@ -189,7 +200,7 @@ function main() {
   }
   if (values.json) {
     console.log(JSON.stringify({
-      exitCode, targetMajor: major, command: ['pnpm', ...args], stdout: redact(result.stdout), stderr: redact(result.stderr),
+      exitCode, targetMajor: major, command: [yarn ? 'npm' : 'pnpm', ...args], stdout: redact(result.stdout), stderr: redact(result.stderr),
       ...(inlined ? { catalog, install: install && { exitCode: install.status, stdout: redact(install.stdout), stderr: redact(install.stderr) } } : {}),
       error: result.error ? 'The update process did not finish. Inspect its outcome before another attempt.' : null,
     }, null, 2));

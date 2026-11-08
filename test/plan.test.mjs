@@ -463,7 +463,7 @@ test('a library that ships migrations is flagged', async () => {
   assert.equal(libIn(r, 21, '@angular/material').migrations, true);
 });
 
-for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', 'yarn ng update', 'yarn'], ['bun.lock', 'bunx --no-install ng update', 'bun']]) {
+for (const [lockfile, runner, manager] of [['pnpm-lock.yaml', `pnpm exec node ${quotePath(UPDATE)}`, 'pnpm'], ['yarn.lock', `node ${quotePath(UPDATE)}`, 'yarn'], ['bun.lock', 'bunx --no-install ng update', 'bun']]) {
   test(`${manager} projects get ${manager} commands`, async () => {
     const r = await plan(world(), app({ deps: base, files: { [lockfile]: '' } }), { to: 21 });
     assert.equal(r.plan.project.packageManager, manager);

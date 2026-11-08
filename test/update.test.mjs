@@ -156,6 +156,21 @@ test('pnpm updater: a shim that names its script twice, as corepack writes one, 
   assert.equal(r.code, 0, r.stderr || r.stdout);
 });
 
+test('yarn updater: the target CLI runs from npm\'s own cache, so Angular never installs a temporary one through yarn', async () => {
+  // On yarn 4, `yarn ng update` stopped at "Installing a temporary Angular CLI" with no error.
+  const f = fixture();
+  rmSync(join(f.project, 'pnpm-lock.yaml'));
+  writeFileSync(join(f.project, 'yarn.lock'), '# yarn lockfile\n');
+  const git = (args) => spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', ...args], { cwd: f.project, encoding: 'utf8' });
+  git(['add', '--all']); git(['commit', '-m', 'yarn']);
+  const npm = join(f.root, 'npm-cli.js');
+  writeFileSync(npm, driverSource);
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm } });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.read().args, ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', ...packages]);
+  assert.equal(f.read().dispatch, 'true', 'the target CLI keeps control instead of handing back to the app\'s old one');
+});
+
 test('pnpm updater: executable shims are resolved without running a command shell', async () => {
   const f = fixture(), bin = join(f.root, 'bin'); mkdirSync(bin);
   if (process.platform === 'win32') {

@@ -63,6 +63,15 @@ Error: Repository is not clean. Please commit or stash any changes before updati
 
 The installed CLI put its temporary package inside the project (`node_modules`, or `.angular/cache/angular-cli-tmp-packages-*`), where pnpm treats it as another workspace importer and changes the lockfile. It happens from Angular 21's CLI onward, in any project with a `pnpm-workspace.yaml`, and a `packages` list in that file doesn't prevent it. Plain `pnpm dlx` can still hand off to that local CLI, so current plans use `update.mjs`: pnpm acquires the target CLI in its cache, and `NG_DISABLE_VERSION_CHECK` is scoped to the child to keep that selected CLI in control. This is the same version-dispatch control Angular uses in its own temporary runner, not a Git or peer bypass. Do not retry an old command, commit an unexplained lockfile change, or bypass cleanliness. Preserve the diff and output, verify which migrations actually ran, and ask before removing verified bootstrap-only leftovers. Then make a fresh plan from the clean, verified starting point.
 
+## yarn stops at `Installing a temporary Angular CLI`
+
+```text
+The installed Angular CLI version is outdated.
+Installing a temporary Angular CLI versioned 21.2.29 to perform the update.
+```
+
+On yarn 4, a plain `yarn ng update` printed this and stopped, with no error and nothing changed. An older CLI asked to update installs a temporary newer one with the project's package manager, and that install failed silently. The plan's command for a yarn project runs `update.mjs` instead, which has npm run the target CLI from its own cache and keeps it in control, so no temporary CLI is needed. If you see this, run the plan's command.
+
 ## `ERR_PNPM_IGNORED_BUILDS`, or `Unable to install packages` on pnpm
 
 ```
