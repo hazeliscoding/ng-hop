@@ -367,6 +367,22 @@ test('a library needing an extra package brings it along when the project declar
   assert.match(text.stdout, /marked: 15\.0\.0 -> 17\.0\.2, fits \^17\.0\.0 \|\| \^18\.0\.0; needed by ngx-markdown/);
 });
 
+test('a library that moves names its repository, where its release notes are when the package has none', async () => {
+  const md = pkg('ngx-markdown', {
+    '20.0.0': { peer: '^20.0.0', at: '2025-06-01', repository: { type: 'git', url: 'git+https://github.com/jfcere/ngx-markdown.git' } },
+    '21.0.0': { peer: '^21.0.0', at: '2025-12-01', repository: { type: 'git', url: 'git+https://github.com/jfcere/ngx-markdown.git' } },
+  });
+  const options = { deps: { ...base, 'ngx-markdown': '^20.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0' } };
+  assert.equal(libIn(await plan(world(md), app(options), { to: 21 }), 21, 'ngx-markdown').repository, 'https://github.com/jfcere/ngx-markdown');
+  assert.match((await plan(world(md), app(options), { to: 21, text: true })).stdout, /ngx-markdown: 20\.0\.0 -> 21\.0\.0;.*; repository: https:\/\/github\.com\/jfcere\/ngx-markdown$/m);
+
+  for (const [repository, expected] of [['git://github.com/markedjs/marked.git', 'https://github.com/markedjs/marked'], ['git+ssh://git@github.com/ngrx/platform.git', 'https://github.com/ngrx/platform'], ['javascript:alert(1)', undefined], ['https://example.com/a b', undefined]]) {
+    const lib = pkg('ui-lib', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', repository } });
+    const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.0.0' } }), { to: 21 });
+    assert.equal(libIn(r, 21, 'ui-lib').repository, expected, repository);
+  }
+});
+
 test('an extra package the project does not declare is left for npm to install', async () => {
   const md = pkg('ngx-markdown', { '20.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { marked: '^15.0.0' } }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01', peers: { marked: '^17.0.0' } } });
   const r = await plan(world(md), app({ deps: { ...base, 'ngx-markdown': '^20.0.0' }, lock: { ...lockBase, 'ngx-markdown': '20.0.0' } }), { to: 21 });

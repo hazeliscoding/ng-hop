@@ -719,6 +719,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     // so the build can't resolve it. Each new peer is named, and listed to install with the version that fits.
     for (const lib of moved) {
       const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+      const repository = repositoryUrl(after);
+      if (repository) lib.repository = repository;
       const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
       const valid = added.filter((peer) => VALID_NAME.test(peer));
       if (lib.from && valid.length) lib.newPeers = valid;
@@ -822,6 +824,13 @@ const SUPPORT = {
   stale: 'UNCONFIRMED: this release is older than the Angular major and only accepts it through an open-ended range, check the running app',
 };
 
+// Where a library's changelog or release notes are, since many packages don't ship them. Only a web address is kept.
+function repositoryUrl(manifest) {
+  const raw = typeof manifest?.repository === 'string' ? manifest.repository : manifest?.repository?.url;
+  const url = String(raw || '').replace(/^git\+/, '').replace(/^(git|ssh):\/\/(git@)?/, 'https://').replace(/\.git$/, '');
+  return /^https:\/\/[\w.-]+\/\S+$/.test(url) ? url : null;
+}
+
 function render(plan) {
   const lines = [];
   const p = plan.project;
@@ -843,7 +852,7 @@ function render(plan) {
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}${s.ranges?.length ? `, fits ${s.ranges.join(' and ')}` : ''}; needed by ${s.neededBy.join(', ')}`);
     lines.push(`  Run: ${hop.command}`);
