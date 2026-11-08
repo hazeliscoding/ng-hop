@@ -602,6 +602,22 @@ test('pnpm bootstrap: the printed Run command selects the target CLI, not the lo
   assert.doesNotMatch(r.stdout, /Run: pnpm exec ng update/);
 });
 
+test('the repo\'s own Node pins below a major\'s range are named under it, wherever the repo keeps them', async () => {
+  // The enterprise run's agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
+  const [core, compiler] = angular();
+  core.versions['21.2.0'].engines = { node: '^22.22.3 || ^24.15.0 || >=26.0.0' };
+  const files = {
+    '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\nRUN corepack enable\n',
+    '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" }, "image": "mcr.microsoft.com/devcontainers/typescript-node:1-24-bookworm" }',
+    '.nvmrc': '22\n',
+    '.github/workflows/ci.yml': "jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n",
+  };
+  const r = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase, files }), { to: 21 });
+  assert.deepEqual(r.plan.hops[0].node.pins, [{ file: '.devcontainer/Dockerfile', value: 'node:22.12.0-bookworm' }, { file: '.github/workflows/ci.yml', value: '20' }]);
+  const text = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase, files }), { to: 21, text: true });
+  assert.match(text.stdout, /Node pins below that, in the repo: \.devcontainer\/Dockerfile \(node:22\.12\.0-bookworm\), \.github\/workflows\/ci\.yml \(20\)/);
+});
+
 test('Node outside a major\'s range is reported on that major', async () => {
   const [core, compiler] = angular();
   core.versions['21.2.0'].engines = { node: '>=999.0.0' };

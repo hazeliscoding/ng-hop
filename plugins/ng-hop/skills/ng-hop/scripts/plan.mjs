@@ -3,7 +3,7 @@
 // It reads package.json, the lockfile and npm, and never changes the project.
 // Exit codes: 0 the target is reachable (or nothing to do), 2 blocked before the target, 1 could not plan.
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
@@ -236,6 +236,55 @@ function readBunLock(dir) {
   } catch {
     return {};
   }
+}
+
+// Where the repo pins the Node its team runs: version files, package.json, a dev container or Dockerfile, CI workflows.
+// The upgrade passes on this machine and then fails on theirs, so each is checked against every major's Node range.
+// In the enterprise run, an agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
+function nodePins(dir) {
+  let root = dir;
+  while (!existsSync(join(root, '.git')) && dirname(root) !== root) root = dirname(root);
+  if (!existsSync(join(root, '.git'))) root = dir;
+  const pins = [];
+  const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } };
+  const add = (path, value, kind = 'version') => pins.push({ file: relative(dir, path).replace(/\\/g, '/'), value: String(value).trim(), kind });
+  const bases = [...new Set([dir, root])];
+  for (const base of bases) {
+    for (const name of ['.nvmrc', '.node-version']) { const text = read(join(base, name)); if (text?.trim()) add(join(base, name), text.trim().split('\n')[0]); }
+    const tools = /^nodejs\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
+    if (tools) add(join(base, '.tool-versions'), tools[1]);
+    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
+      for (const [, image] of (read(join(base, docker)) || '').matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image, 'image');
+    }
+    const devcontainer = read(join(base, '.devcontainer', 'devcontainer.json')) || '';
+    const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+    if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
+    const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+    if (feature) add(join(base, '.devcontainer', 'devcontainer.json'), feature);
+  }
+  try {
+    const pkg = JSON.parse(read(join(dir, 'package.json')) || '{}');
+    if (pkg.engines?.node) add(join(dir, 'package.json'), pkg.engines.node, 'engines');
+    if (pkg.volta?.node) add(join(dir, 'package.json'), pkg.volta.node);
+  } catch { /* readProject reports a broken package.json */ }
+  const workflows = join(root, '.github', 'workflows');
+  for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)) : []) {
+    for (const [, value] of (read(join(workflows, name)) || '').matchAll(/node-version:\s*([^#\n]+)/g)) {
+      for (const v of value.replace(/[[\]'"]/g, '').split(',')) if (/^\s*v?\d/.test(v)) add(join(workflows, name), v);
+    }
+  }
+  return pins;
+}
+
+// Whether a pin keeps the team on a Node the range accepts. A bare major such as "22" floats to its newest release, so
+// it fits when any release of that major does; a fixed version has to be in the range itself.
+function pinFits(pin, range) {
+  if (pin.kind === 'engines') return !semver.validRange(pin.value) || !semver.lt(semver.minVersion(pin.value), semver.minVersion(range));
+  const version = pin.kind === 'image' ? /(?:^|[/:])(?:node|(?:typescript|javascript)-node):(?:\d+-)?(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
+  if (!version) return true;
+  const parts = version.split('.');
+  const asRange = parts.length === 3 ? version : `${version}.x`;
+  return semver.intersects(asRange, range);
 }
 
 // The files angular.json loads straight from node_modules, by package: the scripts and styles of every target and
@@ -543,6 +592,7 @@ async function broughtLicenses(registry, lib, before, after) {
 async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const assets = angularAssets(projectDir);
+  const pins = nodePins(projectDir);
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const registry = registryClient(JSON.parse(configText), projectDir);
@@ -762,6 +812,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     if (nodeRange && semver.validRange(nodeRange)) {
       const version = process.version.replace(/^v/, '');
       node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.ltr(version, nodeRange) ? 'too-old' : 'unsupported';
+      const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
+      if (below.length) node.pins = below;
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
@@ -896,6 +948,11 @@ async function buildPlan({ projectDir, to, next = false }) {
         : semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`);
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
+    // A pin the last upgrade left behind still fails the team, so it's named here too, against this major's range.
+    const installed = project.installed('@angular/core')?.version;
+    const range = installed && (await registry.release('@angular/core', installed).catch(() => null))?.engines?.node;
+    const below = range && semver.validRange(range) ? pins.filter((p) => !pinFits(p, range)).map(({ file, value }) => ({ file, value })) : [];
+    if (below.length) plan.nodePins = { range, pins: below };
     if (behind.length) {
       // Only a CLI that has to move bootstraps a temporary copy of itself.
       const update = behind.some((b) => b.name === '@angular/cli') ? updateCommand(project) : `${runnerFor(project)} ng update`;
@@ -934,6 +991,7 @@ function render(plan) {
       for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
       lines.push(`  Run: ${plan.patches.command}`);
     }
+    if (plan.nodePins) lines.push(`  Node pins below what Angular ${plan.target} needs (${plan.nodePins.range}), in the repo: ${plan.nodePins.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
   }
   else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
   else lines.push(plan.reachable === semver.major(p.angular)
@@ -943,6 +1001,7 @@ function render(plan) {
   for (const hop of plan.hops) {
     lines.push('', `Angular ${hop.major} (${hop.angular})`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
+    if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
       lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
