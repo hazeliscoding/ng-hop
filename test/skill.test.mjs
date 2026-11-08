@@ -223,6 +223,8 @@ test('a Node in a gap of Angular\'s range is too old, and a newer release of the
   const rule = skill.split('\n').find((line) => line.includes('`Node: too-old`'));
   assert.ok(rule, 'the skill has to answer Node: too-old');
   assert.match(rule, /refuse to run/);
+  // CLI 22.2.6 only warns on Node 23 and 25, which sit in gaps of the same range, so the plan calls them too-old too.
+  assert.match(rule, /odd majors/);
   assert.match(rule, /newer release of the line they're on/);
   assert.match(rule, /`unsupported` means Node is newer than every/);
 });
