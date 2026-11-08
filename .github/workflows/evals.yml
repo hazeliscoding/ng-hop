@@ -236,9 +236,7 @@ jobs:
         os: [ubuntu-24.04, windows-latest]
         case: ${{ fromJSON(needs.prepare.outputs.cases) }}
     env:
-      NG_HOP_WORKSPACE: ${{ runner.temp }}/ws
       NG_CLI_ANALYTICS: 'false'
-      CHROME_BIN: ${{ runner.os == 'Linux' && '/usr/bin/google-chrome' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -259,6 +257,9 @@ jobs:
           fi
           git config --global user.name "Fixture for evals"
           git config --global user.email "fixture@example.invalid"
+          # A job's own env can't read the runner's paths, so these come from here.
+          echo "NG_HOP_WORKSPACE=$RUNNER_TEMP/ws" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Linux ]; then echo "CHROME_BIN=/usr/bin/google-chrome" >> "$GITHUB_ENV"; fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: templates
