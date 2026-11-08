@@ -79,15 +79,25 @@ function registryClient(config, cwd) {
     }
   }
 
-  async function fetchOnce(name, full) {
-    const url = baseFor(name) + name.replace('/', '%2F');
-    const accept = full ? 'application/json' : 'application/vnd.npm.install-v1+json';
+  async function viaNpmRelease(name, version) {
+    try {
+      const { stdout } = await runNpm(['view', `${name}@${version}`, '--json'], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      const found = [].concat(stdout.trim() ? JSON.parse(stdout) : []);
+      return found[found.length - 1] || null;
+    } catch (err) {
+      const text = `${err.stdout || ''}${err.message || ''}`;
+      if (/E404/.test(text)) return null;
+      throw new PlanError(`Could not read ${name}@${version} from the registry through npm: ${text.split('\n')[0].slice(0, 200)}`);
+    }
+  }
+
+  async function fetchOnce(url, accept, onAuthFailure) {
     let lastError;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const res = await fetch(url, { headers: { accept } });
         if (res.status === 404) return null;
-        if (res.status === 401 || res.status === 403) return viaNpm(name);
+        if (res.status === 401 || res.status === 403) return onAuthFailure();
         if (res.ok) return await res.json();
         lastError = new Error(`HTTP ${res.status}`);
       } catch (err) {
@@ -97,12 +107,14 @@ function registryClient(config, cwd) {
     throw new PlanError(`Could not reach ${url}: ${lastError?.cause?.code || lastError?.message}. A plan needs the registry, so none was made.`);
   }
 
-  const get = (name, full = false) => {
-    const key = `${name}|${full}`;
-    if (!cache.has(key)) cache.set(key, fetchOnce(name, full));
+  const cached = (key, load) => {
+    if (!cache.has(key)) cache.set(key, load());
     return cache.get(key);
   };
-  return { get };
+  const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
+  // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
+  const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
+  return { get, release };
 }
 
 async function mapLimited(items, fn) {
@@ -219,13 +231,17 @@ function judge(manifest, published, major, frameworkVersion, angularReleased) {
   return verdict;
 }
 
-function eligibleReleases(doc, floor) {
+// prerelease: only for a --next hop, where a library's own prerelease may be all that supports the new major.
+// Stable releases still come first.
+function eligibleReleases(doc, floor, prerelease = false) {
   const latest = doc['dist-tags']?.latest;
-  return newestFirst(stableOnly(Object.keys(doc.versions))).filter((v) => {
+  const eligible = (versions) => newestFirst(versions).filter((v) => {
     if (doc.versions[v].deprecated) return false;
-    if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest)) return false;
+    if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest) && !semver.prerelease(v)) return false;
     return !floor || semver.gte(v, floor);
   });
+  const stable = eligible(stableOnly(Object.keys(doc.versions)));
+  return prerelease ? [...stable, ...eligible(Object.keys(doc.versions).filter((v) => semver.valid(v) && semver.prerelease(v)))] : stable;
 }
 
 function hasAngularPeersForHop(doc, floor, majorRange) {
@@ -236,13 +252,13 @@ function hasAngularPeersForHop(doc, floor, majorRange) {
   return (line.length ? [line[0]] : Object.keys(doc.versions)).some((v) => angularPeers(doc.versions[v]).length > 0);
 }
 
-function chooseRelease(doc, floor, major, frameworkVersion, angularReleased) {
+function chooseRelease(doc, floor, major, frameworkVersion, angularReleased, prerelease = false) {
   const verdictOf = (v) => judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased);
   // An installed release that already names this major stays put: the upgrade changes nothing it doesn't have to.
   if (floor && doc.versions[floor] && !doc.versions[floor].deprecated && verdictOf(floor) === 'declared') {
     return { version: floor, support: 'declared' };
   }
-  const candidates = eligibleReleases(doc, floor);
+  const candidates = eligibleReleases(doc, floor, prerelease);
   const declared = candidates.find((v) => verdictOf(v) === 'declared');
   if (declared) return { version: declared, support: 'declared' };
   const open = candidates.find((v) => verdictOf(v) === 'open');
@@ -355,12 +371,15 @@ async function readLicenseFile(manifest) {
 
 // npm doesn't warn about this, and the build, tests and page all still pass. PrimeNG went from MIT to a commercial
 // license with "SEE LICENSE IN LICENSE.md" as its field on both sides, so that form needs the files themselves.
-async function licenseChange(doc, { name, from, to }) {
-  const [before, after] = [doc?.versions?.[from], doc?.versions?.[to]];
+async function licenseChange({ name, from, to }, before, after) {
   if (!before || !after) return { name, unread: true };
   const fields = [before, after].map(licenseField);
   const comparable = (text) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (comparable(fields[0]) !== comparable(fields[1])) return { name, from, to, before: plainLine(fields[0]) || 'none', after: plainLine(fields[1]) || 'none' };
+  if (comparable(fields[0]) !== comparable(fields[1])) {
+    // A field that only points at a file says nothing on its own, so the file's title stands in for it.
+    const shown = async (manifest, field) => (/^see license/i.test(field) && licenseTitle((await readLicenseFile(manifest).catch(() => null)) || '')) || plainLine(field) || 'none';
+    return { name, from, to, before: await shown(before, fields[0]), after: await shown(after, fields[1]) };
+  }
   if (!/^see license/i.test(fields[1])) return null;
   const files = await Promise.all([before, after].map((manifest) => readLicenseFile(manifest).catch(() => null)));
   if (!files[0] || !files[1]) return { name, unread: true };
@@ -369,9 +388,43 @@ async function licenseChange(doc, { name, from, to }) {
   return words(files[0]) === words(files[1]) ? null : { name, from, to, before: licenseTitle(files[0]), after: licenseTitle(files[1]) };
 }
 
+// SPDX ids for permissive licenses. A new dependency under anything else gets named, copyleft included, because that
+// comes with obligations of its own.
+const PERMISSIVE = new Set(['mit', 'mit-0', 'isc', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', '0bsd', 'unlicense', 'cc0-1.0', 'blueoak-1.0.0', 'zlib', 'python-2.0', 'cc-by-3.0', 'cc-by-4.0']);
+const permissive = (field) => {
+  const ids = field.split(/\s+(?:or|and|with)\s+|[()\s]+/i).filter(Boolean).map((id) => id.toLowerCase());
+  return ids.length > 0 && (/\band\b/i.test(field) ? ids.every((id) => PERMISSIVE.has(id)) : ids.some((id) => PERMISSIVE.has(id)));
+};
+
+// A moved library can bring packages under licenses of their own: PrimeNG 22 newly depends on a commercial license
+// manager. Only new dependencies and ones whose range changed get looked up, and there are usually none.
+async function broughtLicenses(registry, lib, before, after) {
+  const was = before?.dependencies || {};
+  const now = after?.dependencies || {};
+  const changed = Object.keys(now).filter((dep) => VALID_NAME.test(dep) && was[dep] !== now[dep] && semver.validRange(now[dep]));
+  return mapLimited(changed, async (dep) => {
+    try {
+      const doc = await registry.get(dep);
+      const stable = doc ? stableOnly(Object.keys(doc.versions)) : [];
+      const to = semver.maxSatisfying(stable, now[dep]);
+      const from = was[dep] && semver.validRange(was[dep]) ? semver.maxSatisfying(stable, was[dep]) : null;
+      if (!to) return { name: dep, via: lib.name, unread: true };
+      if (from === to) return null;
+      const [old, next] = await Promise.all([from ? registry.release(dep, from) : null, registry.release(dep, to)]);
+      if (from) { const change = await licenseChange({ name: dep, from, to }, old, next); return change && { ...change, via: lib.name }; }
+      const field = licenseField(next);
+      if (permissive(field)) return null;
+      const file = /^see license/i.test(field) ? await readLicenseFile(next).catch(() => null) : null;
+      return { name: dep, via: lib.name, from: null, to, before: null, after: (file && licenseTitle(file)) || plainLine(field) || 'none' };
+    } catch {
+      return { name: dep, via: lib.name, unread: true };
+    }
+  });
+}
+
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
-async function buildPlan({ projectDir, to }) {
+async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
@@ -392,8 +445,16 @@ async function buildPlan({ projectDir, to }) {
   if (!coreDoc || !compilerDoc) throw new PlanError('The registry has no @angular/core or @angular/compiler-cli.');
   const latestAngular = coreDoc['dist-tags'].latest;
   const latestMajor = semver.major(latestAngular);
-  const target = to ?? latestMajor;
-  if (target > latestMajor) throw new PlanError(`Angular ${target} isn't released yet. The latest stable version is ${latestAngular}.`);
+  // Angular's `next` tag is either a minor of the current major or the next major, depending on the month.
+  const nextTag = coreDoc['dist-tags'].next;
+  const prerelease = semver.valid(nextTag) && semver.prerelease(nextTag) && semver.gt(nextTag, latestAngular) ? nextTag : null;
+  const nextMajor = prerelease ? semver.major(prerelease) : null;
+  if (next && !prerelease) throw new PlanError(`Angular has no prerelease newer than ${latestAngular} right now, so --next has nothing to try.`);
+  if (next && to !== undefined && to !== nextMajor) throw new PlanError(`--next aims at Angular's next prerelease, ${prerelease}, so leave out --to or make it ${nextMajor}.`);
+  const target = to ?? (next ? nextMajor : latestMajor);
+  if (!next && target > latestMajor) {
+    throw new PlanError(`Angular ${target} isn't released yet. The latest stable version is ${latestAngular}.${nextMajor === target ? ` A prerelease, ${prerelease}, is out: plan with --next to try it.` : ''}`);
+  }
   if (target < currentMajor) throw new PlanError(`The project is on Angular ${currentMajor}, already past ${target}. This skill only moves forward.`);
 
   const plan = {
@@ -401,9 +462,12 @@ async function buildPlan({ projectDir, to }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [],
+    latestAngular, target, next: next ? prerelease : null, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
+  if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
+  const cliDoc = next ? await registry.get('@angular/cli') : null;
+  const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';
 
   // Which dependencies are tied to Angular? Read every one, because the name alone can't say.
   const names = Object.keys(project.deps).filter((n) => !isFramework(n));
@@ -451,11 +515,12 @@ async function buildPlan({ projectDir, to }) {
   let blockedAt = null;
   for (let major = currentMajor + 1; major <= target; major++) {
     const majorRange = `>=${major}.0.0 <${major + 1}.0.0`;
-    const frameworkVersion = semver.maxSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange);
+    const toPrerelease = Boolean(next) && major === nextMajor;
+    const frameworkVersion = toPrerelease ? prerelease : semver.maxSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange);
     if (!frameworkVersion) throw new PlanError(`The registry has no stable @angular/core ${major}.`);
-    const angularReleased = coreDoc.time?.[`${major}.0.0`] || coreDoc.time?.[semver.minSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange)];
+    const angularReleased = coreDoc.time?.[`${major}.0.0`] || coreDoc.time?.[semver.minSatisfying(stableOnly(Object.keys(coreDoc.versions)), majorRange)] || coreDoc.time?.[frameworkVersion];
     const coreManifest = coreDoc.versions[frameworkVersion];
-    const compilerVersion = semver.maxSatisfying(stableOnly(Object.keys(compilerDoc.versions)), majorRange);
+    const compilerVersion = toPrerelease && compilerDoc.versions[prerelease] ? prerelease : semver.maxSatisfying(stableOnly(Object.keys(compilerDoc.versions)), majorRange);
     const compilerManifest = compilerDoc.versions[compilerVersion];
 
     const libs = [];
@@ -487,7 +552,7 @@ async function buildPlan({ projectDir, to }) {
         }
         continue;
       }
-      const choice = chooseRelease(doc, floor, major, frameworkVersion, angularReleased);
+      const choice = chooseRelease(doc, floor, major, frameworkVersion, angularReleased, toPrerelease);
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
       const manifest = doc.versions[choice.version];
       libs.push({
@@ -588,7 +653,9 @@ async function buildPlan({ projectDir, to }) {
       if (lib.from && valid.length) lib.newPeers = valid;
       if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
     }
-    const command = [`${updateCommand(project)} @angular/core@${major} @angular/cli@${major}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+    // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
+    const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;
+    const command = [`${updateCommand(project)} ${framework}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = { major, angular: frameworkVersion, node, libs, shared: changes, command };
 
     if (blockers.length) {
@@ -599,14 +666,39 @@ async function buildPlan({ projectDir, to }) {
     if (blockedAt === null) {
       plan.hops.push(hop);
       plan.reachable = major;
-      // shortcut: only the libraries the plan moves, which already have full registry documents. Shared packages such as
-      // TypeScript would need a very large download each. Check those too if a shared package ever changes its license.
-      const compared = await mapLimited(moved.filter((lib) => lib.from), (lib) => licenseChange(docs.get(lib.name), lib));
-      for (const change of compared.filter(Boolean)) {
-        if (change.unread) { plan.unchecked.push({ name: change.name, reason: 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' }); continue; }
+      const releases = async (name, from, to) => Promise.all([registry.release(name, from), registry.release(name, to)]).catch(() => [null, null]);
+      const compared = await Promise.all([
+        ...moved.filter((lib) => lib.from).map(async (lib) => {
+          const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+          return [await licenseChange(lib, before, after), ...await broughtLicenses(registry, lib, before, after)];
+        }),
+        ...changes.filter((s) => s.from).map(async (s) => [await licenseChange(s, ...await releases(s.name, s.from, s.to))]),
+      ]);
+      const brought = new Map();
+      for (const change of compared.flat().filter(Boolean)) {
+        if (change.unread) {
+          plan.unchecked.push({ name: change.name, reason: change.via ? `${change.via} brings it, and its license could not be read` : 'its license is in a file the plan could not read, so a change of license can\'t be ruled out' });
+          continue;
+        }
         plan.licenseChanges.push({ major, ...change });
-        plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
+        if (change.via) brought.set(change.via, [...(brought.get(change.via) || []), change]);
+        else plan.notes.push(`Angular ${major} moves ${change.name} from ${change.from} to ${change.to}, and its license changes: "${change.before}" to "${change.after}". Nothing fails when this happens, so nothing else will tell the person. Read both, and ask before going to Angular ${major}.`);
       }
+      // One line per library, however many packages it brings, so the plan stays readable.
+      for (const [via, list] of brought) {
+        const each = list.map((c) => `${c.name} ${c.to} under "${c.after}"${c.before ? ` (${c.from} was "${c.before}")` : ''}`).join(', ');
+        plan.notes.push(`Angular ${major} moves ${via}, which brings packages whose license changed or isn't a common open-source one: ${each}. Read those too, and ask before going to Angular ${major}.`);
+      }
+
+      // ng update moves every framework package along with core, so a deprecation shows nowhere unless the plan says so.
+      const framework = Object.keys(project.deps).filter((name) => isFramework(name) && VALID_NAME.test(name) && !plan.deprecations.some((d) => d.name === name));
+      const manifests = await mapLimited(framework, (name) => registry.release(name, frameworkVersion).catch(() => null));
+      framework.forEach((name, i) => {
+        const message = manifests[i]?.deprecated;
+        if (!message) return;
+        plan.deprecations.push({ major, name, version: frameworkVersion, message: String(message).slice(0, 300) });
+        plan.notes.push(`Angular ${major} still installs ${name}, which npm marks deprecated: "${String(message).slice(0, 200)}" ng update moves it anyway, so nothing breaks now, but it's worth planning to move off it.`);
+      });
     }
   }
 
@@ -618,7 +710,10 @@ async function buildPlan({ projectDir, to }) {
     for (const name of ['@angular/core', '@angular/cli']) {
       const have = project.installed(name)?.version;
       const doc = have ? await registry.get(name) : null;
-      const newest = doc ? semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`) : null;
+      const tagged = doc?.['dist-tags']?.next;
+      const newest = !doc ? null
+        : next ? (semver.valid(tagged) && semver.major(tagged) === currentMajor ? tagged : null)
+        : semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`);
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
     if (behind.length) {
@@ -652,7 +747,7 @@ function render(plan) {
       lines.push(`  Run: ${plan.patches.command}`);
     }
   }
-  else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.target} is reachable.`);
+  else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
   else lines.push(plan.reachable === semver.major(p.angular)
     ? `Result: BLOCKED. Angular ${plan.blockedAt} isn't possible today, so this project stays on ${plan.reachable} until a blocker below is resolved.`
     : `Result: BLOCKED at Angular ${plan.blockedAt}. Angular ${plan.reachable} is the highest version everything supports today.`);
@@ -683,18 +778,19 @@ function render(plan) {
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
 
-const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--json]
+const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--json]
 
 Works out how far an Angular app can upgrade today, and what is in the way. Changes nothing.
   --project  the project folder (default: the current folder)
   --to       the Angular major to aim for (default: the latest stable)
+  --next     aim for Angular's next prerelease instead, only when someone asks to try one
   --json     print the plan as JSON
 Exit codes: 0 the target is reachable or there is nothing to do, 2 blocked before the target, 1 no plan could be made.`;
 
 async function main() {
   let values;
   try {
-    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
+    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
   } catch (err) {
     throw new PlanError(`${err.message.split('.')[0]}.\n${USAGE}`);
   }
@@ -705,7 +801,7 @@ async function main() {
     to = Number(values.to);
     if (!Number.isInteger(to) || to < 2) throw new PlanError(`--to takes an Angular major version such as 22, not "${values.to}".`);
   }
-  const plan = await buildPlan({ projectDir, to });
+  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next) });
   process.stdout.write(`${values.json ? JSON.stringify(plan, null, 2) : render(plan)}\n`);
   process.exitCode = plan.status === 'blocked' ? 2 : 0;
 }

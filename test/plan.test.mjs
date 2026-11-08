@@ -969,3 +969,131 @@ test('a tag from the registry can\'t forge a line of the plan', async () => {
   const r = await plan(world(lib), app({ deps: { ...base, 'old-lib': '^20.0.0' }, lock: { ...lockBase, 'old-lib': '20.0.0' } }), { to: 21, text: true });
   assert.ok(!forgedLine(r.stdout), r.stdout);
 });
+
+// ---- Deprecated framework packages -------------------------------------------------------------------------------
+
+const ANIMATIONS_GONE = 'Use `animate.enter` and `animate.leave` instead.';
+const animations = (deprecatedFrom) => pkg('@angular/animations', Object.fromEntries(['20.0.0', '20.2.0', '21.0.0', '21.2.0', '22.0.0', '22.2.0'].map((v) => [v, deprecatedFrom && v >= deprecatedFrom ? { deprecated: ANIMATIONS_GONE } : {}])));
+const withAnimations = { deps: { ...base, '@angular/animations': '^20.0.0' }, lock: { ...lockBase, '@angular/animations': '20.0.0' } };
+
+test('a framework package the app uses that npm marks deprecated is named once, at the first major that installs it', async () => {
+  // @angular/animations is deprecated from 20.2 on, and ng update keeps moving it, so nothing else would say so.
+  const r = await plan(world(animations('20.2.0')), app(withAnimations));
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.plan.deprecations, [{ major: 21, name: '@angular/animations', version: '21.2.0', message: ANIMATIONS_GONE }]);
+  const text = await plan(world(animations('20.2.0')), app(withAnimations), { text: true });
+  const note = text.stdout.split('\n').find((l) => l.startsWith('Note:') && l.includes('@angular/animations'));
+  assert.ok(note && note.includes('deprecated') && note.includes('animate.enter'), text.stdout);
+  assert.ok(text.stdout.indexOf(note) < text.stdout.indexOf('Run:'));
+});
+
+test('a framework package that is not deprecated, or that the app does not use, says nothing and costs nothing', async () => {
+  const hits = [];
+  const r = await plan(world(animations(null)), app(withAnimations), { registryOptions: { hits } });
+  assert.deepEqual(r.plan.deprecations, []);
+  const none = [];
+  const unused = await plan(world(animations('20.2.0')), app({ deps: base, lock: lockBase }), { registryOptions: { hits: none } });
+  assert.deepEqual(unused.plan.deprecations, []);
+  assert.ok(!none.some((h) => h.includes('animations')), 'no request for a package the app does not declare');
+});
+
+// ---- What a moved library brings with it ------------------------------------------------------------------------
+
+const prime = (deps21, extra = {}) => pkg('primeng', {
+  '20.0.0': { peer: '^20.0.0', at: '2025-06-01', license: 'MIT', deps: { tslib: '^2.3.0', '@primeuix/styles': '^2.0.0' } },
+  '21.0.0': { peer: '^21.0.0', at: '2025-12-01', license: 'MIT', deps: deps21, ...extra },
+});
+const primeApp = { deps: { ...base, primeng: '^20.0.0' }, lock: { ...lockBase, primeng: '20.0.0' } };
+const brought = (r) => r.plan.licenseChanges.filter((c) => c.via);
+
+test('a new dependency under a license that is not a common open-source one is named, as PrimeNG 22 brings its license manager', async () => {
+  const manager = pkg('@primeui/license-manager', { '1.0.0': { license: 'SEE LICENSE IN LICENSE.md' }, '1.1.0': { license: 'SEE LICENSE IN LICENSE.md' } });
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', '@primeui/license-manager': '^1.0.0' }), manager, styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(brought(r), [{ major: 21, name: '@primeui/license-manager', via: 'primeng', from: null, to: '1.1.0', before: null, after: 'SEE LICENSE IN LICENSE.md' }]);
+  const text = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', '@primeui/license-manager': '^1.0.0' }), manager, styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21, text: true });
+  assert.match(text.stdout, /Note: .*primeng.*@primeui\/license-manager.*SEE LICENSE IN LICENSE\.md/);
+});
+
+test('a dependency whose range moves gets its license compared, like the library itself', async () => {
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' }, '3.1.0': { license: 'SEE LICENSE IN LICENSE.md' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^3.0.0' }), styles, pkg('tslib', { '2.8.1': { license: '0BSD' } })), app(primeApp), { to: 21 });
+  assert.deepEqual(brought(r), [{ major: 21, name: '@primeuix/styles', via: 'primeng', from: '2.0.3', to: '3.1.0', before: 'MIT', after: 'SEE LICENSE IN LICENSE.md' }]);
+});
+
+test('dependencies that keep their range, or arrive under a permissive license, say nothing and cost nothing', async () => {
+  const hits = [];
+  const styles = pkg('@primeuix/styles', { '2.0.3': { license: 'MIT' } });
+  const r = await plan(world(prime({ tslib: '^2.3.0', '@primeuix/styles': '^2.0.0', 'left-pad': '^1.3.0' }), styles, pkg('tslib', { '2.8.1': { license: '0BSD' } }), pkg('left-pad', { '1.3.0': { license: '(MIT OR Apache-2.0)' } })), app(primeApp), { to: 21, registryOptions: { hits } });
+  assert.deepEqual(brought(r), []);
+  assert.ok(!hits.some((h) => h.startsWith('tslib') || h.startsWith('@primeuix/styles')), `unchanged ranges are not looked up: ${hits.join(' ')}`);
+});
+
+test('a shared package the plan moves gets its license compared too', async () => {
+  const ts = pkg('typescript', { '5.8.3': { license: 'Apache-2.0' }, '5.9.3': { license: 'BUSL-1.1' }, '6.0.3': { license: 'Apache-2.0' } });
+  const r = await plan([...angular(), ts, pkg('rxjs', { '7.8.2': {} })], app({ deps: base, lock: lockBase }), { to: 21 });
+  assert.deepEqual(r.plan.licenseChanges, [{ major: 21, name: 'typescript', from: '5.8.3', to: '5.9.3', before: 'Apache-2.0', after: 'BUSL-1.1' }]);
+});
+
+// ---- --next ----------------------------------------------------------------------------------------------------
+
+function nextWorld(nextVersion, ...extra) {
+  const [core, compiler] = angular();
+  const at = '2026-10-30T00:00:00.000Z';
+  core.versions[nextVersion] = { name: '@angular/core', version: nextVersion, peerDependencies: { rxjs: '^6.5.3 || ^7.4.0' }, engines: { node: '>=18.0.0' } };
+  compiler.versions[nextVersion] = { name: '@angular/compiler-cli', version: nextVersion, peerDependencies: { typescript: '>=5.9 <7' } };
+  for (const doc of [core, compiler]) { doc.time[nextVersion] = at; doc['dist-tags'].next = nextVersion; }
+  const cli = pkg('@angular/cli', { '20.0.0': {}, '21.0.0': {}, '22.0.0': {}, '22.2.0': {}, [nextVersion]: {} }, { next: nextVersion });
+  return [core, compiler, cli, typescript(), pkg('rxjs', { '7.8.2': {} }), ...extra];
+}
+const on22 = { deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, lock: { ...lockBase, '@angular/core': '22.2.0', '@angular/cli': '22.2.0' } };
+
+test('--next offers a minor prerelease of the current major as a patch, and says it is one', async () => {
+  const r = await plan(nextWorld('22.3.0-next.4'), app(on22), { next: true });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.status, 'already-there');
+  assert.equal(r.plan.next, '22.3.0-next.4');
+  assert.equal(r.plan.patches.command, 'npx --no-install ng update @angular/core@22.3.0-next.4 @angular/cli@22.3.0-next.4');
+  const text = await plan(nextWorld('22.3.0-next.4'), app(on22), { next: true, text: true });
+  assert.match(text.stdout, /prerelease/);
+});
+
+test('--next takes a prerelease of the next major as a hop of its own, and lets libraries use prereleases too', async () => {
+  const lib = pkg('ui-lib', { '22.0.0': { peer: '^22.0.0', at: '2026-06-01' }, '23.0.0-rc.0': { peer: '^23.0.0-0', at: '2026-10-31' } });
+  const stuck = pkg('old-lib', { '22.0.0': { peer: '^22.0.0', at: '2026-06-01' } });
+  const deps = { ...on22.deps, 'ui-lib': '^22.0.0' };
+  const lock = { ...on22.lock, 'ui-lib': '22.0.0' };
+  const r = await plan(nextWorld('23.0.0-rc.1', lib), app({ deps, lock }), { next: true });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.hops[0].major, 23);
+  assert.equal(r.plan.hops[0].angular, '23.0.0-rc.1');
+  assert.equal(libIn(r, 23, 'ui-lib').to, '23.0.0-rc.0');
+  assert.equal(r.plan.hops[0].command, 'npx --no-install ng update @angular/core@23.0.0-rc.1 @angular/cli@23.0.0-rc.1 ui-lib@23.0.0-rc.0');
+
+  const blocked = await plan(nextWorld('23.0.0-rc.1', lib, stuck), app({ deps: { ...deps, 'old-lib': '^22.0.0' }, lock: { ...lock, 'old-lib': '22.0.0' } }), { next: true });
+  assert.equal(blocked.code, 2);
+  assert.equal(blocked.plan.blockers[0].name, 'old-lib');
+});
+
+test('--next plans the stable majors below a prerelease major from stable releases', async () => {
+  const r = await plan(nextWorld('23.0.0-rc.1'), app({ deps: { ...base, '@angular/core': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0' } }), { next: true });
+  assert.deepEqual(r.plan.hops.map((h) => h.angular), ['22.2.0', '23.0.0-rc.1']);
+});
+
+test('without --next, a major with only a prerelease out says how to try it', async () => {
+  const r = await plan(nextWorld('23.0.0-rc.1'), app(on22), { to: 23 });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /Angular 23 isn't released/);
+  assert.match(r.stderr, /23\.0\.0-rc\.1/);
+  assert.match(r.stderr, /--next/);
+});
+
+test('--next with no prerelease newer than the latest release, or with another --to, makes no plan', async () => {
+  const none = await plan(world(), app({ deps: base, lock: lockBase }), { next: true });
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /no prerelease/);
+  const mismatch = await plan(nextWorld('23.0.0-rc.1'), app(on22), { next: true, to: 22 });
+  assert.equal(mismatch.code, 1);
+  assert.match(mismatch.stderr, /--next/);
+});

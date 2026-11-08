@@ -25,6 +25,7 @@ export function pkg(name, releases, tags = {}) {
     if (r.migrations) versions[version]['ng-update'] = { migrations: './migrations.json' };
     if (r.engines) versions[version].engines = r.engines;
     if (r.license) versions[version].license = r.license;
+    if (r.deps) versions[version].dependencies = r.deps;
     if (r.files) versions[version].files = r.files;
     if (r.at) time[version] = `${r.at}T00:00:00.000Z`;
   }
@@ -85,6 +86,17 @@ export async function startRegistry(packages, { requireAuth = false, failWith = 
     if (failWith) { res.writeHead(failWith); return res.end('{}'); }
     if (requireAuth && !req.headers.authorization) { res.writeHead(401); return res.end('{"error":"auth required"}'); }
     const doc = byName.get(name);
+    // One release's manifest, as /<name>/<version or tag>, which is how the registry serves it without the whole document.
+    const slash = name.lastIndexOf('/');
+    const parent = !doc && slash > 0 ? byName.get(name.slice(0, slash)) : null;
+    if (parent) {
+      const wanted = name.slice(slash + 1);
+      const release = parent.versions[parent['dist-tags']?.[wanted] || wanted];
+      if (!release) { res.writeHead(404, { 'content-type': 'application/json' }); return res.end('{"error":"not found"}'); }
+      const { files, ...manifest } = release;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ...manifest, dist: { tarball: `http://127.0.0.1:${server.address().port}/-/tarball/${parent.name}/${release.version}` } }));
+    }
     if (!doc) { res.writeHead(404, { 'content-type': 'application/json' }); return res.end('{"error":"not found"}'); }
     // The abbreviated form really does drop these, so the plan is tested against the same gaps.
     const abbreviated = /install-v1/.test(req.headers.accept || '');
@@ -92,7 +104,7 @@ export async function startRegistry(packages, { requireAuth = false, failWith = 
     if (abbreviated) {
       body = { name: doc.name, 'dist-tags': doc['dist-tags'], versions: {} };
       for (const [v, m] of Object.entries(doc.versions)) {
-        body.versions[v] = { name: m.name, version: m.version, peerDependencies: m.peerDependencies, ...(m.deprecated ? { deprecated: m.deprecated } : {}), ...(m.engines ? { engines: m.engines } : {}) };
+        body.versions[v] = { name: m.name, version: m.version, peerDependencies: m.peerDependencies, ...(m.dependencies ? { dependencies: m.dependencies } : {}), ...(m.deprecated ? { deprecated: m.deprecated } : {}), ...(m.engines ? { engines: m.engines } : {}) };
       }
     }
     if (body === doc) {
@@ -129,11 +141,12 @@ export function runScript(script, args, { cwd, env = {} } = {}) {
   });
 }
 
-export async function plan(packages, proj, { to, text = false, registryOptions } = {}) {
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
+    if (next) args.push('--next');
     if (!text) args.push('--json');
     const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url } });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null };

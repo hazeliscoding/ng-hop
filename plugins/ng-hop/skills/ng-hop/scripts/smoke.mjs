@@ -4,7 +4,7 @@
 // is available renders it and collects errors. Compare the result with the same check from before the upgrade.
 // Exit codes: 0 the app runs, 1 it doesn't (or the check couldn't run).
 // Usage: smoke.mjs [--project .] [--app <name>] [--port 4287] [--path /] [--timeout 300] [--no-browser] [--json]
-import { execFile, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,10 +12,8 @@ import { parseArgs } from 'node:util';
 
 const READY = /(Local:\s+https?:\/\/|Compiled successfully|Application bundle generation complete)/;
 const FAILED = /(Application bundle generation failed|Failed to compile|\[ERROR\]|^\s*Error:|An unhandled exception occurred|Port \d+ is already in use)/m;
-// shortcut: Chrome's log doesn't record a message's level, so this matches the text of Angular's error handler and of
-// uncaught errors, and misses a plain console.error('oops'). Move to the DevTools protocol if that ever matters.
-const CONSOLE_ERROR = /^\s*"?(ERROR\b|Uncaught|Error:|NG0\d+|Failed to load)/;
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+const oneLine = (text) => String(text ?? '').split('\n')[0].trim().slice(0, 300);
 
 function findChrome() {
   const paths = process.platform === 'win32'
@@ -34,24 +32,96 @@ function rootSelector(dir) {
   return /<([a-z][a-z0-9]*-[a-z0-9-]*)/i.exec(body?.[1] || '')?.[1] || null;
 }
 
-function renderInChrome(chrome, url, selector) {
+// Chrome's DevTools protocol over --remote-debugging-pipe: Chrome reads commands on its file descriptor 3 and writes
+// on 4, as JSON with a null byte after each. That needs no WebSocket and no library, works the same on every platform,
+// and gives each console message its level, which Chrome's own log never recorded: a plain console.error('oops') used
+// to pass, and the word ERROR in an ordinary log line used to fail.
+function renderInChrome(chrome, url, selector, { waitMs = 15000, settleMs = 2000 } = {}) {
   return new Promise((done) => {
     const profile = mkdtempSync(join(tmpdir(), 'ng-hop-chrome-'));
-    const args = ['--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run', `--user-data-dir=${profile}`, '--enable-logging=stderr', '--virtual-time-budget=8000', '--dump-dom', url];
-    execFile(chrome, args, { maxBuffer: 64 * 1024 * 1024, timeout: 90000 }, (err, stdout, stderr) => {
-      try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome can hold its profile briefly, and this is only a temp folder */ }
-      if (err && !stdout) return done({ ran: false, reason: String(err.message).split('\n')[0] });
-      const errors = [];
-      for (const line of stderr.split(/\r?\n/)) {
-        const message = /CONSOLE[^\]]*\]\s*(.*)$/.exec(line)?.[1];
-        if (message && CONSOLE_ERROR.test(message)) errors.push(message.replace(/, source:.*$/, '').slice(0, 300));
-      }
-      const content = selector
-        ? new RegExp(`<${selector}[^>]*>([\\s\\S]*?)</${selector}>`, 'i').exec(stdout)?.[1]
-        : /<body[^>]*>([\s\S]*)<\/body>/i.exec(stdout)?.[1];
-      const text = (content || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<!--[\s\S]*?-->/g, '').trim();
-      done({ ran: true, rendered: text.length > 0, errors: [...new Set(errors)] });
+    const args = ['--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, '--remote-debugging-pipe', 'about:blank'];
+    let child;
+    try { child = spawn(chrome, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] }); } catch (err) { return done({ ran: false, reason: oneLine(err.message) }); }
+    const [, , , toChrome, fromChrome] = child.stdio;
+    const pending = new Map();
+    const waiters = [];
+    const errors = [];
+    let nextId = 1;
+    let buffer = '';
+    let finished = false;
+
+    const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      toChrome.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
     });
+    const waitFor = (method, ms) => new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), ms);
+      waiters.push({ method, resolve: () => { clearTimeout(timer); resolve(true); } });
+    });
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      const exited = new Promise((r) => { if (child.exitCode !== null) r(); else child.once('exit', r); });
+      let giveUp;
+      send('Browser.close').catch(() => {});
+      Promise.race([exited, new Promise((r) => { giveUp = setTimeout(r, 5000); })]).then(() => {
+        // Left running, the timer would hold the whole process open for its full five seconds.
+        clearTimeout(giveUp);
+        if (child.exitCode === null) child.kill();
+        try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome can hold its profile briefly, and this is only a temp folder */ }
+        done(result);
+      });
+    };
+    const deadline = setTimeout(() => finish({ ran: false, reason: 'Chrome did not finish within 90 seconds' }), 90000);
+
+    fromChrome.on('data', (chunk) => {
+      buffer += chunk;
+      for (let end = buffer.indexOf('\0'); end >= 0; end = buffer.indexOf('\0')) {
+        let message;
+        try { message = JSON.parse(buffer.slice(0, end)); } catch { message = {}; }
+        buffer = buffer.slice(end + 1);
+        if (message.id && pending.has(message.id)) {
+          const { resolve, reject } = pending.get(message.id);
+          pending.delete(message.id);
+          if (message.error) reject(new Error(message.error.message)); else resolve(message.result);
+          continue;
+        }
+        const params = message.params || {};
+        if (message.method === 'Runtime.consoleAPICalled' && ['error', 'assert'].includes(params.type)) {
+          errors.push(oneLine((params.args || []).map((a) => a.value ?? a.description ?? a.type).join(' ')));
+        } else if (message.method === 'Runtime.exceptionThrown') {
+          const details = params.exceptionDetails || {};
+          errors.push(oneLine(details.exception?.description || details.text));
+        } else if (message.method === 'Log.entryAdded' && params.entry?.level === 'error') {
+          errors.push(oneLine(`${params.entry.text}${params.entry.url ? ` (${params.entry.url})` : ''}`));
+        }
+        for (const waiter of waiters.filter((w) => w.method === message.method)) waiter.resolve();
+      }
+    });
+    child.on('error', (err) => finish({ ran: false, reason: oneLine(err.message) }));
+    child.on('exit', () => finish({ ran: false, reason: 'Chrome exited before the page was checked' }));
+
+    (async () => {
+      const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+      const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+      await Promise.all(['Runtime.enable', 'Log.enable', 'Page.enable'].map((method) => send(method, {}, sessionId)));
+      const loaded = waitFor('Page.loadEventFired', 30000);
+      await send('Page.navigate', { url }, sessionId);
+      await loaded;
+      // An app can render a moment after the load event, so this waits for the root to fill, then a little longer
+      // for errors from its first requests.
+      const measure = `(() => { const root = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : 'document.body'}; if (!root) return 0; const copy = root.cloneNode(true); copy.querySelectorAll('script').forEach((s) => s.remove()); return copy.innerHTML.replace(/<!--[\\s\\S]*?-->/g, '').trim().length; })()`;
+      let rendered = false;
+      for (const start = Date.now(); !rendered && Date.now() - start < waitMs;) {
+        const { result } = await send('Runtime.evaluate', { expression: measure, returnByValue: true }, sessionId);
+        rendered = result?.value > 0;
+        if (!rendered) await new Promise((r) => setTimeout(r, 250));
+      }
+      await new Promise((r) => setTimeout(r, settleMs));
+      finish({ ran: true, rendered, errors: [...new Set(errors)] });
+    })().catch((err) => finish({ ran: false, reason: oneLine(err.message) }));
   });
 }
 
