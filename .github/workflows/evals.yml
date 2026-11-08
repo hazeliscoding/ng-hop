@@ -226,7 +226,8 @@ jobs:
   opencode:
     name: OpenCode ${{ matrix.case }} on ${{ matrix.os }}
     needs: prepare
-    if: inputs.agent == 'opencode'
+    # The canary is skipped for OpenCode, and a plain condition would count that against every job after it.
+    if: ${{ !failure() && !cancelled() && inputs.agent == 'opencode' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
