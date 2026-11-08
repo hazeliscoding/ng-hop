@@ -116,9 +116,10 @@ This is an app below a pnpm workspace root, on pnpm 12.0 to 12.6. In those versi
 
 ## The build and tests pass, but the dev server fails
 
-`smoke.mjs` exists for this. Read its `server error` lines.
+`smoke.mjs` exists for this. Read its `server error` lines, or its `server log` lines when no error line matched.
 
-- **`Could not resolve "marked-katex-extension"` (or `mermaid`, `katex`, `clipboard`):** `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
+- **`Failed to resolve import "marked-katex-extension"` from Vite, or `Could not resolve "marked-katex-extension"` from esbuild (or `mermaid`, `katex`, `clipboard`):** the page comes back but renders nothing, with a 500 for `main.js` in the console. `ngx-markdown` imports its optional extras dynamically, and the dev server's prebundling tries to resolve them even when the app never uses them. If the app doesn't use the extra, add the name to `externalDependencies` under the `build` options in `angular.json`, and mention it under hand fixes.
+- **The server starts, but nothing answers on its port:** from Angular 22, `@angular/build`'s dev server takes the `PORT` environment variable over `--port`, and says `Environment variable "PORT" detected. Using port <n>.` `smoke.mjs` sets both. When you run `ng serve` yourself, unset `PORT` or give it the same port.
 - **Anything else:** check whether the same error appears in the `smoke.mjs` result from before this major. If it does, it isn't from this upgrade.
 
 ## `No matching export in "node_modules/@angular/cdk/fesm2022/collections.mjs" for import "_VIEW_REPEATER_STRATEGY"`
@@ -150,13 +151,17 @@ Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js
 
 ## Whole files show as changed
 
-Migrations can rewrite a file with different line endings, mostly on Windows. Compare `git diff --stat` with `git diff --ignore-cr-at-eol --stat`. If the second is much smaller, restore the original endings before committing, because otherwise real changes get buried. Follow `.gitattributes` if the repo has one.
+Migrations and package managers write their own line endings on any OS, and can drop a file's final newline, so a repo that commits CRLF gets whole files back in LF. Compare `git diff --stat` with `git diff --ignore-cr-at-eol --stat`. If the second is much smaller, run `eol.mjs`: it puts back each changed file's endings and final newline as git checks the file out, following `.gitattributes`, and changes nothing else.
+
+A migration can also reformat whole files. Angular 21's control-flow migration re-indents every template it converts, because its `format` option is on by default. Don't rebuild the files from the previous version by hand, since a reviewer has nothing to check that against. Straight after `ng update`, before any hand fix, restore from the last commit only the files whose whole change is the conversion: `git diff -w` shows nothing else in them, apart from the `NgIf`, `NgFor` or `CommonModule` imports it drops. Then run `npx --no-install ng generate @angular/core:control-flow --path=src --format=false`, which converts them without re-indenting. Keep the migration's output in any file with other changes, such as a component whose inline template another migration also edited. Then carry on from step 4e, so the checks and `eol.mjs` cover what the rerun wrote. For a migration with no such option, keep its output. Either way, tell reviewers to read the diff with `git diff -w`.
 
 ## Tests that won't run
 
 - **Karma** needs `--browsers=ChromeHeadless` when there's no display. Upgrading doesn't switch an existing project to Vitest, so don't move test runners as part of this.
 - **`CHROME_BIN`:** set it if Chrome isn't found.
 - **A spec that fails to compile because of an API change** is the upgrade's to fix. A spec that already failed in step 3 isn't.
+- **`Unknown argument: watch`:** the project has no `test` target in `angular.json`. Run what its `package.json` scripts and CI run instead, at the git root too in a monorepo, and say which in your report.
+- **The suite stops before any spec runs,** as with Karma's `Found 1 load error` from one spec that doesn't compile: no unit test gives any signal, before or after the upgrade. `SKILL.md` step 3 treats that like a failing build, so ask the person before going on. Read the lines above the load error first: `Cannot load browser` points to the `--browsers` flag, not to a spec.
 
 ## Resuming after an interruption
 

@@ -103,7 +103,7 @@ cp -r ng-hop/plugins/ng-hop/skills/ng-hop your-app/.agents/skills/ng-hop
 | Agent | Folder it reads | How far this is checked |
 |---|---|---|
 | Claude Code | installed by the plugin | Full evals, with and without the skill |
-| [OpenCode](https://opencode.ai/docs/skills) | `.agents/skills/` or `.opencode/skills/` | Run for real on v2.2.0: it found the skill, ran the plan and answered correctly. No full upgrade tested yet. |
+| [OpenCode](https://opencode.ai/docs/skills) | `.agents/skills/` or `.opencode/skills/` | Run for real on v2.2.0, on Windows with a free model: it took a test app from Angular 20 to 22, one commit per major, and passed all 17 checks Claude Code is graded on. |
 | [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-skills) | `.agents/skills/` or `.github/skills/` | From Copilot's docs only. Not run yet, so please report what you find. |
 
 ## Use it

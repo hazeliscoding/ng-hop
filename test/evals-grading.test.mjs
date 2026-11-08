@@ -131,6 +131,15 @@ test('facts an upgrade report owes the person, in the words real answers used', 
   assert.ok(says(node, 'Node has to be at least 22.22 or 24.15 now.'));
   assert.ok(says(node, '## Node\nAngular 22 needs **`^22.22.3 || ^24.15.0 || >=26.0.0`**. This machine is on 24.20.0, so it\'s fine.'), 'an OpenCode answer');
   assert.ok(!says(node, 'Your Node version is fine.'));
+
+  // Real wording: readme-wizard's PR, a run before the rule, and the misleading line that led to the rule.
+  for (const name of ['real-readme-wizard', 'real-readme-wizard-no-tests']) {
+    const none = CASES.find((c) => c.name === name).assertions.find((a) => /no unit test/i.test(a.text));
+    assert.ok(says(none, 'No unit test ran at any point, because the suite already fails to compile on main.'), name);
+    assert.ok(says(none, 'One spec has a type error, so Karma never runs any tests.'), name);
+    assert.ok(!says(none, 'All results matched the starting point, including the one test failure.'), name);
+    assert.ok(!says(none, 'Tests pass on every major.'), name);
+  }
   assert.ok(!says(node, '## Node\n\nUnchanged.\n\n## Versions\n24.15 of the docs'), 'a heading reaches only the line under it');
 
   const wrong = check('ask-open-range', 'Does not claim 34.3.1 stops working on the newer Angular');

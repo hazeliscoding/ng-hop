@@ -369,16 +369,20 @@ function describeBlocker(doc, name, floor, major, frameworkVersion, angularRelea
 
 // ---- Peers shared across the hop: TypeScript, RxJS, and packages a library needs alongside it ----------------
 
-function minimalBump(doc, ranges, floor) {
+// Stable releases that aren't deprecated or past `latest`, inside every range and from `floor` up, oldest first.
+function usableReleases(doc, ranges, floor) {
   const latest = doc['dist-tags']?.latest;
-  const pool = stableOnly(Object.keys(doc.versions)).filter((v) => {
+  return stableOnly(Object.keys(doc.versions)).filter((v) => {
     if (doc.versions[v].deprecated) return false;
     if (latest && semver.valid(latest) && !semver.prerelease(latest) && semver.gt(v, latest)) return false;
+    if (floor && semver.lt(v, floor)) return false;
     return ranges.every((r) => semver.satisfies(v, r, { includePrerelease: true }));
   }).sort(semver.compare);
-  const usable = floor ? pool.filter((v) => semver.gte(v, floor)) : pool;
+}
+
+// The lowest minor that works, at its newest patch: the smallest move that gets its fixes.
+function minimalBump(usable) {
   if (usable.length === 0) return null;
-  // The lowest minor that works, at its newest patch: the smallest move that gets its fixes.
   const lowest = usable[0];
   const sameMinor = usable.filter((v) => semver.major(v) === semver.major(lowest) && semver.minor(v) === semver.minor(lowest));
   return sameMinor[sameMinor.length - 1];
@@ -402,9 +406,14 @@ async function resolveShared({ project, registry, requirements, current, coupled
     if (!declared && peer === 'rxjs') continue;
     if (have && ranges.every((r) => semver.satisfies(have, r, { includePrerelease: true }))) continue;
     const doc = await registry.get(peer);
-    const pick = doc ? minimalBump(doc, ranges, have) : null;
+    const usable = doc ? usableReleases(doc, ranges, have) : [];
+    const pick = minimalBump(usable);
     if (!pick) { conflicts.push({ name: peer, have, wants }); continue; }
-    changes.push({ name: peer, from: have, to: pick, neededBy: [...new Set(wants.map((w) => w.by))] });
+    // ng update takes the newest release in these ranges, so `to` is the smallest move, `newest` what ng update may
+    // install instead, and anything in the ranges fits. A shared package can cross a major, so it names its repository.
+    const newest = usable[usable.length - 1];
+    const repository = repositoryUrl(await registry.release(peer, pick).catch(() => null));
+    changes.push({ name: peer, from: have, to: pick, ...(newest !== pick ? { newest } : {}), ranges: [...new Set(ranges)], ...(repository ? { repository } : {}), neededBy: [...new Set(wants.map((w) => w.by))] });
     current[peer] = pick;
   }
   return { changes, conflicts };
@@ -715,24 +724,41 @@ async function buildPlan({ projectDir, to, next = false }) {
 
     const moved = libs.filter((l) => l.from !== l.to);
     // npm, pnpm and bun install a required peer on their own, so nothing else says the app gained one, and yarn doesn't,
-    // so the build can't resolve it. Each new peer is named, and listed to install with the version that fits.
+    // so the build can't resolve it. Each new peer is named, and listed to install with a version that fits every library
+    // that needs it, picked once they're all known, so the order the libraries come in can't change the pick.
+    const newPeers = new Map();
     for (const lib of moved) {
       const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
+      const repository = repositoryUrl(after);
+      if (repository) lib.repository = repository;
       const added = Object.keys(after?.peerDependencies || {}).filter((peer) => !after.peerDependenciesMeta?.[peer]?.optional && !before?.peerDependencies?.[peer] && !project.deps[peer]);
       const valid = added.filter((peer) => VALID_NAME.test(peer));
       if (lib.from && valid.length) lib.newPeers = valid;
       if (lib.from && valid.length < added.length) plan.unchecked.push({ name: lib.name, reason: `${lib.to} names a peer that isn't a valid npm package name, so it isn't listed` });
       for (const peer of lib.from ? valid : []) {
-        const range = after.peerDependencies[peer];
-        const listed = changes.find((s) => s.name === peer);
-        if (listed) { if (!listed.neededBy.includes(lib.name)) listed.neededBy.push(lib.name); continue; }
-        const doc = await registry.get(peer).catch(() => null);
-        // A framework package keeps in step with core, as ng update keeps the rest of them.
-        const fits = isFramework(peer) && semver.satisfies(frameworkVersion, range, { includePrerelease: true }) ? frameworkVersion
-          : doc && semver.validRange(range) ? semver.maxSatisfying(eligibleReleases(doc, null), range) : null;
-        if (fits) changes.push({ name: peer, from: null, to: fits, neededBy: [lib.name] });
-        else plan.unchecked.push({ name: peer, reason: `${lib.name} ${lib.to} newly needs ${range}, and the registry has no release to install for it` });
+        const entry = newPeers.get(peer) || { ranges: [], neededBy: [] };
+        if (!entry.ranges.includes(after.peerDependencies[peer])) entry.ranges.push(after.peerDependencies[peer]);
+        entry.neededBy.push(lib.name);
+        newPeers.set(peer, entry);
       }
+    }
+    for (const [peer, { ranges, neededBy }] of newPeers) {
+      const fitsAll = (v) => ranges.every((r) => semver.validRange(r) && semver.satisfies(v, r, { includePrerelease: true }));
+      const needs = `${neededBy.join(' and ')} newly need${neededBy.length > 1 ? '' : 's'} ${ranges.join(' and ')}`;
+      const listed = changes.find((s) => s.name === peer);
+      if (listed) {
+        // Already moving as a shared package, so its pick has to suit these libraries too.
+        listed.neededBy.push(...neededBy.filter((name) => !listed.neededBy.includes(name)));
+        listed.ranges.push(...ranges.filter((r) => !listed.ranges.includes(r)));
+        if (!fitsAll(listed.to)) plan.unchecked.push({ name: peer, reason: `${needs}, which ${listed.to} doesn't meet` });
+        continue;
+      }
+      const doc = await registry.get(peer).catch(() => null);
+      // A framework package keeps in step with core, as ng update keeps the rest of them.
+      const fits = isFramework(peer) && fitsAll(frameworkVersion) ? frameworkVersion
+        : doc ? eligibleReleases(doc, null).filter(fitsAll).sort(semver.rcompare)[0] : null;
+      if (fits) changes.push({ name: peer, from: null, to: fits, ranges, neededBy });
+      else plan.unchecked.push({ name: peer, reason: `${needs}, and the registry has no release that fits` });
     }
     // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
     const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}` : `@angular/core@${major} @angular/cli@${major}`;
@@ -753,7 +779,11 @@ async function buildPlan({ projectDir, to, next = false }) {
           const [before, after] = [docs.get(lib.name)?.versions?.[lib.from], docs.get(lib.name)?.versions?.[lib.to]];
           return [await licenseChange(lib, before, after), ...await broughtLicenses(registry, lib, before, after)];
         }),
-        ...changes.filter((s) => s.from).map(async (s) => [await licenseChange(s, ...await releases(s.name, s.from, s.to))]),
+        ...changes.filter((s) => s.from).map(async (s) => {
+          const change = await licenseChange(s, ...await releases(s.name, s.from, s.to));
+          // ng update may install the newest release that fits instead of the plan's pick, so that one is compared too.
+          return [change ?? (s.newest ? await licenseChange({ ...s, to: s.newest }, ...await releases(s.name, s.from, s.newest)) : null)];
+        }),
       ]);
       const brought = new Map();
       for (const change of compared.flat().filter(Boolean)) {
@@ -817,12 +847,20 @@ const SUPPORT = {
   stale: 'UNCONFIRMED: this release is older than the Angular major and only accepts it through an open-ended range, check the running app',
 };
 
+// Where a library's changelog or release notes are, since many packages don't ship them. Only a short https address
+// made of URL-safe characters is kept, because the package's author writes it and an agent may paste it into a shell.
+function repositoryUrl(manifest) {
+  const raw = typeof manifest?.repository === 'string' ? manifest.repository : manifest?.repository?.url;
+  const url = String(raw || '').replace(/^git\+/, '').replace(/^(git|ssh):\/\/(git@)?/, 'https://').replace(/\.git$/, '');
+  return url.length <= 200 && /^https:\/\/[\w.-]+(\/[\w.~-]+)+\/?$/.test(url) ? url : null;
+}
+
 function render(plan) {
   const lines = [];
   const p = plan.project;
   lines.push(`Angular ${p.angular} (from ${p.angularSource}), ${p.packageManager}, Node ${p.node}. Latest Angular: ${plan.latestAngular}.`);
   if (plan.status === 'already-there') {
-    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? 'Only patch releases are available.' : 'Nothing to upgrade.'}`);
+    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? (plan.next ? `${plan.next} is a prerelease of it.` : 'Only patch releases are available.') : 'Nothing to upgrade.'}`);
     if (plan.patches) {
       for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
       lines.push(`  Run: ${plan.patches.command}`);
@@ -838,9 +876,9 @@ function render(plan) {
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}`);
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
     }
-    for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}; needed by ${s.neededBy.join(', ')}`);
+    for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}${s.ranges?.length ? `, fits ${s.ranges.join(' and ')}` : ''}; needed by ${s.neededBy.join(', ')}${s.repository ? `; repository: ${s.repository}` : ''}`);
     lines.push(`  Run: ${hop.command}`);
   }
   if (plan.blockers.length) {

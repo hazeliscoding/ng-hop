@@ -148,6 +148,8 @@ export const check = {
 const DIRTY_LINE = "// my half-finished work: do not lose this";
 
 // A real app may stop short of the latest for a good reason, so its commits are checked up to wherever it stopped.
+// Matches "No unit test ran at any point" and "so Karma never runs any tests", not "including the one test failure".
+const NO_TESTS_RAN = /(no|none of the|never)[^.\n]{0,60}(unit )?(tests?|specs?)[^.\n]{0,40}\b(ran|run)|(tests?|specs?|suite|karma)[^.\n]{0,60}(never|didn't|did not|couldn't|could not|can't|cannot)[^.\n]{0,30}(run|compile)|load error/i;
 const upToWhereItStopped = (from) => (ctx) => { const end = ctx.major(ctx.deps['@angular/core']) ?? from; return Array.from({ length: Math.max(0, end - from) }, (_, i) => from + 1 + i); };
 const realApp = ({ tests }) => [
   check.skillFired(), check.reachesMajor(22), check.commitPerMajor(upToWhereItStopped(18)), check.cleanTree(), check.notOnMain(),
@@ -467,9 +469,17 @@ should I just use --force?`,
     assertions: realApp({ tests: false }),
   },
   {
+    // One spec on main doesn't compile, so Karma runs none, and the skill stops to ask about that. The prompt answers
+    // ahead of time, so the run is the whole upgrade, and the report has to say no unit test ran.
     name: 'real-readme-wizard', tier: 'real', fixture: 'real-readme-wizard', budget: 25, timeoutMinutes: 100,
+    prompt: "Upgrade this app to the latest Angular. If the unit tests can't run, go on with the build and app check.",
+    assertions: [...realApp({ tests: false }), check.says('Says no unit test ran', NO_TESTS_RAN)],
+  },
+  {
+    // The rule on its own: no unit test can run, so the run stops at the start and asks before changing anything.
+    name: 'real-readme-wizard-no-tests', tier: 'real', fixture: 'real-readme-wizard', budget: 5, timeoutMinutes: 30,
     prompt: 'Upgrade this app to the latest Angular.',
-    assertions: realApp({ tests: true }),
+    assertions: [check.skillFired(), check.reachesMajor(18), check.specsUntouched(), check.noChanges(), check.says('Says no unit test can run', NO_TESTS_RAN), check.endsWithQuestion()],
   },
 ];
 

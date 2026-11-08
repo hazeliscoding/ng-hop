@@ -11,7 +11,8 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const READY = /(Local:\s+https?:\/\/|Compiled successfully|Application bundle generation complete)/;
-const FAILED = /(Application bundle generation failed|Failed to compile|\[ERROR\]|^\s*Error:|An unhandled exception occurred|Port \d+ is already in use)/m;
+// The last three are Vite's, which it writes on the first request for a module, after the server said it was ready.
+const FAILED = /(Application bundle generation failed|Failed to compile|\[ERROR\]|^\s*Error:|An unhandled exception occurred|Port \d+ is already in use|Pre-transform error|Internal server error|Failed to resolve import)/m;
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 const oneLine = (text) => String(text ?? '').split('\n')[0].trim().slice(0, 300);
 
@@ -135,11 +136,14 @@ function startServer(dir, { app, port, timeoutMs }) {
   const ng = join(dir, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
   if (!existsSync(ng)) return Promise.resolve({ state: 'no-cli', log: `No Angular CLI at ${ng}. Install the project's dependencies first.` });
   const args = [ng, 'serve', ...(app ? [app] : []), '--port', String(port), '--host', '127.0.0.1'];
-  const child = spawn(process.execPath, args, { cwd: dir, env: { ...process.env, NG_CLI_ANALYTICS: 'false', CI: '1' }, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  // From Angular 22, @angular/build's dev server takes PORT over --port, so a PORT left in the shell would move it.
+  const env = { ...process.env, NG_CLI_ANALYTICS: 'false', CI: '1', PORT: String(port) };
+  const child = spawn(process.execPath, args, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   let log = '';
   return new Promise((done) => {
     let finished = false;
-    const finish = (state) => { if (finished) return; finished = true; clearTimeout(timer); done({ state, log: stripAnsi(log), child }); };
+    // `log` is read live, because the server keeps writing after it's ready.
+    const finish = (state) => { if (finished) return; finished = true; clearTimeout(timer); done({ state, child, get log() { return stripAnsi(log); } }); };
     const timer = setTimeout(() => finish('timeout'), timeoutMs);
     const onData = (chunk) => {
       log += chunk;
@@ -184,7 +188,7 @@ async function main() {
   const dir = resolve(values.project || '.');
   const port = Number(values.port || 4287);
   const path = values.path || '/';
-  const result = { ok: false, serve: 'not started', http: null, browser: 'not run', rendered: null, consoleErrors: [], serverErrors: [] };
+  const result = { ok: false, serve: 'not started', http: null, browser: 'not run', rendered: null, consoleErrors: [], serverErrors: [], serverLog: [] };
 
   const server = await startServer(dir, { app: values.app, port, timeoutMs: Number(values.timeout || 300) * 1000 });
   result.serve = server.state;
@@ -207,11 +211,13 @@ async function main() {
       result.ok = page.status === 200 && result.rendered !== false && result.consoleErrors.length === 0;
     } finally {
       // The server writes errors after startup too, such as a module it can't resolve on first request.
-      const late = stripAnsi(server.log);
-      if (FAILED.test(late)) result.serverErrors = late.split('\n').filter((l) => FAILED.test(l)).slice(0, 15).map((l) => l.trim().slice(0, 300));
+      const late = server.log.split('\n').filter((l) => FAILED.test(l));
+      if (late.length) result.serverErrors = late.slice(0, 15).map((l) => l.trim().slice(0, 300));
     }
   }
   if (result.serverErrors.length) result.ok = false;
+  // A failed page with no error line above: what the server said last usually explains it.
+  if (!result.ok && server.state === 'ready' && !result.serverErrors.length && !result.consoleErrors.length) result.serverLog = server.log.split('\n').map((l) => l.trim()).filter(Boolean).slice(-12).map((l) => l.slice(0, 300));
   if (server.child) stopTree(server.child);
 
   if (values.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -219,6 +225,8 @@ async function main() {
     const lines = [`App check: ${result.ok ? 'PASS' : 'FAIL'}`, `  dev server: ${result.serve}`, `  page fetch: ${result.http ?? 'not reached'}`, `  browser: ${result.browser}${result.rendered === null ? '' : `, rendered ${result.rendered ? 'content' : 'NOTHING'}`}`];
     for (const e of result.serverErrors) lines.push(`  server error: ${e}`);
     for (const e of result.consoleErrors) lines.push(`  console error: ${e}`);
+    for (const l of result.serverLog) lines.push(`  server log: ${l}`);
+    if (!result.ok) lines.push("  Look these lines up in the skill's references/troubleshooting.md before digging further.");
     process.stdout.write(`${lines.join('\n')}\n`);
   }
   process.exitCode = result.ok ? 0 : 1;

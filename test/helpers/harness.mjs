@@ -27,6 +27,7 @@ export function pkg(name, releases, tags = {}) {
     if (r.license) versions[version].license = r.license;
     if (r.deps) versions[version].dependencies = r.deps;
     if (r.files) versions[version].files = r.files;
+    if (r.repository) versions[version].repository = r.repository;
     if (r.at) time[version] = `${r.at}T00:00:00.000Z`;
   }
   const stable = Object.keys(releases).filter((v) => !v.includes('-'));
