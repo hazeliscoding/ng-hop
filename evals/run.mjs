@@ -2,22 +2,31 @@
 // Runs eval cases in clean, headless Claude sessions, with the skill and without it, in the folder layout the
 // skill-creator viewer reads. Sessions run one at a time by default because each can hold gigabytes with a real build.
 // A run already finished is skipped, so an interrupted batch picks up where it stopped.
-// Usage: node evals/run.mjs --iteration 1 [--case name[,name]] [--tier plan|upgrade] [--config with_skill|without_skill]
-//        [--runs 1] [--model id] [--max-seconds 560]
-import { execSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { freemem } from 'node:os';
+// Usage: node evals/run.mjs --iteration 1 [--case name[,name]] [--tier plan|upgrade|real] [--config with_skill|without_skill]
+//        [--runs 1] [--agent claude|opencode] [--model id] [--max-seconds 560]
+import { execFileSync, execSync, spawn } from 'node:child_process';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { freemem, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CASES } from './cases.mjs';
-import { installCommand, PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
+import { developerEnv, installCommand, PLUGIN, spawnAgent, TEMPLATES, WORKSPACE } from './common.mjs';
 import { grade } from './grade.mjs';
+import { parseTranscript } from './transcripts.mjs';
 
 const { values } = parseArgs({ options: {
   iteration: { type: 'string', default: '1' }, case: { type: 'string' }, tier: { type: 'string' }, config: { type: 'string' },
-  runs: { type: 'string', default: '1' }, model: { type: 'string', default: 'claude-opus-5-5' }, 'max-seconds': { type: 'string' },
+  runs: { type: 'string', default: '1' }, agent: { type: 'string', default: 'claude' }, model: { type: 'string' }, 'max-seconds': { type: 'string' },
   'min-free-gb': { type: 'string', default: '2.5' }, 'regrade': { type: 'boolean' },
 } });
+if (!['claude', 'opencode'].includes(values.agent)) throw new Error(`--agent takes claude or opencode, not ${values.agent}`);
+const model = values.model || (values.agent === 'opencode' ? 'opencode/big-pickle' : 'claude-opus-5-5');
+const OPENCODE = process.env.OPENCODE_BIN || 'opencode';
+if (values.agent === 'opencode' && !values.regrade) {
+  // The config runOpenCode writes uses OpenCode 2's names. On another version its denied commands might not apply, and --auto would run them.
+  const version = execFileSync(OPENCODE, ['--version'], { encoding: 'utf8' }).trim();
+  if (!/^(opencode )?v?2\./.test(version)) throw new Error(`The OpenCode runs need OpenCode 2, not ${version}`);
+}
 const started = Date.now();
 const maxMs = values['max-seconds'] ? Number(values['max-seconds']) * 1000 : Infinity;
 const minFree = Number(values['min-free-gb']) * 1024 ** 3;
@@ -49,7 +58,7 @@ function prepareProject(c, dir) {
 
 function runClaude(c, config, projectDir, runDir) {
   // No setting sources, because an install script can write a settings file that sends the agent's login elsewhere.
-  const args = ['-p', c.prompt, '--model', values.model, '--setting-sources', '', '--strict-mcp-config',
+  const args = ['-p', c.prompt, '--model', model, '--setting-sources', '', '--strict-mcp-config',
     '--no-session-persistence', '--permission-mode', 'auto', '--max-budget-usd', String(c.budget ?? (c.tier === 'plan' ? 2 : 12)),
     '--disallowedTools', 'Bash(git push*)', 'Bash(gh *)', 'Bash(nvm *)', 'Bash(npm install -g*)', 'Bash(npm i -g*)',
     'PowerShell(git push*)', 'PowerShell(gh *)', 'PowerShell(nvm *)', 'PowerShell(npm install -g*)', 'PowerShell(npm i -g*)',
@@ -75,27 +84,46 @@ function runClaude(c, config, projectDir, runDir) {
   });
 }
 
-function parseTranscript(runDir) {
-  const lines = readFileSync(join(runDir, 'transcript.jsonl'), 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
-  const result = lines.find((l) => l.type === 'result');
-  const commands = [];
-  const tools = {};
-  const skills = [];
-  let lastText = '';
-  for (const l of lines) {
-    if (l.type !== 'assistant') continue;
-    for (const part of l.message?.content || []) {
-      if (part.type === 'text' && part.text.trim()) lastText = part.text;
-      if (part.type !== 'tool_use') continue;
-      tools[part.name] = (tools[part.name] || 0) + 1;
-      if (part.name === 'Bash' || part.name === 'PowerShell') commands.push(part.input.command);
-      if (part.name === 'Skill') skills.push(part.input.skill);
-    }
-  }
-  return { result, commands, tools, skills, finalText: result?.result || lastText };
+// OpenCode on a free model needs no login, so there's nothing for an install script to take, and it runs where Claude
+// Code can't safely, such as on Windows. Each run gets a home of its own, so nothing from the machine's own setup or
+// another run reaches it, with sharing off so no session leaves as a public link. It's denied what a Claude run is, as
+// OpenCode 2's shell rules: a pattern ending in ` *` also matches the bare command.
+const OPENCODE_DENIED = ['git push *', 'gh *', 'nvm *', 'npm install -g *', 'npm i -g *'];
+function runOpenCode(c, config, projectDir, runDir) {
+  const home = mkdtempSync(join(tmpdir(), 'ng-hop-opencode-'));
+  const xdg = Object.fromEntries(['CONFIG', 'DATA', 'STATE', 'CACHE'].map((k) => [`XDG_${k}_HOME`, join(home, k.toLowerCase())]));
+  const settings = join(xdg.XDG_CONFIG_HOME, 'opencode');
+  mkdirSync(settings, { recursive: true });
+  writeFileSync(join(settings, 'opencode.json'), JSON.stringify({
+    $schema: 'https://opencode.ai/config.json', share: 'disabled', update: 'disable',
+    permissions: OPENCODE_DENIED.map((resource) => ({ action: 'shell', resource, effect: 'deny' })),
+  }, null, 2));
+  if (config === 'with_skill') cpSync(join(PLUGIN, 'skills', 'ng-hop'), join(settings, 'skills', 'ng-hop'), { recursive: true });
+  const args = ['run', '--standalone', '--auto', '--format', 'json', '--model', model, c.prompt];
+  return new Promise((resolve) => {
+    const out = [];
+    // `opencode run` starts its session in $PWD when that's set, not in its working folder, so both name the project.
+    const env = developerEnv({ ...xdg, PWD: projectDir, NG_CLI_ANALYTICS: 'false' });
+    const child = spawn(OPENCODE, args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stdout.on('data', (d) => out.push(d));
+    child.stderr.on('data', (d) => { stderr += d; });
+    const timer = setTimeout(() => {
+      if (process.platform === 'win32') { try { execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' }); } catch { /* already gone */ } } else child.kill('SIGTERM');
+    }, (c.timeoutMinutes ?? (c.tier === 'plan' ? 20 : 45)) * 60000);
+    const done = (code) => {
+      clearTimeout(timer);
+      writeFileSync(join(runDir, 'transcript.jsonl'), Buffer.concat(out));
+      writeFileSync(join(runDir, 'stderr.txt'), stderr);
+      rmSync(home, { recursive: true, force: true });
+      resolve(code);
+    };
+    child.on('error', (err) => { stderr += String(err); done(1); });
+    child.on('close', done);
+  });
 }
 
-function capture(projectDir, runDir, base, parsed) {
+function capture(projectDir, runDir, base, parsed, realApp = false) {
   const outputs = join(runDir, 'outputs');
   mkdirSync(outputs, { recursive: true });
   const git = (cmd) => { try { return sh(`git ${cmd}`, projectDir); } catch (err) { return String(err.message); } };
@@ -118,6 +146,9 @@ function capture(projectDir, runDir, base, parsed) {
   writeFileSync(join(outputs, 'git-log.txt'), git(`log --stat --format=%n%h%x20%s ${base}..HEAD`));
   writeFileSync(join(outputs, 'working-tree.txt'), facts.status || '(clean)');
   writeFileSync(join(outputs, 'diff-excluding-lockfile.patch'), git(`diff ${base} --ignore-cr-at-eol -- . ":(exclude)package-lock.json" ":(exclude)pnpm-lock.yaml"`).slice(0, 400000));
+  // A real app's commits are worth keeping: a bundle carries them without a .git, uncompressed, so the check for the
+  // login before an upload can still read every byte of it.
+  if (realApp) git(`-c pack.compression=0 -c core.compression=0 -c pack.window=0 bundle create "${join(outputs, 'history.bundle')}" --all`);
   if (existsSync(join(projectDir, 'package.json'))) copyFileSync(join(projectDir, 'package.json'), join(outputs, 'package.json'));
   return facts;
 }
@@ -150,18 +181,18 @@ for (const c of cases) {
       mkdirSync(runDir, { recursive: true });
       const base = prepareProject(c, projectDir);
       const t0 = Date.now();
-      const code = await runClaude(c, config, projectDir, runDir);
+      const code = await (values.agent === 'opencode' ? runOpenCode : runClaude)(c, config, projectDir, runDir);
       const seconds = (Date.now() - t0) / 1000;
       const parsed = parseTranscript(runDir);
-      const facts = capture(projectDir, runDir, base, parsed);
+      const facts = capture(projectDir, runDir, base, parsed, c.tier === 'real');
       const usage = parsed.result?.usage || {};
       const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
       writeFileSync(join(runDir, 'timing.json'), JSON.stringify({ total_tokens: tokens, duration_ms: Math.round(seconds * 1000), total_duration_seconds: seconds, cost_usd: parsed.result?.total_cost_usd ?? null, exit_code: code }, null, 2));
-      const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: c.tier === 'upgrade' });
+      const g = await grade(c, { config, facts, parsed, projectDir, runDir, verify: c.tier !== 'plan' });
       const failed = g.expectations.filter((e) => !e.passed).map((e) => e.text);
       console.log(`${c.name} ${config}: ${g.summary.passed}/${g.summary.total} in ${Math.round(seconds)}s, $${(parsed.result?.total_cost_usd ?? 0).toFixed(2)}${failed.length ? `\n   failed: ${failed.join(' | ').slice(0, 700)}` : ''}`);
       // Real projects are large, and only the graded results and transcript are needed afterwards.
-      if (c.tier === 'upgrade') rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
+      if (c.tier !== 'plan') rmSync(join(projectDir, 'node_modules'), { recursive: true, force: true });
     }
   }
 }

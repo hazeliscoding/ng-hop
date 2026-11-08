@@ -1,5 +1,5 @@
 name: Eval machine
-description: Node, pnpm, Claude Code, and the user with no sudo that everything untrusted runs as.
+description: Node, pnpm, yarn, bun, Claude Code, and the user with no sudo that everything untrusted runs as.
 
 runs:
   using: composite
@@ -12,7 +12,7 @@ runs:
       shell: bash
       run: |
         # Pinned so a batch's cases all ran on the same tools. Bump them only with a rerun of every case.
-        npm install -g pnpm@12.16.1 @anthropic-ai/claude-code@2.1.319
+        npm install -g pnpm@12.16.1 @yarnpkg/cli-dist@4.18.1 bun@1.4.4 @anthropic-ai/claude-code@2.1.319
 
         # Ubuntu 24.04 blocks the user namespaces that Chrome's sandbox needs.
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

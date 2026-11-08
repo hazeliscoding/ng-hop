@@ -29,9 +29,9 @@ on:
         type: choice
         options: [both, with_skill, without_skill]
       model:
-        description: Model the agent runs on
+        description: Model the agent runs on (empty means claude-opus-5-5)
         required: false
-        default: claude-opus-5-5
+        default: ''
       parallel:
         description: Cases at once
         required: false
@@ -96,7 +96,8 @@ jobs:
             import { CASES } from './evals/cases.mjs';
             const wanted = process.env.CASES.split(',').map((name) => name.trim()).filter(Boolean);
             for (const name of wanted) if (!CASES.some((c) => c.name === name)) throw new Error('No case named ' + name);
-            const cases = CASES.filter((c) => process.env.WEEKLY === 'true' ? c.tier === 'plan' : !wanted.length || wanted.includes(c.name));
+            // A real app's case is a long upgrade, so it only runs when named.
+            const cases = CASES.filter((c) => process.env.WEEKLY === 'true' ? c.tier === 'plan' : wanted.length ? wanted.includes(c.name) : c.tier !== 'real');
             console.log('cases=' + JSON.stringify(cases.map((c) => c.name)));
             console.log('fixtures=' + (process.env.TRIGGERS === 'true' ? 'plain-20' : [...new Set(cases.map((c) => c.fixture))].join(' ')));
           " >> "$GITHUB_OUTPUT"

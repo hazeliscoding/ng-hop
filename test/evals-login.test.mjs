@@ -92,6 +92,16 @@ test('every harness script starts the agent through the one place that handles t
   }
 });
 
+test('an OpenCode run is denied what a Claude Code run is, in the names OpenCode 2 reads', () => {
+  const source = readFileSync(join(EVALS, 'run.mjs'), 'utf8');
+  const claude = [...source.matchAll(/'Bash\(([^)]+)\)'/g)].map((m) => m[1].replace(/ ?\*$/, ''));
+  const opencode = [.../const OPENCODE_DENIED = \[([^\]]*)\]/.exec(source)[1].matchAll(/'([^']+)'/g)].map((m) => m[1].replace(/ \*$/, ''));
+  assert.deepEqual(opencode, claude);
+  assert.match(source, /permissions: OPENCODE_DENIED\.map\(\(resource\) => \(\{ action: 'shell', resource, effect: 'deny' \}\)\)/);
+  // 2.2 still translates the 1.x names, but they're deprecated: once they're dropped, --auto would allow every command.
+  assert.doesNotMatch(source, /\bpermission: \{|\bautoupdate\b/);
+});
+
 test('a login on stdin leaves out any login in the environment too', { skip: process.platform === 'win32' }, () => {
   const result = runAgent(cleanEnv({ NG_HOP_LOGIN_ON_STDIN: '1', ANTHROPIC_API_KEY: TOKEN, CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-another-fake-token', PATH: fakeClaude('') }), TOKEN);
   const seen = JSON.parse(result.stdout);

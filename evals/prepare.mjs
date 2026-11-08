@@ -3,7 +3,7 @@
 // its tests must do what the fixture says they do. A fixture that's broken at the start would make every result a lie.
 // Usage: node evals/prepare.mjs [fixture ...]
 import { execSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { FIXTURES } from './fixtures.mjs';
 import { developerEnv, TEMPLATES, testCommand } from './common.mjs';
@@ -37,6 +37,30 @@ for (const name of names) {
   mkdirSync(dir, { recursive: true });
   const started = Date.now();
   try {
+    if (fixture.repo) {
+      // A real app: the folder that holds it, at a pinned commit, with its own lockfile and nothing else of the repo.
+      const clone = join(TEMPLATES, `.clone-${name}`);
+      rmSync(clone, { recursive: true, force: true });
+      run(`git clone --quiet --filter=blob:none --no-checkout ${fixture.repo} "${clone}"`, TEMPLATES);
+      run(`git -c advice.detachedHead=false checkout --quiet ${fixture.ref}`, clone);
+      cpSync(join(clone, fixture.dir || '.'), dir, { recursive: true, filter: (src) => !/[\\/]\.git$/.test(src) });
+      // A folder taken out of its repository loses the ignore rules above it, and pr-sweep's renderer then committed
+      // all of node_modules at the start. The repository's own rules come along.
+      if (fixture.dir && existsSync(join(clone, '.gitignore'))) appendFileSync(join(dir, '.gitignore'), `\n${readFileSync(join(clone, '.gitignore'), 'utf8')}`);
+      rmSync(clone, { recursive: true, force: true });
+      run('npm ci --no-audit --no-fund', dir);
+      // Its build and tests are whatever they are. The agent compares against them, and so does whoever reads the result.
+      let built = true;
+      let tested = true;
+      try { run('npx ng build', dir); } catch { built = false; }
+      try { run(testCommand(dir), dir); } catch { tested = false; }
+      run('git init -q -b main && git add -A && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -q -m "chore: start of the real app"', dir);
+      writeFileSync(join(dir, '.git', 'info', 'exclude'), '.ng-hop-ok\n');
+      writeFileSync(join(dir, '.ng-hop-ok'), new Date().toISOString());
+      const core = JSON.parse(readFileSync(join(dir, 'node_modules/@angular/core/package.json'), 'utf8')).version;
+      console.log(`${name}: ok, a real app on Angular ${core}, build ${built ? 'passes' : 'FAILS'}, tests ${tested ? 'pass' : 'fail or there are none'}, ${Math.round((Date.now() - started) / 1000)}s`);
+      continue;
+    }
     const manager = fixture.packageManager || 'npm';
     const pnpm = manager === 'pnpm';
     run(`npx -y @angular/cli@${fixture.angular} new fixture-app --directory=. --defaults --skip-git --skip-install --ssr=false --style=css --routing=true${manager === 'npm' ? '' : ` --package-manager=${manager}`}`, dir);

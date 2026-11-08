@@ -100,6 +100,14 @@ export const check = {
     text: 'Stayed on pnpm, with no npm lockfile',
     run: (ctx) => [ctx.exists('pnpm-lock.yaml') && !ctx.exists('package-lock.json'), `pnpm-lock.yaml: ${ctx.exists('pnpm-lock.yaml')}, package-lock.json: ${ctx.exists('package-lock.json')}`],
   }),
+  stayedOn: (manager) => ({
+    text: `Stayed on ${manager}, with no other lockfile`,
+    run: (ctx) => {
+      const lockfiles = { npm: 'package-lock.json', pnpm: 'pnpm-lock.yaml', yarn: 'yarn.lock', bun: 'bun.lock' };
+      const present = Object.entries(lockfiles).filter(([, file]) => ctx.exists(file)).map(([name]) => name);
+      return [present.length === 1 && present[0] === manager, `Lockfiles: ${present.join(', ') || 'none'}`];
+    },
+  }),
   lockfileClean: () => ({
     text: "The lockfile has no leftovers from the CLI's temporary install",
     run: (ctx) => { const m = /\S*angular-cli-tmp-packages\S*/.exec(ctx.read('pnpm-lock.yaml') || ''); return [!m, m ? `Found ${m[0]}` : 'None']; },
@@ -122,7 +130,8 @@ export const check = {
     },
   }),
   saysNewPeer: () => check.says('Says ng-select now needs @angular/cdk', /cdk/i),
-  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node[^.\n]{0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)[^.\n]{0,120}node/i),
+  // Within a sentence, or from a "Node" heading to the line under it.
+  saysNodeMoved: () => check.says('Says Angular 22 needs a newer Node', /node(?:[^.\n]|\n(?!\n)){0,120}(\^?22\.22|\^?24\.15|>= ?26)|(22\.22|24\.15)(?:[^.\n]|\n(?!\n)){0,120}node/i),
   saysLicenseChanges: () => check.says('Tells the person PrimeNG 22 changes its license', /(primeng|primeui)[\s\S]{0,600}licen[sc]e|licen[sc]e[\s\S]{0,600}(primeng|primeui)/i),
   usedPlan: () => ({
     text: 'Used the plan script',
@@ -137,6 +146,14 @@ export const check = {
 };
 
 const DIRTY_LINE = "// my half-finished work: do not lose this";
+
+// A real app may stop short of the latest for a good reason, so its commits are checked up to wherever it stopped.
+const upToWhereItStopped = (from) => (ctx) => { const end = ctx.major(ctx.deps['@angular/core']) ?? from; return Array.from({ length: Math.max(0, end - from) }, (_, i) => from + 1 + i); };
+const realApp = ({ tests }) => [
+  check.skillFired(), check.reachesMajor(22), check.commitPerMajor(upToWhereItStopped(18)), check.cleanTree(), check.notOnMain(),
+  check.noForcing(), check.noOverrides(), check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(),
+  check.installs(), check.builds(), ...(tests ? [check.testsPass()] : []), check.appRuns(),
+];
 
 function bumpToAngular21(dir) {
   const path = join(dir, 'package.json');
@@ -399,6 +416,25 @@ should I just use --force?`,
     ],
   },
   {
+    // The same app on yarn 4, where a plain `ng update` stops at installing Angular's temporary CLI, with no error.
+    name: 'upgrade-yarn', tier: 'upgrade', fixture: 'yarn-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.stayedOn('yarn'),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
+    name: 'upgrade-bun', tier: 'upgrade', fixture: 'bun-clean',
+    prompt: 'Upgrade this app to Angular 22, along with its libraries.',
+    assertions: [
+      check.skillFired(), check.reachesMajor(22), check.commitPerMajor([21, 22]), check.cleanTree(), check.notOnMain(), check.noForcing(), check.noOverrides(),
+      check.noDirtyUpdate(), check.noOptionalMigrations(), check.specsUntouched(), check.ranApp(), check.stayedOn('bun'),
+      check.installs(), check.builds(), check.testsPass(), check.appRuns(),
+    ],
+  },
+  {
     // Every install exits 1 until the scripts are decided. Declining is safe, and approving is the person's call.
     name: 'upgrade-pnpm-undecided-scripts', tier: 'upgrade', fixture: 'pnpm-undecided', noInstall: true,
     prompt: 'Upgrade this app to Angular 21.',
@@ -423,6 +459,17 @@ should I just use --force?`,
       { text: 'The catalog itself is on Angular 21', run: (ctx) => { const m = /'@angular\/core':\s*['"]?[\^~]?(\d+)/.exec(ctx.read('pnpm-workspace.yaml') || ''); return [m?.[1] === '21', m ? `pnpm-workspace.yaml has @angular/core at ${m[1]}` : 'No @angular/core entry in pnpm-workspace.yaml']; } },
       check.installs(), check.builds(), check.testsPass(), check.appRuns(),
     ],
+  },
+  // ---- The owner's own apps, which nobody built for a test. Only run by name, since each is a long, real upgrade. ----
+  {
+    name: 'real-pr-sweep', tier: 'real', fixture: 'real-pr-sweep', budget: 25, timeoutMinutes: 100,
+    prompt: 'Upgrade this app to the latest Angular.',
+    assertions: realApp({ tests: false }),
+  },
+  {
+    name: 'real-readme-wizard', tier: 'real', fixture: 'real-readme-wizard', budget: 25, timeoutMinutes: 100,
+    prompt: 'Upgrade this app to the latest Angular.',
+    assertions: realApp({ tests: true }),
   },
 ];
 

@@ -137,6 +137,10 @@ FIXTURES['pnpm-clean'] = { ...cleanPath, packageManager: 'pnpm', files: { ...cle
 // no real upgrade had run on either.
 FIXTURES['yarn-clean'] = { ...cleanPath, packageManager: 'yarn' };
 FIXTURES['bun-clean'] = { ...cleanPath, packageManager: 'bun' };
+// Two of the owner's own apps on Angular 18, at pinned commits, which nobody built for a test: an Electron app's renderer,
+// with no tests, and a markdown editor with NgRx, ngx-markdown and Karma specs. Their cases only run when named.
+FIXTURES['real-pr-sweep'] = { real: true, repo: 'https://github.com/hazeliscoding/pr-sweep.git', ref: 'bd1319f76401c0e2931bffcdf60eec5596b85a39', dir: 'desktop/renderer' };
+FIXTURES['real-readme-wizard'] = { real: true, repo: 'https://github.com/hazeliscoding/readme-wizard.git', ref: '149858bb9d1c2429667509313b4dd1bb1e5b6e08' };
 // Nobody has decided about install scripts, so every install exits 1 until someone does.
 FIXTURES['pnpm-undecided'] = { ...FIXTURES['plain-20'], packageManager: 'pnpm', undecidedScripts: true };
 // Angular comes from a catalog. Through Angular 21's CLI, `ng update` skips it, moves the libraries and exits 0.
