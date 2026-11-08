@@ -111,7 +111,7 @@ Keep it short and lead with the result:
 - **Node:** the range the new Angular needs, if it's stricter than before. Their CI and deployment images need it too, even if this machine is fine.
 - **Unconfirmed:** libraries npm couldn't vouch for, and what you checked instead.
 - **Already failing:** anything from step 3, left as it was.
-- **Available but not done:** optional migrations `ng update` offered, and deprecations to plan for.
+- **Available but not done:** the optional migrations the last major's `ng update` still offers that would change this app (search the code for what each one targets), settings the migrations added to keep the old behaviour (such as `ChangeDetectionStrategy.Eager`), and deprecations to plan for. A deprecated package nothing imports only needs removing.
 - **Not checked:** anything you skipped or that couldn't run, such as unit tests when none ran, and flows the app check can't reach.
 
 ## Staying in scope
