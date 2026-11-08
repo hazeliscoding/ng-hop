@@ -760,6 +760,12 @@ test('a pin semver can\'t read, a range nothing meets or a number past 2^53, doe
   assert.deepEqual(await pinsOf({ ...engines('>=22 <20'), '.nvmrc': '99999999999999999\n' }), []);
 });
 
+test('an engines range that allows any Node pins none, while one that stops below the range is still named', async () => {
+  // "*" keeps the team on no Node in particular, and it can't be raised and keep its form. "<20" starts at 0.0.0 too.
+  assert.deepEqual(await pinsOf(engines('*')), []);
+  assert.deepEqual(await pinsOf(engines('<20')), [{ file: 'package.json', value: '<20' }]);
+});
+
 test('an app already on the target still hears about a Node pin below its range', async () => {
   const deps = { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' };
   const options = { deps, lock: { ...lockBase, '@angular/core': '22.2.0' }, files: { ...git, '.devcontainer/Dockerfile': 'FROM node:22.12.0-bookworm\n' } };

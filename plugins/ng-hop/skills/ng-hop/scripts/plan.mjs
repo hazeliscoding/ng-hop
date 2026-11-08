@@ -310,7 +310,8 @@ function nodePins(dir) {
 function pinFits(pin, range) {
   try {
     // ">=24" allows Node 24.0, which Angular 22 refuses, so the lowest Node an engines range allows has to be accepted.
-    if (pin.kind === 'engines') { const min = semver.validRange(pin.value) && semver.minVersion(pin.value); return !min || semver.satisfies(min, range); }
+    // "*", which semver also makes of ">=0", allows any Node and pins none.
+    if (pin.kind === 'engines') { const valid = semver.validRange(pin.value), min = valid && valid !== '*' && semver.minVersion(valid); return !min || semver.satisfies(min, range); }
     // A dev container image's tag can start with the image's own version, as typescript-node:5.2-24-bookworm does, so
     // the Node in it is the two-digit major after that, and a tag that is only the image's version (5-trixie) says none.
     // shortcut: an image's own version freezes the Node inside it, so only its major is known from the tag; read the
