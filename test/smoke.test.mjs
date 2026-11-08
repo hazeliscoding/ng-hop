@@ -55,6 +55,14 @@ test('a page that answers with an error fails', async () => {
   assert.equal(result.http, 500);
 });
 
+test('the dev server gets the port through PORT too, which Angular 22 prefers to --port', async () => {
+  const angular22 = "const at = Number(process.env.PORT || port);\nhttp.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root>hi</app-root></body></html>'); }).listen(at, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + at + '/'));";
+  const p = fakeApp(angular22);
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir, env: { PORT: String(port + 500) } });
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(JSON.parse(r.stdout).http, 200);
+});
+
 test('a project with no install says what to do', async () => {
   const p = project({ deps: { '@angular/core': '^21.0.0' } });
   made.push(p);

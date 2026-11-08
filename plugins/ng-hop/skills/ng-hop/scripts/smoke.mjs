@@ -135,7 +135,9 @@ function startServer(dir, { app, port, timeoutMs }) {
   const ng = join(dir, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
   if (!existsSync(ng)) return Promise.resolve({ state: 'no-cli', log: `No Angular CLI at ${ng}. Install the project's dependencies first.` });
   const args = [ng, 'serve', ...(app ? [app] : []), '--port', String(port), '--host', '127.0.0.1'];
-  const child = spawn(process.execPath, args, { cwd: dir, env: { ...process.env, NG_CLI_ANALYTICS: 'false', CI: '1' }, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+  // From Angular 22, @angular/build's dev server takes PORT over --port, so a PORT left in the shell would move it.
+  const env = { ...process.env, NG_CLI_ANALYTICS: 'false', CI: '1', PORT: String(port) };
+  const child = spawn(process.execPath, args, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   let log = '';
   return new Promise((done) => {
     let finished = false;
