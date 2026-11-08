@@ -44,6 +44,9 @@ for (const name of names) {
       run(`git clone --quiet --filter=blob:none --no-checkout ${fixture.repo} "${clone}"`, TEMPLATES);
       run(`git -c advice.detachedHead=false checkout --quiet ${fixture.ref}`, clone);
       cpSync(join(clone, fixture.dir || '.'), dir, { recursive: true, filter: (src) => !/[\\/]\.git$/.test(src) });
+      // A folder taken out of its repository loses the ignore rules above it, and pr-sweep's renderer then committed
+      // all of node_modules at the start. The repository's own rules come along.
+      if (fixture.dir && existsSync(join(clone, '.gitignore'))) appendFileSync(join(dir, '.gitignore'), `\n${readFileSync(join(clone, '.gitignore'), 'utf8')}`);
       rmSync(clone, { recursive: true, force: true });
       run('npm ci --no-audit --no-fund', dir);
       // Its build and tests are whatever they are. The agent compares against them, and so does whoever reads the result.
