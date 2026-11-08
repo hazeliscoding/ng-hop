@@ -75,7 +75,7 @@ The evals use small apps built for them, run on Linux, and only when someone sta
   - [x] Line endings: each run wrote its own script to restore them, and one dropped a final newline, so the skill ships one.
   - [x] No test signal: an app with no `test` target runs the project's own test command, and a run where no test can run at all stops to ask.
   - [x] The report: release notes from the repository when a package ships none, the version `ng update` chose inside a range, and only the optional migrations that would change the app.
-  - [ ] Check the files `angular.json` loads from a library against its next release, so a dropped file such as `marked.min.js` shows in the plan instead of the build.
+  - [x] Check the files `angular.json` loads from a library against its next release, so a dropped file such as `marked.min.js` shows in the plan instead of the build.
   - [ ] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says.
 - [x] Take a whole upgrade through OpenCode, and update the README's agent table with what happened. OpenCode 2.2 on a free model took the test app from Angular 20 to 22 on Windows, one commit per major, and passed all 17 checks.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.

@@ -147,7 +147,7 @@ The library's new major started requiring a peer the app doesn't list: ng-select
 
 ## A file named in `angular.json` no longer exists
 
-Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js`, which apps often list under `scripts`. Before removing the entry, search the code for anything using what it provided (a global `marked`, for instance). If nothing does, remove it and say so under hand fixes. If something does, switch that code to an import.
+Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js`, which apps often list under `scripts`. The plan names such a file under the major, in an `angular.json:` line, and otherwise the build fails with `Could not resolve "node_modules/marked/marked.min.js"`. Before removing the entry, search the code for anything using what it provided (a global `marked`, for instance). If nothing does, remove it and say so under hand fixes. If something does, switch that code to an import.
 
 ## Whole files show as changed
 

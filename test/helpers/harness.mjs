@@ -58,7 +58,11 @@ function tarball(files) {
   for (const [path, text] of Object.entries(files)) {
     const body = Buffer.from(text);
     const header = Buffer.alloc(512);
-    header.write(`package/${path}`, 0, 'latin1');
+    // Past 100 bytes, ustar puts the start of the path in its prefix field, as npm's tar does.
+    const full = `package/${path}`;
+    const cut = full.length > 100 ? full.lastIndexOf('/', 155) : -1;
+    header.write(cut > 0 ? full.slice(cut + 1) : full, 0, 'latin1');
+    if (cut > 0) header.write(full.slice(0, cut), 345, 'latin1');
     header.write('0000644\0', 100, 'latin1');
     header.write(`${body.length.toString(8).padStart(11, '0')}\0`, 124, 'latin1');
     header.write('        ', 148, 'latin1');
