@@ -264,7 +264,7 @@ test('the team\'s libraries go only to the major the app needs next, since the a
 
 test('the team\'s libraries that need each other are upgraded and published together, as the plan says', () => {
   // A cycle has no order to follow, and the plan names every library in it.
-  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /need each other/, 'positive control: the plan says so');
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /need each other, so no order works for them/, 'positive control: the plan says so');
   const first = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8').split('\n').find((line) => line.startsWith('**Upgrade it first.**'));
   assert.ok(first, 'positive control: blocked.md offers to upgrade the team\'s libraries first');
   assert.match(first, /need each other/);
