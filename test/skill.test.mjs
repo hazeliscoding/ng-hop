@@ -342,6 +342,14 @@ test('the team\'s libraries that need each other are upgraded and published toge
   assert.match(first, /upgrade and publish them together/);
 });
 
+test('the test script names every test file once, since node --test given a list runs only those', () => {
+  // CONTRIBUTING.md says a new file goes in package.json's test script, and a file left out would never run, here or in CI.
+  const listed = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts.test.split(/\s+/).filter((arg) => arg.endsWith('.test.mjs')).sort();
+  const files = readdirSync(join(ROOT, 'test'), { recursive: true }).map((file) => `test/${file.replace(/\\/g, '/')}`).filter((file) => file.endsWith('.test.mjs')).sort();
+  assert.ok(listed.includes('test/skill.test.mjs'), 'positive control: the script names this file');
+  assert.deepEqual(listed, files);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));
