@@ -1605,6 +1605,8 @@ test('a lockfile that cannot be read falls back instead of making up a version',
 const pnpm12 = { '--version': '12.16.1', 'config get minimum-release-age': 'undefined' };
 const pnpm21 = (deps) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0', lib: '21.0.0' })) } });
 const youngLib = () => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+const ripeAt = (doc, v, minutes) => new Date(Date.parse(doc.time[v]) + minutes * 60e3).toISOString();
+const youngPatch = (doc, v, from, ago = 30) => { doc.versions[v] = { ...doc.versions[from], version: v }; doc.time[v] = new Date(Date.now() - ago * 60e3).toISOString(); doc['dist-tags'].latest = v; };
 
 test('bun holds a release back by the minimumReleaseAge in the app\'s bunfig.toml, in seconds, and ng update asks it nothing', async () => {
   const proj = (files) => app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'bun.lock': '{}', ...files } });
@@ -1632,4 +1634,70 @@ test('the plan only asks the package manager, and keeps pnpm from recording itse
   assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true });
   assert.deepEqual(r.asked.map((a) => a.args).sort(), ['--version', 'config get minimum-release-age']);
   for (const a of r.asked) assert.equal(a.pmOnFail, 'ignore');
+});
+
+test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
+  const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
+  const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(libIn(r, 22, 'ui-lib').to, '22.0.0');
+  assert.deepEqual(libIn(r, 22, 'ui-lib').held, { version: '22.1.0', until: ripeAt(lib, '22.1.0', 1440) });
+  assert.ok(r.plan.hops[0].command.endsWith(' ui-lib@22.0.0'));
+  // The control: pnpm 10 has no minimum release age, and ng update reads none from it.
+  const pnpm10 = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': '10.33.0', 'config get minimum-release-age': 'undefined' } });
+  assert.equal(libIn(pnpm10, 22, 'ui-lib').to, '22.1.0');
+});
+
+test('tooling that follows Angular\'s major, with only a release too young for the new one, says until when, or that npm\'s before leaves it out', async () => {
+  const lib = pkg('@angular-eslint/schematics', { '21.0.0': { at: '2025-12-01' }, '22.0.0': { ago: 10 } });
+  const reason = (r) => r.plan.unchecked.find((u) => u.name === '@angular-eslint/schematics')?.reason;
+  const r = await plan(world(lib), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.match(reason(r) ?? '', /^its 22\.x releases are too young until \d{4}-\d\d-\d\d \d\d:\d\d UTC, and it follows Angular's major$/, JSON.stringify(r.plan.unchecked));
+  const before = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  const npm = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular-eslint/schematics': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/schematics': '21.0.0' }, files: { '.npmrc': before } }), { to: 22 });
+  assert.equal(reason(npm), 'its 22.x releases are newer than npm\'s before, and it follows Angular\'s major');
+  const free = await plan(world(lib), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22 });
+  assert.equal(libIn(free, 22, '@angular-eslint/schematics').to, '22.0.0', 'the control: with no age, it moves');
+});
+
+test('from Angular CLI 22.1, ng update skips a young Angular patch itself, so the command keeps the major and the hop shows what it installs', async () => {
+  const [core, compiler] = angular();
+  youngPatch(core, '22.2.1', '22.2.0');
+  const r = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], pnpm21({}), { to: 22, manager: pnpm12 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.plan.hops[0].angular, '22.2.0');
+  assert.equal(r.plan.hops[0].angularNewer.version, '22.2.1');
+  assert.ok(r.plan.hops[0].command.endsWith(' @angular/core@22 @angular/cli@22'), r.plan.hops[0].command);
+});
+
+test('below Angular CLI 22.1, ng update takes Angular\'s newest patch however young, so the command names the newest old enough', async () => {
+  // pnpm 12.16.1's install then let a young release in by writing an exemption nobody approved under its default age,
+  // and refused it under an age the team set: ERR_PNPM_NO_MATURE_MATCHING_VERSION.
+  const [core, compiler] = angular();
+  youngPatch(core, '21.2.1', '21.2.0');
+  const cli = pkg('@angular/cli', { '21.2.0': { at: '2025-11-28' }, '21.2.1': { ago: 30 } });
+  const packages = () => [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), cli];
+  const proj = () => app({ deps: base, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } });
+  const r = await plan(packages(), proj(), { to: 21, manager: pnpm12 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.plan.hops[0].command.endsWith(' @angular/core@21.2.0 @angular/cli@21.2.0'), r.plan.hops[0].command);
+  const free = await plan(packages(), proj(), { to: 21 });
+  assert.ok(free.plan.hops[0].command.endsWith(' @angular/core@21 @angular/cli@21'), 'the control: with no age, the majors');
+});
+
+test('an installed release is never held back, since the lockfile has it and the manager checks it against its exemptions', async () => {
+  // M7's 21.4.0 was installed when it was 40 minutes old, with an exemption in pnpm-workspace.yaml.
+  const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0 || ^22.0.0', ago: 40 } });
+  const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(libIn(r, 22, 'ui-lib').to, '21.0.0');
+});
+
+test('a release with no publish time counts as old enough, as ng update and pnpm count it', async () => {
+  // pnpm 12.16.1 under minimumReleaseAgeStrict installed a release the registry gave no time for.
+  const lib = (time) => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0', ...time } });
+  const r = await plan(world(lib({})), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.equal(libIn(r, 22, 'ui-lib').to, '22.0.0');
+  const dated = await plan(world(lib({ ago: 10 })), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.equal(dated.code, 2, 'the control: the same release dated ten minutes ago waits');
 });
