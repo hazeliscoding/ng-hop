@@ -285,6 +285,22 @@ test('with one release that has no publish time and one too young, only the youn
   assert.ok(text.includes(`\nAngular 22 (22.2.0), waiting on a publish time from the registry, and until ${at}\n`), text);
 });
 
+test('a document with no time at all, as some private registries serve, has every release held back on yarn from 4.11, Angular\'s too', async () => {
+  // yarn 4.18.1 refused a package whose document had no time: YN0016: │ notime@npm:^1.0.0: All versions satisfying
+  // "^1.0.0" are quarantined. Reading a held release's time from such a document without a guard stopped the plan with
+  // TypeError: Cannot read properties of undefined (reading '22.0.0').
+  const lib = undated();
+  delete lib.time;
+  const r = await plan(world(lib), yarnApp(), { to: 22, text: true, manager: yarn18 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stdout, /^Angular 22 \(22\.2\.0\), waiting on a publish time from the registry$/m, r.stdout);
+  assert.match(r.stdout, /^ {2}ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); missing its publish time on the registry, which yarn holds back$/m);
+  const [core, compiler] = angular();
+  for (const doc of [core, compiler]) delete doc.time;
+  const own = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], yarnApp({}), { to: 22, manager: yarn18 });
+  assert.deepEqual([own.code, own.plan?.waiting?.noSooner], [2, 'Angular 22 itself has no publish time on the registry, which yarn holds back'], own.stderr);
+});
+
 test('npm, bun and ng update count a release with no publish time old enough, and pnpm from 11.23 then checks none of its package', async () => {
   // npm 11.19.0 installed it under before and under min-release-age, as npm-pick-manifest's isBefore passes a release with
   // no time, bun 1.4.2 under minimumReleaseAge, and ng update 22.2.6's isReleaseAgeSatisfied counts it old enough. pnpm
