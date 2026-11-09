@@ -1912,6 +1912,14 @@ test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pn
   // pnpm 12.16.1, 11.28.11 and 10.34.9 all failed on a key set twice: "duplicate mapping key".
   const twice = pnpm21({}, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 10\nminimumReleaseAge: 20\n' } });
   assert.equal(await ageOf(twice, { manager: pnpm12 }), `${join(twice.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge more than once, which pnpm 12.16.1 refuses: every pnpm command fails on it until it is set once, so ask the person to fix it`);
+  // Whatever the key: all three failed on packages set twice in a pnpm-workspace.yaml, here one above the app, where the
+  // plan read the default of a day, and 12.16.1 and 11.28.11 on any key set twice in their config.yaml, which pnpm 10
+  // doesn't read.
+  const packages = webApp({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\npackages:\n  - other/*\npackages:\n  - apps/*\n' });
+  for (const version of ['12.16.1', '10.34.9']) assert.equal(await ageOf(packages, { manager: { '--version': version } }), `${join(packages.root, 'pnpm-workspace.yaml')} sets packages more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it`);
+  const config = xdgWith('autoInstallPeers: true\nautoInstallPeers: true\n');
+  assert.match(await ageWith({}, config), /config\.yaml sets autoInstallPeers more than once, which pnpm 12\.16\.1 refuses: /);
+  assert.equal(await ageOf(pnpm21({}), { manager: { '--version': '10.34.9' }, env: config }), null, 'the control: pnpm 10');
   // 12.16.1 failed over 1d in its config.yaml or the nearest pnpm-workspace.yaml whatever set the age, the environment
   // or another file, and in one whose packages left the app out; 11.28.11 read the age that won.
   const day = { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1d\n' }, env = { pnpm_config_minimum_release_age: '20' };

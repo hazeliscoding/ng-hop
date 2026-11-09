@@ -565,9 +565,8 @@ function pnpmAge(project, version, config) {
   // A file's value, or why it can't be read. 12.16.1 read 60, "60", +60 and 0x3C as 60, passed over an empty value or
   // null, and failed on every command over 060, -5, 60.5, 1e3, 1d or a number past 2^64; 11.28.11 and 10.34.9 printed
   // -5, 60.5 and 1d as they were, and 060, 1e3 and 99999999999999999999 as 60, 1000 and 100000000000000000000, for ng
-  // update to parse with parseInt. All three failed over a key set twice.
+  // update to parse with parseInt.
   const read = (from, key, values) => {
-    if (values.length > 1) return { refused: `${from} sets ${key} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` };
     const [value] = values;
     if (typeof value === 'object') return { unread: ageUnread('pnpm', unreadLine(from, value)).unknown };
     if (value === undefined || /^(?:|null|~)$/.test(value)) return null;
@@ -576,7 +575,15 @@ function pnpmAge(project, version, config) {
     return v12 ? { refused: `${shown}, which pnpm ${version} refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it` }
       : { unclear: `${shown}, which is no whole number of minutes, and the plan can't tell what pnpm ${version} holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
   };
-  const inYaml = (file) => read(file, 'minimumReleaseAge', yamlValues(readText(file), 'minimumReleaseAge'));
+  // All three failed over any key a pnpm-workspace.yaml sets twice, and 12.16.1 and 11.28.11 over one in config.yaml.
+  // shortcut: a key set twice inside another, which all three failed over too, goes unnoticed; follow nested keys if a
+  // team ever trips on one.
+  const inYaml = (file) => {
+    const text = readText(file);
+    const twice = yamlTop(text).keys.map((k) => k.key).find((key, i, all) => all.indexOf(key) !== i);
+    return twice ? { refused: `${file} sets ${twice} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` }
+      : read(file, 'minimumReleaseAge', yamlValues(text, 'minimumReleaseAge'));
+  };
   const workspace = upFrom(project.dir).map((dir) => join(dir, 'pnpm-workspace.yaml')).find(existsSync);
   const files = [workspace && inYaml(workspace), v11 && inYaml(join(pnpmConfigDir(), 'config.yaml'))];
   // pnpm parses both files whatever sets the age, and 12.16.1 did even with the workspace's packages leaving the app out,
