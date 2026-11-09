@@ -391,6 +391,14 @@ test('npm\'s before is a date, so a release after it waits with no time to wait 
   assert.doesNotMatch(text, /^ {2}(From \d|Run: )/m, 'no time to wait for, and nothing to run');
   const after = await plan(world(youngLib()), npmApp(`before=${new Date(Date.now() + 60e3).toISOString()}\n`), { to: 22 });
   assert.equal(after.code, 0, after.stderr);
+  // On the target major, a patch newer than before waits for the setting to move too, with no time.
+  const [core, compiler] = angular();
+  youngPatch(core, '22.3.0', '22.2.0', 10);
+  const cli = pkg('@angular/cli', { '22.2.0': { at: '2026-05-28' }, '22.3.0': { ago: 10 } });
+  const on22 = app({ deps: { ...base, '@angular/core': '^22.2.0', '@angular/cli': '^22.2.0' }, lock: { ...lockBase, '@angular/core': '22.2.0', '@angular/cli': '22.2.0' }, files: { '.npmrc': rc } });
+  const patch = (await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), cli], on22, { to: 22, text: true })).stdout;
+  assert.match(patch, /^Already on Angular 22\. Nothing to upgrade until npm's before moves:$/m, patch);
+  assert.match(patch, /^ {2}@angular\/core: 22\.3\.0 is newer than npm's before$/m);
 });
 
 test('npm 11.10 to 11.14 turn min-release-age into a before that many days back, which ng update reads, so the wait has a time', async () => {
