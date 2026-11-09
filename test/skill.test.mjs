@@ -113,6 +113,15 @@ test('running ng through the wrong manager or a pinned pnpm has its errors in tr
   for (const text of ['EBADDEVENGINES', 'ERR_PNPM_BAD_CONFIG_DEP', 'ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE']) assert.ok(trouble.includes(text), text);
 });
 
+test('under yarn\'s Plug\'n\'Play the app is checked with yarn ng serve, since smoke.mjs finds no CLI there', () => {
+  // smoke.mjs starts node_modules/@angular/cli/bin/ng.js, which Plug'n'Play doesn't have, while `yarn ng serve` on
+  // Angular CLI 22.2.5 and yarn 4.16.0 served the page.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'smoke.mjs'), 'utf8'), /No Angular CLI at/, 'positive control: smoke.mjs still says this');
+  assert.match(skillStep(3), /Plug'n'Play/);
+  const section = troubleSection('No Angular CLI at');
+  assert.match(section, /yarn ng serve/);
+});
+
 test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {
   // pnpm says so itself: The "pnpm" field in package.json is no longer read by pnpm.
   const blocked = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8');
