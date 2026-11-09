@@ -1969,7 +1969,7 @@ test('a value on the line below its key, or in a file indented as a whole, is re
   // pnpm 12.16.1, 11.28.11 and 10.34.9 read 60 from each of these, where the plan read the default of a day, and yarn
   // 4.18.1 read 45 from npmMinimalAgeGate with 45 below it, which the plan said yarn refuses.
   const pnpmWith = (text) => ageOf(pnpm21({}, { files: { 'pnpm-workspace.yaml': text } }), { manager: pnpm12 });
-  for (const text of ['minimumReleaseAge:\n  60\n', 'minimumReleaseAge: # an hour\n  60\n', 'minimumReleaseAge:\n\n  60\n', '  minimumReleaseAge: 60\n', '# settings\n  minimumReleaseAge: 60\n', '---\n  minimumReleaseAge: 60\n']) {
+  for (const text of ['minimumReleaseAge:\n  60\n', 'minimumReleaseAge: # an hour\n  60\n', 'minimumReleaseAge:\n\n  60\n', '  minimumReleaseAge: 60\n', '# settings\n  minimumReleaseAge: 60\n', '---\n  minimumReleaseAge: 60\n', '--- # settings\nminimumReleaseAge: 60\n', 'minimumReleaseAge: 60\n...\n']) {
     assert.equal((await pnpmWith(text))?.minutes, 60, text);
   }
   // Indented as a whole, a workspace's packages list sits under its key or at the key's own indentation.
@@ -1977,18 +1977,21 @@ test('a value on the line below its key, or in a file indented as a whole, is re
     assert.equal((await ageOf(webApp({ 'pnpm-workspace.yaml': `  minimumReleaseAge: 60\n${packages}` }), { manager: pnpm12 }))?.minutes, minutes, packages);
   }
   const yarnWith = (text) => ageOf(yarn21({ files: { '.yarnrc.yml': text } }), { manager: { '--version': '4.18.1' } });
-  for (const text of ['npmMinimalAgeGate:\n  45\n', '  npmMinimalAgeGate: 45\n']) assert.equal((await yarnWith(text))?.minutes, 45, text);
+  for (const text of ['npmMinimalAgeGate:\n  45\n', '  npmMinimalAgeGate: 45\n', 'npmMinimalAgeGate: 45\n...\n']) assert.equal((await yarnWith(text))?.minutes, 45, text);
   // pnpm 12.16.1 read the tag !!int "60" and the flow document as 60, and refused 60 with 70 on the line below it and a
-  // colon with no space after it; yarn 4.18.1 refused !!int "45" and read the anchor &a 45 as 45. The plan follows none
-  // of them, so it names the line it can't read instead of guessing what the manager makes of it.
+  // colon with no space after it; yarn 4.18.1 refused !!int "45" and read the anchor &a 45 as 45. All three pnpm and yarn
+  // failed every command over a second document, a string document starting --- |, and "" with a value on the line
+  // below it, where the plan read the age. The plan follows none of them, so it names the line it can't read instead of
+  // guessing what the manager makes of it.
   const unread = (file, line, shown, check) => `line ${line} of ${file}, "${shown}", is in a form the plan can't read, so the plan can't tell ${check.split(' ')[0]}'s minimum release age, and a release younger than that can still stop a command; ask the person to check it with ${check}`;
-  for (const [text, shown] of [['minimumReleaseAge: !!int "60"\n', 'minimumReleaseAge: !!int "60"'], ['minimumReleaseAge: 60\n  70\n', 'minimumReleaseAge: 60'], ['minimumReleaseAge:60\n', 'minimumReleaseAge:60'], ['{minimumReleaseAge: 60}\n', '{minimumReleaseAge: 60}']]) {
+  for (const [text, shown, line = 1] of [['minimumReleaseAge: !!int "60"\n', 'minimumReleaseAge: !!int "60"'], ['minimumReleaseAge: 60\n  70\n', 'minimumReleaseAge: 60'], ['minimumReleaseAge:60\n', 'minimumReleaseAge:60'], ['{minimumReleaseAge: 60}\n', '{minimumReleaseAge: 60}'],
+    ['---\nminimumReleaseAge: 60\n---\n', '---', 3], ['--- |\n  minimumReleaseAge: 60\n', '--- |'], ['minimumReleaseAge: ""\n  60\n', 'minimumReleaseAge: ""']]) {
     const p = pnpm21({}, { files: { 'pnpm-workspace.yaml': text } });
-    assert.equal(await ageOf(p, { manager: pnpm12 }), unread(join(p.dir, 'pnpm-workspace.yaml'), 1, shown, 'pnpm config get minimum-release-age'), text);
+    assert.equal(await ageOf(p, { manager: pnpm12 }), unread(join(p.dir, 'pnpm-workspace.yaml'), line, shown, 'pnpm config get minimum-release-age'), text);
   }
-  for (const text of ['npmMinimalAgeGate: !!int "45"', 'npmMinimalAgeGate: &a 45']) {
-    const p = yarn21({ files: { '.yarnrc.yml': `${text}\n` } });
-    assert.equal(await ageOf(p, { manager: { '--version': '4.18.1' } }), unread(join(p.dir, '.yarnrc.yml'), 1, text, 'yarn config get npmMinimalAgeGate'), text);
+  for (const [text, shown, line = 1] of [['npmMinimalAgeGate: !!int "45"\n', 'npmMinimalAgeGate: !!int "45"'], ['npmMinimalAgeGate: &a 45\n', 'npmMinimalAgeGate: &a 45'], ['---\nnpmMinimalAgeGate: 45\n---\n', '---', 3]]) {
+    const p = yarn21({ files: { '.yarnrc.yml': text } });
+    assert.equal(await ageOf(p, { manager: { '--version': '4.18.1' } }), unread(join(p.dir, '.yarnrc.yml'), line, shown, 'yarn config get npmMinimalAgeGate'), text);
   }
   // A yarnPath the plan can't read leaves yarn's version unknown too, since it names the release yarn hands over to.
   const path = yarn21({ pin: 'yarn@4.18.1', files: { '.yarnrc.yml': 'yarnPath: &p .yarn/releases/yarn-4.10.1.cjs\n' } });

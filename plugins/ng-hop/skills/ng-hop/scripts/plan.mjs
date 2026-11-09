@@ -442,9 +442,12 @@ const scalar = (text) => {
 // plan can read, such as a flow document or a key with no space after its colon. The top level is at the first line's
 // indentation, since pnpm 12.16.1, 11.28.11 and 10.34.9 and yarn 4.18.1 read a file indented as a whole too.
 function yamlTop(text) {
-  // Blank lines and comments go, and the --- and ... around a document.
+  // Blank lines and comments go, and a --- starting the document and a ... ending it, alone on their lines. Any other
+  // marker line is odd: a second document, or a --- | starting a string one, failed every command in pnpm 12.16.1,
+  // 11.28.11 and 10.34.9 and yarn 4.18.1.
   const lines = (text ?? '').replace(/^\uFEFF/, '').split(/\r?\n/).map((line, i) => ({ line: i + 1, text: line }))
-    .filter(({ text: line }) => !/^\s*(?:#.*)?$/.test(line) && !/^(?:---|\.\.\.)(?:\s|$)/.test(line));
+    .filter(({ text: line }) => !/^\s*(?:#.*)?$/.test(line))
+    .filter(({ text: line }, i, all) => !(i === 0 && /^---(?:\s+(?:#.*)?)?$/.test(line)) && !(i === all.length - 1 && /^\.\.\.(?:\s+(?:#.*)?)?$/.test(line)));
   const indent = (line) => /^ */.exec(line)[0].length;
   const top = indent(lines[0]?.text ?? '');
   const keys = [];
@@ -460,15 +463,16 @@ function yamlTop(text) {
 }
 
 // Every value of a top-level key, a key set twice giving two: a plain or quoted one on its line, or alone on the line
-// below, as pnpm and yarn read it. A form the plan doesn't follow gives that line, { line, text }, instead: a tag, a
-// value over more than one line, or a top level the plan can't read.
+// below a key with nothing after it but a comment, as pnpm and yarn read it. A form the plan doesn't follow gives that
+// line, { line, text }, instead: a tag, a value over more than one line, or a top level the plan can't read. "" with a
+// value below it is one, which every pnpm and yarn command failed on.
 function yamlValues(text, key) {
   const { keys, odd } = yamlTop(text);
   if (odd) return [odd];
   return keys.filter((k) => k.key === key).map((k) => {
     const [only, ...more] = k.below;
     if (!only) return scalar(k.rest) ?? k;
-    return !more.length && scalar(k.rest) === '' ? scalar(only.text) ?? only : k;
+    return !more.length && k.rest.replace(/(?:^|\s)#.*$/, '').trim() === '' ? scalar(only.text) ?? only : k;
   });
 }
 
