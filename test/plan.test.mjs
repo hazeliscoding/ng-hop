@@ -1957,6 +1957,21 @@ test('the version comes from the nearest package.json pin, its packageManager or
   assert.match(await ageOf({ dir: join(tagged.dir, 'apps', 'web') }, { manager: pnpm12 }), /package\.json pins "latest" in devEngines\.packageManager, which names no pnpm version, /);
 });
 
+test('a devEngines pin for pnpm or yarn doesn\'t stop npm from reading the registry settings, wherever it sits', async () => {
+  // npm 11.19.0 checks devEngines on every command, config and view too, and failed with EBADDEVENGINES on any manager
+  // but npm, as pnpm 12.16.1's own pnpm init writes it into package.json. --force makes that a warning.
+  const web = { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' };
+  const engine = (name, version) => ({ devEngines: { packageManager: { name, version, onFail: 'download' } } });
+  const own = app({ files: { 'package.json': JSON.stringify({ name: 'app', packageManager: 'pnpm@12.16.1', ...engine('pnpm', '12.16.1'), dependencies: web }), 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })) } });
+  const root = app({ files: { 'package.json': JSON.stringify({ name: 'mono', private: true, ...engine('pnpm', '12.16.1') }), 'pnpm-workspace.yaml': 'packages:\n  - apps/*\n', 'pnpm-lock.yaml': pnpmLock(pnpmImporter('apps/web', { core: '21.2.0', cli: '21.2.0' })), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: web }) } });
+  const yarn = app({ files: { 'package.json': JSON.stringify({ name: 'app', ...engine('yarn', '4.18.1'), dependencies: web }), 'yarn.lock': '' } });
+  for (const [proj, version] of [[own, '12.16.1'], [{ dir: join(root.dir, 'apps', 'web') }, '12.16.1'], [yarn, '4.18.1']]) {
+    const r = await plan(world(), proj, { to: 22 });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual([r.plan.releaseAge?.version, r.asked], [version, []], proj.dir);
+  }
+});
+
 test('yarn takes npmMinimalAgeGate from YARN_NPM_MINIMAL_AGE_GATE in any case, then the nearest .yarnrc.yml, then the home folder\'s', async () => {
   // yarn 4.18.1, offline: the environment's 120 beat an rc's 60, also as Yarn_Npm_Minimal_Age_Gate; a project's 60 beat
   // a parent's 90 and the home's 200; a parent's two levels up applied when nothing nearer set it; the home's alone gave

@@ -78,11 +78,12 @@ function npmScript(project) {
 // npm's debug log, cache and update check go to a folder of the plan's own, which it removes, since a repo's .npmrc can
 // name any folder for them: npm 11.19.0 wrote its log, which quotes a key it doesn't know word for word, where logs-dir
 // said, and the update check also asks the registry the .npmrc names. A flag beats .npmrc. npm 11.19.0 also left Node's
-// compile cache in the temporary folder, which nothing removes.
+// compile cache in the temporary folder, which nothing removes. And it checks devEngines on every command, config and
+// view too, failing on a packageManager that names pnpm or yarn unless --force makes that a warning.
 async function runNpm(npm, args, options) {
   const own = mkdtempSync(join(tmpdir(), 'ng-hop-npm-'));
   try {
-    return await exec(process.execPath, [npm, ...args, `--cache=${own}`, `--logs-dir=${own}`, '--no-update-notifier'], { ...options, env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' } });
+    return await exec(process.execPath, [npm, ...args, `--cache=${own}`, `--logs-dir=${own}`, '--no-update-notifier', '--force'], { ...options, env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' } });
   } finally {
     rmSync(own, { recursive: true, force: true });
   }
