@@ -757,7 +757,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     if (sharedWith.length) plan.notes.push(`The catalog is also used by ${sharedWith.join(', ')}, so moving it moves them too, without their migrations. Ask before going ahead.`);
   }
   if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
-  const cliDoc = next ? await registry.get('@angular/cli', Boolean(age)) : null; // publish times are only in the full document
+  // The CLI's next tag, and with an age its publish times, which are only in the full document.
+  const cliDoc = next || age ? await registry.get('@angular/cli', Boolean(age)) : null;
   const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';
 
   // Which dependencies are tied to Angular? Read every one, because the name alone can't say.
@@ -829,11 +830,17 @@ async function buildPlan({ projectDir, to, next = false }) {
     const coreManifest = coreDoc.versions[frameworkVersion];
     const angularNewer = !toPrerelease && semver.maxSatisfying(inMajor(coreDoc), majorRange);
     const compilerVersion = toPrerelease && compilerDoc.versions[prerelease] ? prerelease : semver.maxSatisfying(oldEnough(compilerDoc), majorRange) || semver.maxSatisfying(inMajor(compilerDoc), majorRange);
-    // shortcut: Angular's own version stands in for the CLI that runs the hop, which ships each minor with it; core 22.1.0
-    // came out on 2026-07-29 three hours before CLI 22.1.0.
+    // shortcut: core's version stands in for that of the CLI that runs the hop, whose minors come out hours after core's,
+    // 22.1.0 three hours later on 2026-07-29; use the CLI's own if a hop in those hours ever matters.
     const ngUpdateSkips = Boolean(age?.ngUpdateReads) && semver.gte(frameworkVersion, NG_UPDATE_AGE);
-    // Angular itself can be too young: core, or on a --next hop the CLI, which can come out hours after it.
-    const angularHeld = [['@angular/core', coreDoc, frameworkVersion], ...(toPrerelease ? [['@angular/cli', cliDoc, cliNext]] : [])]
+    // The CLI the hop installs: the newest old enough, or else the major's first, which comes out after core's, by 30
+    // minutes at 22.0.0. ng update gives a young CLI no target, and leaves it and its package group behind.
+    const cliVersion = toPrerelease ? cliNext : cliDoc && (semver.maxSatisfying(oldEnough(cliDoc), majorRange) || semver.minSatisfying(inMajor(cliDoc), majorRange));
+    // Angular itself can be too young: core, or the CLI.
+    // shortcut: core's time stands in for the rest of its package group, which came out up to 2 minutes 39 after it at
+    // 22.2.0, so for those minutes a hop reads as ready while ng update leaves a member behind; read their times if that
+    // window ever matters.
+    const angularHeld = [['@angular/core', coreDoc, frameworkVersion], ['@angular/cli', cliDoc, cliVersion]]
       .filter(([, doc, v]) => young(doc, v)).map(([name, doc, v]) => ({ name, version: v, installed: project.installed(name)?.version ?? null, published: doc.time[v], until: ripens(doc, v) }));
     const compilerManifest = compilerDoc.versions[compilerVersion];
 
@@ -1021,11 +1028,10 @@ async function buildPlan({ projectDir, to, next = false }) {
     // pnpm under its default age, lets in by writing an exemption nobody approved. So the command names the newest old
     // enough, for core and the CLI, whose numbers and days differ.
     const exact = age && !ngUpdateSkips && !toPrerelease;
-    const cliFull = exact ? await registry.get('@angular/cli', true) : null;
     const named = (name, doc) => { const ok = doc && semver.maxSatisfying(oldEnough(doc), majorRange); return ok && ok !== semver.maxSatisfying(inMajor(doc), majorRange) ? `${name}@${ok}` : `${name}@${major}`; };
     // `@angular/core@23` would resolve to a stable 23, so a prerelease is named exactly.
     const framework = toPrerelease ? `@angular/core@${frameworkVersion} @angular/cli@${cliNext}`
-      : exact ? `${named('@angular/core', coreDoc)} ${named('@angular/cli', cliFull)}` : `@angular/core@${major} @angular/cli@${major}`;
+      : exact ? `${named('@angular/core', coreDoc)} ${named('@angular/cli', cliDoc)}` : `@angular/core@${major} @angular/cli@${major}`;
     const command = [`${updateCommand(project)} ${framework}`, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
     const hop = {
       major, angular: frameworkVersion, node, libs, shared: changes, dropped: [], command, ...(age ? { ngUpdateSkips } : {}),
