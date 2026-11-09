@@ -108,10 +108,18 @@ test('no settings file a repo writes can stall the plan, with a long run of spac
     [below(`apps/${'*a'.repeat(8)}b`, `apps/${'a'.repeat(60)}`), 1440],
     [below(`${'**/'.repeat(16)}x`, Array.from({ length: 16 }, (_, i) => `d${i}`).join('/')), 1440],
   ];
+  // Each case is timed against an ordinary plan with the same manager just before it, since a busy machine slows both:
+  // with 72 busy processes on 12 CPUs, the 150,000 spaces took 15.2 s with nothing backtracking. The heaviest ordinary
+  // plan here, an app's own .npmrc, has pnpm 10's npm read settings twice, and the backtracking took 16.5 s or more on
+  // top of a plan on an idle machine, so a case gets twice an ordinary plan and 5 s more.
   for (const [proj, expected, manager = pnpm12] of cases) {
-    const started = Date.now();
+    let started = Date.now();
+    await ageOf(appRc('minimum-release-age=60\n'), { manager });
+    const ordinary = Date.now() - started;
+    started = Date.now();
     const age = await ageOf(proj, { manager });
-    assert.ok(Date.now() - started < 15e3, `planning took ${Date.now() - started} ms`);
+    const took = Date.now() - started;
+    assert.ok(took < 2 * ordinary + 5e3, `planning took ${took} ms, and an ordinary plan ${ordinary} ms`);
     if (expected instanceof RegExp) assert.match(age, expected); else assert.equal(age?.minutes, expected);
   }
   // The controls: the same patterns still take in an app they name.
