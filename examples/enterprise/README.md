@@ -23,13 +23,13 @@ You need Node 24.15 or newer, pnpm 12 and git, and Docker Desktop for the dev co
    ```
 3. Open `<folder>/acme-portal` in your agent, with ng-hop installed, and ask: "Upgrade this app to Angular 22."
 
-To start over, stop the registry, delete `examples/enterprise/registry/storage/` and start it again. The registry keeps what each run publishes, and once the libraries' 22.0.0 is in it, the portal isn't blocked any more.
+To start over, stop the registry, delete `examples/enterprise/registry/storage/` and start it again. The registry keeps what each run publishes, and once the libraries' 22.0.0 is in it, their peer ranges don't block the portal any more.
 
 ## What should happen
 
 1. The plan says the portal is blocked by `@acme/ui-core` and `@acme/ui-forms`, that both come from the registry your npm config sets for `@acme`, and that, if they're your team's, ui-core goes first.
 2. Asked where they live, you point the agent at `<folder>/acme-ui`. It upgrades that workspace to Angular 22, moves each library's peer ranges and version, builds and tests them, and asks before publishing.
-3. Back in the portal, the plan is clear. But the libraries' 22.0.0 is only minutes old, and from Angular CLI 22.1, `ng update` skips a release younger than pnpm's minimum release age, a day by default, and reads no exemption list. So the agent asks: wait a day, or exempt the two releases in a commit of their own, the way `pnpm-workspace.yaml` already exempts 21.4.0, and install them before it updates Angular. Then the agent takes the app to 22, raises the dev container's Node to one Angular 22 accepts, and checks the build, the tests and the running app.
+3. Back in the portal, the plan says Angular 22 is waiting until the libraries' 22.0.0 is a day old, since from Angular CLI 22.1 `ng update` skips a release younger than pnpm's minimum release age, a day by default, and reads no exemption list. So the agent asks: wait a day, or exempt the two releases in a commit of their own, the way `pnpm-workspace.yaml` already exempts 21.4.0, and run the plan's command that installs them before it updates Angular. Then the agent takes the app to 22, raises the dev container's Node to one Angular 22 accepts, and checks the build, the tests and the running app.
 
 The upgrade runs from your machine, not inside the dev container. The container has its own Node and its own `node_modules`, so rebuild it afterwards and check the app there. In VS Code, run "Dev Containers: Rebuild and Reopen in Container", or "Dev Containers: Rebuild Container" if you're already in it, then `pnpm run build` and `pnpm test --watch=false` in its terminal. From a terminal:
 
