@@ -1738,8 +1738,9 @@ test('below Angular CLI 22.1, ng update takes Angular\'s newest patch however yo
 });
 
 test('an installed release is never held back, since the lockfile has it and the manager checks it against its exemptions', async () => {
-  // M7's 21.4.0 was installed when it was 40 minutes old, with an exemption in pnpm-workspace.yaml.
-  const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0 || ^22.0.0', ago: 40 } });
+  // M7's 21.4.0 was installed when it was 40 minutes old, with an exemption in pnpm-workspace.yaml. This 21.0.0 came
+  // out after 21.1.0, as a backport does, so held back it would be swapped for 21.1.0 rather than picked again later.
+  const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0 || ^22.0.0', ago: 40 }, '21.1.0': { peer: '^21.0.0 || ^22.0.0', at: '2025-12-01' } });
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(libIn(r, 22, 'ui-lib').to, '21.0.0');
