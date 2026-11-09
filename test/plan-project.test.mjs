@@ -221,6 +221,18 @@ test('pnpm: a root that also declares npm workspaces doesn\'t stop the plan', as
 test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and older lay it over the root\'s', async () => {
   const w = acmeWorkspace({ workspaces: ['apps/*'] });
   blockedOnUiCore(await plan(world(), w, { to: 21, own: { scope: '@acme', packages: [uiCore()], auth: true } }));
+  // npm 11.19.0's ini and pnpm 10.34.9 read a line ended by \r\n or a lone \r, and a key with spaces around its =, as
+  // Windows editors and people write them. A key the plan missed left @acme/ui-core to the default registry, which has
+  // none, and the app read as reachable.
+  const company = await startRegistry([uiCore()], { requireAuth: true });
+  try {
+    const host = company.url.replace(/^http:/, '');
+    for (const rc of [`@acme:registry=${company.url}\r\n${host}:_authToken=test-only\r\n`, `@acme:registry = ${company.url}\n${host}:_authToken = test-only\n`, `@acme:registry=${company.url}\r${host}:_authToken=test-only\r`]) {
+      blockedOnUiCore(await plan(world(), acmeWorkspace({ files: { 'apps/web/.npmrc': rc } }), { to: 21 }));
+    }
+  } finally {
+    await company.close();
+  }
 });
 
 test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a mirror set at the root stays', async () => {
