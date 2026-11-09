@@ -16,6 +16,17 @@ const acme = (ago, extra = {}) => [
   pkg('@acme/ui-forms', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@acme/ui-core': '^21.4.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@acme/ui-core': '^22.0.0' }, ago: ago - 0.01 } }),
 ];
 const acmeDeps = { '@acme/ui-core': '^21.4.0', '@acme/ui-forms': '^21.4.0' };
+// A private registry can leave a release out of its document's time: here 21.0.0 is dated and 22.0.0 isn't.
+const undated = (more = {}) => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0' }, ...more });
+const yarnApp = (deps = { 'ui-lib': '^21.0.0' }, files = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, files: { 'yarn.lock': '', ...files } });
+const yarn18 = { '--version': '4.18.1' };
+// Angular's newest patch, 22.3.0, with no publish time, and a CLI to match.
+const undatedPatch = () => {
+  const [core, compiler] = angular();
+  core.versions['22.3.0'] = { ...core.versions['22.2.0'], version: '22.3.0' };
+  core['dist-tags'].latest = '22.3.0';
+  return [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), pkg('@angular/cli', { '21.2.0': { at: '2025-11-28' }, '22.2.0': { at: '2026-05-28' }, '22.3.0': {} })];
+};
 
 // npm 11.10 added min-release-age. npm 10.9.10 lists it as a string, a key it doesn't know, and 11.19.0 as a number.
 const npmCli = [join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'), join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')].find(existsSync);
@@ -163,6 +174,74 @@ test('an installed release is never held back, since the lockfile has it and the
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(libIn(r, 22, 'ui-lib').to, '21.0.0');
+});
+
+test('yarn from 4.11 and pnpm 10 hold back a release the registry gives no publish time, however old, so its major waits for an exemption', async () => {
+  // yarn 4.11.0 to 4.18.1 gate a release whose time is undefined (typeof a>"u" in the gate): 4.11.0 said YN0082:
+  // lib@npm:^1.1.0: No candidates found, and 4.18.1 YN0016: lib@npm:^1.1.0: All versions satisfying "^1.1.0" are
+  // quarantined, until npmPreapprovedPackages listed it. pnpm 10.34.9 keeps only releases with a time before its cutoff:
+  // ERR_PNPM_NO_MATURE_MATCHING_VERSION Version 1.1.0 (released NaN minutes ago) of lib does not meet the
+  // minimumReleaseAge constraint, until minimumReleaseAgeExclude listed it. ng update 22.2.6 takes such a release, since
+  // isReleaseAgeSatisfied finds no time for it, so once it's exempted the plain command runs, with nothing going in first.
+  const gate = { '.yarnrc.yml': 'npmMinimalAgeGate: 1440\n' };
+  const cases = [
+    [yarnApp(), yarn18, 'yarn\'s npmMinimalAgeGate'],
+    [yarnApp(undefined, gate), { '--version': '4.11.0' }, 'yarn\'s npmMinimalAgeGate'],
+    [pnpm21({ 'ui-lib': '^21.0.0' }, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1440\n' } }), { '--version': '10.34.9' }, 'pnpm\'s minimumReleaseAge'],
+  ];
+  for (const [proj, manager, setting] of cases) {
+    const r = await plan(world(undated()), proj, { to: 22, manager });
+    assert.equal(r.code, 2, `${manager['--version']}: ${r.stderr}`);
+    assert.deepEqual(r.plan.blockers.map((b) => [b.name, b.kind, b.version, b.until, b.noPublishTime]), [['ui-lib', 'too-young', '22.0.0', null, true]], manager['--version']);
+    assert.equal(r.plan.blockers[0].reason, `22.0.0 has no publish time on the registry, so ${setting} can't tell its age and holds it back however old it is, until the registry gives it one or the person exempts it`);
+    assert.deepEqual([r.plan.waiting.until, r.plan.waiting.sooner], [null, r.plan.waiting.command], manager['--version']);
+  }
+  const text = (await plan(world(undated()), yarnApp(), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.match(text, /^Result: BLOCKED\. Angular 22 needs releases with no publish time on the registry, which yarn holds back however old they are, so this project stays on 21 until the registry gives them one\.$/m, text);
+  assert.match(text, /^Angular 22 \(22\.2\.0\), waiting on a publish time from the registry$/m);
+  assert.match(text, /^ {2}ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); missing its publish time on the registry, which yarn holds back$/m);
+  assert.ok(text.includes(`\n  Sooner, once the person approves exempting ui-lib 22.0.0 and that is committed by itself: node ${quotePath(UPDATE)} @angular/core@22 @angular/cli@22 ui-lib@22.0.0\n`), text);
+  assert.doesNotMatch(text, /^ {2}(From |Run: )/m, 'no time to wait for, and nothing to run');
+  // The control: yarn 4.10.1's gate read new Date(undefined), whose time is NaN, so it took the release.
+  const old = await plan(world(undated()), yarnApp(undefined, gate), { to: 22, manager: { '--version': '4.10.1' } });
+  assert.deepEqual([old.code, libIn(old, 22, 'ui-lib')?.to], [0, '22.0.0'], old.stderr);
+});
+
+test('yarn takes a release it can date over one with no publish time, waits for a dated one first, and the command never leaves ng update the undated one', async () => {
+  // yarn 4.18.1 took 1.0.0 for ^1.0.0 over 1.1.0, which had no time. ng update from Angular CLI 22.1 takes Angular's
+  // newest that it doesn't skip as too young, and it never skips one with no time, so @angular/core@22 would bring it.
+  const lib = undated({ '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0' } });
+  const passed = await plan(world(lib), yarnApp(), { to: 22, manager: yarn18 });
+  assert.deepEqual([libIn(passed, 22, 'ui-lib')?.to, libIn(passed, 22, 'ui-lib')?.held], ['22.0.0', { version: '22.1.0', until: null, noPublishTime: true }], passed.stderr);
+  const text = (await plan(world(lib), yarnApp(), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.match(text, /^ {2}ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); 22\.1\.0 is newer, but the registry gives it no publish time, which yarn holds back$/m, text);
+  // A release old enough in a day beats one with no time, which never is.
+  const soon = undated({ '22.1.0': { peer: '^22.0.0', ago: 10 } });
+  const waits = await plan(world(soon), yarnApp(), { to: 22, manager: yarn18 });
+  assert.deepEqual([waits.plan.waiting?.libs.find((l) => l.name === 'ui-lib').to, waits.plan.waiting?.until], ['22.1.0', ripeAt(soon, '22.1.0', 1440)], waits.stderr);
+  const r = await plan(undatedPatch(), yarnApp({}), { to: 22, manager: yarn18 });
+  assert.ok(r.plan.hops[0]?.command.endsWith(' @angular/core@22.2.0 @angular/cli@22.2.0'), r.stdout + r.stderr);
+  const angularText = (await plan(undatedPatch(), yarnApp({}), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.match(angularText, /^Angular 22 \(22\.2\.0; 22\.3\.0 is newer, but the registry gives it no publish time, which yarn holds back\)$/m, angularText);
+});
+
+test('with no publish time, tooling that follows Angular\'s major, a patch and Angular itself say what yarn holds back, and give no time', async () => {
+  const eslint = pkg('@angular-eslint/schematics', { '21.0.0': { at: '2025-12-01' }, '22.0.0': {} });
+  const tooling = await plan(world(eslint), yarnApp({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22, manager: yarn18 });
+  assert.equal(tooling.plan.unchecked.find((u) => u.name === '@angular-eslint/schematics')?.reason, 'its 22.x releases have no publish time on the registry, which yarn holds back, and it follows Angular\'s major', tooling.stdout + tooling.stderr);
+  const on22 = () => app({ deps: { ...base, '@angular/core': '^22.2.0', '@angular/cli': '^22.2.0' }, files: { 'yarn.lock': '' } });
+  const patch = await plan(undatedPatch(), on22(), { to: 22, manager: yarn18 });
+  assert.deepEqual(patch.plan.patchesHeld, ['@angular/core', '@angular/cli'].map((name) => ({ name, version: '22.3.0', until: null, noPublishTime: true })), patch.stdout + patch.stderr);
+  const patchText = (await plan(undatedPatch(), on22(), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.match(patchText, /^Already on Angular 22\. Nothing to upgrade until the registry gives them a publish time:$/m, patchText);
+  assert.match(patchText, /^ {2}@angular\/core: 22\.3\.0 is missing its publish time on the registry, which yarn holds back$/m);
+  // Angular 23's one release has no time, so the hop has nothing yarn takes, and nothing goes in before Angular.
+  const [core, compiler] = angular();
+  for (const doc of [core, compiler]) { doc.versions['23.0.0'] = { ...doc.versions['22.2.0'], version: '23.0.0' }; doc['dist-tags'].latest = '23.0.0'; }
+  const next = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], on22(), { manager: yarn18 });
+  assert.equal(next.code, 2, next.stderr);
+  assert.deepEqual(next.plan.blockers.map((b) => [b.name, b.kind, b.noPublishTime]), [['@angular/core', 'too-young', true]]);
+  assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
 });
 
 test('a release with no publish time counts as old enough, as ng update and pnpm count it', async () => {
