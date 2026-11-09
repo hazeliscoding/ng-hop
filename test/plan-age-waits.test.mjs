@@ -113,17 +113,18 @@ test('a library whose newest release is too young moves to the newest that is ol
   assert.equal(libIn(pnpm10, 22, 'ui-lib').to, '22.1.0');
 });
 
-test('tooling that follows Angular\'s major, with only a release too young for the new one, says until when, or that npm\'s before leaves it out', async () => {
+test('tooling that follows Angular\'s major, with only releases too young for the new one, says when the first is old enough, or that npm\'s before leaves them out', async () => {
   // angular-eslint's packages declared an @angular/cli peer in older releases, and whether they do isn't a question of age.
-  const lib = pkg('@angular-eslint/schematics', { '20.0.0': { peers: { '@angular/cli': '>=20.0.0 <21.0.0' }, at: '2025-06-01' }, '21.0.0': { at: '2025-12-01' }, '22.0.0': { ago: 10 } });
+  const lib = pkg('@angular-eslint/schematics', { '20.0.0': { peers: { '@angular/cli': '>=20.0.0 <21.0.0' }, at: '2025-06-01' }, '21.0.0': { at: '2025-12-01' }, '22.0.0': { ago: 1000 }, '22.1.0': { ago: 10 } });
   const reason = (r) => r.plan.unchecked.find((u) => u.name === '@angular-eslint/schematics')?.reason;
   const r = await plan(world(lib), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22, manager: pnpm12 });
-  assert.match(reason(r) ?? '', /^its 22\.x releases are too young until \d{4}-\d\d-\d\d \d\d:\d\d UTC, and it follows Angular's major$/, JSON.stringify(r.plan.unchecked));
-  const before = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  // The first of them to be old enough says when: 22.0.0, out for 1000 minutes, not 22.1.0, out for 10.
+  assert.equal(reason(r), `its 22.x releases are too young until ${shown(ripeAt(lib, '22.0.0', 1440))}, and it follows Angular's major`, JSON.stringify(r.plan.unchecked));
+  const before = `before=${new Date(Date.now() - 2000 * 60e3).toISOString()}\n`;
   const npm = await plan(world(lib), app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular-eslint/schematics': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', '@angular-eslint/schematics': '21.0.0' }, files: { '.npmrc': before } }), { to: 22 });
   assert.equal(reason(npm), 'its 22.x releases are newer than npm\'s before, and it follows Angular\'s major');
   const free = await plan(world(lib), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22 });
-  assert.equal(libIn(free, 22, '@angular-eslint/schematics').to, '22.0.0', 'the control: with no age, it moves');
+  assert.equal(libIn(free, 22, '@angular-eslint/schematics').to, '22.1.0', 'the control: with no age, it moves');
 });
 
 test('tooling that follows Angular\'s major, a follower and a library a sibling moves take the newest release old enough, and name the younger one', async () => {
