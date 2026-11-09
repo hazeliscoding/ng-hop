@@ -154,9 +154,9 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
 // A stand-in for pnpm or yarn, which the plan asks for an unpinned version through npm_execpath, the first place
 // managerCommand looks. answers maps the arguments to what it prints, or to { stderr } for what it prints as it fails;
 // anything else, or null, exits 1. Each question is logged with the folder it ran in, and the pnpm_config_pm_on_fail,
-// Corepack, YARN_IGNORE_PATH and NODE_DISABLE_COMPILE_CACHE settings it ran under. Like yarn 4.18.1, the yarn one reads the .yarnrc.yml in every
-// folder up from where it runs, loading the plugins each names and, without YARN_IGNORE_PATH, the nearest yarnPath, so
-// running it in a repo, or below a folder someone else can write to, runs their code.
+// Corepack, YARN_IGNORE_PATH and NODE_DISABLE_COMPILE_CACHE settings it ran under. Like yarn 4.18.1, the yarn one reads
+// the .yarnrc.yml in every folder up from where it runs, loading the plugins each names and, without YARN_IGNORE_PATH,
+// the nearest yarnPath, so running it in a repo, or below a folder someone else can write to, runs their code.
 export function fakeManager(name, answers) {
   const dir = mkdtempSync(join(tmpdir(), 'ng-hop-pm-'));
   const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
