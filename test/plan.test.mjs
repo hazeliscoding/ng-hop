@@ -1110,10 +1110,12 @@ test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a m
     'apps/web/.npmrc': 'save-exact=true\n',
     'user.npmrc': 'registry=http://127.0.0.1:9/\n',
   } });
-  // The plan asks pnpm for its minimum release age, and this one has none, so no real pnpm runs.
+  // The plan asks pnpm for its minimum release age, and this one has none, so no real pnpm runs. It asks from a folder
+  // in the home folder, so the plan gets one of its own.
   const pnpm = fakeManager('pnpm', { '--version': '10.33.0' });
+  const home = app({}).dir;
   try {
-    const r = await runScript(PLAN, ['--project', w.dir, '--to', '21', '--json'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file } });
+    const r = await runScript(PLAN, ['--project', w.dir, '--to', '21', '--json'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file, HOME: home, USERPROFILE: home } });
     blockedOnUiCore({ ...r, plan: r.stdout ? JSON.parse(r.stdout) : null });
   } finally {
     await Promise.all([mirror.close(), company.close()]);
@@ -1720,6 +1722,21 @@ test('nothing from a yarn repo runs: its yarnPath and plugins stay unloaded, and
   assert.deepEqual(ran(unpinned.dir), []);
 });
 
+test('the plan asks from a folder in the home folder, since any account can leave settings in a shared temporary folder above it', async () => {
+  // yarn 4.18.1 loaded the plugins of a .yarnrc.yml in any folder up from where it ran, YARN_IGNORE_PATH or not, and
+  // pnpm 10 and 11 a .pnpmfile.cjs beside any pnpm-workspace.yaml there. On Linux the temporary folder is /tmp, where
+  // every account can write. The stand-in loads them the same way, as the control shows.
+  const sharedTmp = () => join(app({ files: { 'tmp/.yarnrc.yml': 'plugins:\n  - path: ./plugin.cjs\n', 'tmp/plugin.cjs': MARKER, 'tmp/below/.keep': '' } }).dir, 'tmp');
+  const control = sharedTmp();
+  const stand = fakeManager('yarn', { '--version': '4.18.1' });
+  try { spawnSync(process.execPath, [stand.file, '--version'], { cwd: join(control, 'below') }); } finally { stand.remove(); }
+  assert.deepEqual(ran(control), ['plugin.cjs.ran'], 'the control: below that folder, the stand-in loads its plugin');
+  const tmp = sharedTmp();
+  const r = await plan(world(), yarn21(), { to: 22, manager: { '--version': '4.18.1' }, env: { TMPDIR: tmp, TEMP: tmp, TMP: tmp } });
+  assert.deepEqual([r.asked.map((a) => a.args), ran(tmp), r.plan.releaseAge?.minutes], [['--version'], [], 1440]);
+  assert.ok(!inside(r.asked[0].cwd, tmp), `asked from ${r.asked[0].cwd}`);
+});
+
 test('a relative PATH entry into the project never runs the pnpm it holds', async () => {
   // A relative PATH entry is looked up from the folder a command starts in, so from the project, bin/pnpm here would be
   // the project's own code, as the control shows. Without npm_execpath or COREPACK_ROOT, PATH is where pnpm is found.
@@ -1748,15 +1765,16 @@ test('a pnpm or yarn inside the repo isn\'t run, wherever the plan finds it', as
   assert.equal((await ageOf(pnpm21({}), { manager: pnpm12 })).minutes, 1440, 'the control: one outside it answers');
 });
 
-test('with the temporary folder inside the project or its repo, the plan asks nothing, and says why release age went unchecked', async () => {
-  // From a folder in the repo, pnpm or yarn would read the repo's settings and run what they name.
-  const proj = pnpm21({}, { files: { 'tmp/.keep': '' } });
-  const tmp = { TMPDIR: join(proj.dir, 'tmp'), TEMP: join(proj.dir, 'tmp'), TMP: join(proj.dir, 'tmp') };
-  const r = await plan(world(), proj, { to: 22, manager: pnpm12, env: tmp });
+test('with the home folder inside the project or its repo, the plan asks nothing, and says why release age went unchecked', async () => {
+  // The plan asks from a folder it makes in the home folder, and from a folder in the repo pnpm or yarn would read the
+  // repo's settings and run what they name.
+  const proj = pnpm21({}, { files: { 'home/.keep': '' } });
+  const home = join(proj.dir, 'home');
+  const r = await plan(world(), proj, { to: 22, manager: pnpm12, env: { HOME: home, USERPROFILE: home } });
   assert.deepEqual(r.asked, []);
-  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm wasn't asked for its version, which its minimum release age depends on, since the temporary folder, ${tmp.TMP}, is inside the app's folder, where pnpm would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with TMPDIR, or TEMP on Windows, outside the repo, or with pnpm's version in package.json's packageManager`);
-  const repo = webApp({ '.git/HEAD': 'ref: refs/heads/main\n', 'tmp/.keep': '' });
-  const inRepo = await plan(world(), repo, { to: 22, manager: pnpm12, env: { TMPDIR: join(repo.root, 'tmp'), TEMP: join(repo.root, 'tmp'), TMP: join(repo.root, 'tmp') } });
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm wasn't asked for its version, which its minimum release age depends on, since the home folder, ${home}, is inside the app's folder, where pnpm would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, outside the repo, or with pnpm's version in package.json's packageManager`);
+  const repo = webApp({ '.git/HEAD': 'ref: refs/heads/main\n', 'home/.keep': '' });
+  const inRepo = await plan(world(), repo, { to: 22, manager: pnpm12, env: { HOME: join(repo.root, 'home'), USERPROFILE: join(repo.root, 'home') } });
   assert.deepEqual(inRepo.asked, []);
   assert.match(inRepo.plan.unchecked.find((u) => u.name === 'release age')?.reason, /is inside the app's git repository, /);
   assert.deepEqual((await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 })).asked.length, 1, 'the control: with the usual one, it asks');

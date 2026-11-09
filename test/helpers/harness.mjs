@@ -154,8 +154,9 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
 // A stand-in for pnpm or yarn, which the plan asks for an unpinned version through npm_execpath, the first place
 // managerCommand looks. answers maps the arguments to what it prints, or to { stderr } for what it prints as it fails;
 // anything else, or null, exits 1. Each question is logged with the folder it ran in, and the pnpm_config_pm_on_fail,
-// Corepack and YARN_IGNORE_PATH settings it ran under. Like yarn 4.18.1, the yarn one loads the plugins and, without
-// YARN_IGNORE_PATH, the yarnPath that a .yarnrc.yml in that folder names, so running it in a repo runs the repo's code.
+// Corepack and YARN_IGNORE_PATH settings it ran under. Like yarn 4.18.1, the yarn one reads the .yarnrc.yml in every
+// folder up from where it runs, loading the plugins each names and, without YARN_IGNORE_PATH, the nearest yarnPath, so
+// running it in a repo, or below a folder someone else can write to, runs their code.
 export function fakeManager(name, answers) {
   const dir = mkdtempSync(join(tmpdir(), 'ng-hop-pm-'));
   const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
@@ -163,11 +164,16 @@ export function fakeManager(name, answers) {
 const args = process.argv.slice(2).join(' ');
 const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE];
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack, ignorePath: process.env.YARN_IGNORE_PATH ?? null }) + '\\n');
-const rc = path.join(process.cwd(), '.yarnrc.yml');
-if (${JSON.stringify(name)} === 'yarn' && fs.existsSync(rc)) {
-  for (const [, key, file] of fs.readFileSync(rc, 'utf8').matchAll(/^(yarnPath:|\\s*- path:)\\s*(\\S+)/gm)) {
-    if (key !== 'yarnPath:' || !process.env.YARN_IGNORE_PATH) require(path.resolve(process.cwd(), file));
+if (${JSON.stringify(name)} === 'yarn') {
+  let yarnPath = null;
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    const rc = path.join(dir, '.yarnrc.yml');
+    for (const [, key, file] of fs.existsSync(rc) ? fs.readFileSync(rc, 'utf8').matchAll(/^(yarnPath:|\\s*- path:)\\s*(\\S+)/gm) : []) {
+      if (key === 'yarnPath:') yarnPath ??= path.resolve(dir, file); else require(path.resolve(dir, file));
+    }
+    if (path.dirname(dir) === dir) break;
   }
+  if (yarnPath && !process.env.YARN_IGNORE_PATH) require(yarnPath);
 }
 const answer = ${JSON.stringify(answers)}[args];
 if (answer == null) process.exit(1);

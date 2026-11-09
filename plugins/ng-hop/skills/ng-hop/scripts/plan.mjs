@@ -7,7 +7,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -623,14 +623,16 @@ function pinnedVersion(project, pm) {
 
 // Only a pnpm or yarn nothing pins is asked, and only its version, from a new empty folder outside the repo: run from
 // the app, pnpm 12.16.1's --version wrote into a pinned project's lockfile, and yarn 4.18.1's ran the repo's yarnPath.
-// A temporary folder inside the repo, or a manager found there, would bring that back, so neither is used.
+// A folder inside the repo, or a manager found there, would bring that back, so neither is used. The folder is made in
+// the home folder, since both read settings from every folder above where they run, yarn 4.18.1 loading a plugin from
+// any of them and pnpm 10 and 11 a .pnpmfile.cjs, and every account can write to Linux's shared /tmp.
 async function askVersion(project, pm) {
   const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
   const homes = [[project.dir, 'folder'], [project.pnpmRoot, 'pnpm workspace'], [gitRoot(project.dir), 'git repository']].filter(([dir]) => dir);
   const within = (path) => homes.find(([dir]) => inside(real(path), real(dir)))?.[1];
-  const tmp = tmpdir();
-  const tmpIn = within(tmp);
-  if (tmpIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the temporary folder, ${tmp}, is inside the app's ${tmpIn}, where ${pm} would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with TMPDIR, or TEMP on Windows, outside the repo, or with ${pm}'s version in package.json's packageManager` };
+  const home = homedir();
+  const homeIn = within(home);
+  if (homeIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the home folder, ${home}, is inside the app's ${homeIn}, where ${pm} would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, outside the repo, or with ${pm}'s version in package.json's packageManager` };
   const failed = (why, todo) => ({ unknown: `${pm} couldn't be asked for its version (${why}), which its minimum release age depends on, so a release younger than that can still stop a command; ${todo}` });
   // Corepack stays offline, as update.mjs keeps it, so a manager it hasn't fetched goes unasked, and yarn passes over
   // any yarnPath. A name has no case on Windows, where Node passes on only the first spelling in sort order, so the
@@ -640,7 +642,7 @@ async function askVersion(project, pm) {
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !owned.has(key.toLowerCase()))), ...controls };
   let dir;
   try {
-    dir = mkdtempSync(join(tmp, 'ng-hop-'));
+    dir = mkdtempSync(join(home, '.ng-hop-'));
     const { file, prefix } = managerCommand(dir, pm);
     const found = prefix[0] ?? file;
     const foundIn = within(found);
