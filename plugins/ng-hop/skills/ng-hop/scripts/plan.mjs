@@ -1105,10 +1105,11 @@ async function buildPlan({ projectDir, to, next = false }) {
   // A release the registry gives no publish time, which a private registry can do: npm 11.19.0, bun 1.4.2, yarn 4.10.1
   // and ng update 22.2.6 count it old enough, while yarn 4.11.0 to 4.18.1 hold it back however old it is, their gate
   // asking typeof time > "u", and so do pnpm 10.34.9 and 11.0.0, which keep only releases with a time before their cutoff.
+  // A time of null, "", 0 or false is none to pnpm, which held each back, while yarn 4.18.1 took each.
   // shortcut: a release whose time doesn't parse, which npm and pnpm hold back, and every release of a package with no
   // times at all, of which yarn 4.10.1 found none, count as old enough; follow them if a registry ever sends either.
   const holdsUndated = age?.manager === 'yarn' ? semver.gte(age.version, '4.11.0') : age?.manager === 'pnpm' && !dropsTimes;
-  const undated = (doc, v) => Boolean(doc?.versions?.[v]) && doc.time?.[v] === undefined;
+  const undated = (doc, v) => Boolean(doc?.versions?.[v]) && (age?.manager === 'yarn' ? doc.time?.[v] === undefined : !doc.time?.[v]);
   const checked = new WeakMap();
   const checksNone = (doc) => dropsTimes && Boolean(doc) && (checked.get(doc) ?? checked.set(doc, Object.keys(doc.versions).some((v) => !doc.time?.[v])).get(doc));
   // Younger than the age by its publish time, as ng update reads it too.

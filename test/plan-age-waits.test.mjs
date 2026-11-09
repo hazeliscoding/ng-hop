@@ -214,6 +214,15 @@ test('yarn from 4.11 and pnpm 10 hold back a release the registry gives no publi
   // The control: yarn 4.10.1's gate read new Date(undefined), whose time is NaN, so it took the release.
   const old = await plan(world(undated()), yarnApp(undefined, gate), { to: 22, manager: { '--version': '4.10.1' } });
   assert.deepEqual([old.code, libIn(old, 22, 'ui-lib')?.to], [0, '22.0.0'], old.stderr);
+  // pnpm 10.34.9 and 11.0.0 held back a release whose time was null, "", 0 or false too, keeping only one whose time is
+  // set and before the cutoff, while yarn 4.18.1 took each of those, its gate asking only whether the time is undefined.
+  const timed = (time) => { const lib = undated(); lib.time['22.0.0'] = time; return world(lib); };
+  for (const time of [null, 0]) {
+    const pnpm = await plan(timed(time), pnpm21({ 'ui-lib': '^21.0.0' }, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1440\n' } }), { to: 22, manager: { '--version': '10.34.9' } });
+    assert.deepEqual([pnpm.code, pnpm.plan.blockers.map((b) => [b.name, b.version, b.noPublishTime])], [2, [['ui-lib', '22.0.0', true]]], `${time}: ${pnpm.stderr}`);
+  }
+  const yarn = await plan(timed(null), yarnApp(), { to: 22, manager: yarn18 });
+  assert.deepEqual([yarn.code, libIn(yarn, 22, 'ui-lib')?.to], [0, '22.0.0'], `the control: yarn takes it, ${yarn.stderr}`);
 });
 
 test('yarn takes a release it can date over one with no publish time, waits for a dated one first, and the command never leaves ng update the undated one', async () => {
