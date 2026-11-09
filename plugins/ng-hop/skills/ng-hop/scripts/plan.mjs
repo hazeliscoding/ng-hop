@@ -462,14 +462,14 @@ const pnpmConfigDir = () => (process.env.XDG_CONFIG_HOME ? join(process.env.XDG_
   : process.platform === 'win32' && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'pnpm', 'config')
   : join(homedir(), '.config', 'pnpm'));
 
-// pnpm's minimum-release-age for the app, the first source that sets it winning, as pnpm 12.16.1 and 11.28.11 found it
-// offline: pnpm_config_minimum_release_age, the nearest pnpm-workspace.yaml if it applies to the app, then pnpm's
-// config.yaml.
+// pnpm's minimum-release-age for the app, the first source that sets it winning, as found offline. pnpm 12.16.1 and
+// 11.28.11: pnpm_config_minimum_release_age, the nearest pnpm-workspace.yaml if it applies to the app, then pnpm's
+// config.yaml. pnpm 10.34.9: the nearest pnpm-workspace.yaml whatever its packages, then npm_config_ and .npmrc.
 // shortcut: pnpm 11 also read an empty or fractional pnpm_config_ value, and a null in a file, which 12 passes over;
-// pnpm_config_workspace_dir moved the workspace 11 and 12 read; and pnpm 10 and older are read as 11 is. Follow those
-// if a team sets the age that way.
-function pnpmAge(project, version) {
-  const v12 = semver.gte(version, '12.0.0');
+// pnpm_config_workspace_dir moved the workspace 11 and 12 read; and pnpm before 10.16 holds nothing back by this
+// setting at install, though ng update reads what it prints. Follow those if a team sets the age that way.
+function pnpmAge(project, version, config) {
+  const v11 = semver.gte(version, '11.0.0'), v12 = semver.gte(version, '12.0.0');
   // A file's value, or why it can't be read. 12.16.1 read 60, "60", +60 and 0x3C as 60, passed over an empty value or
   // null, and failed on every command over 060, -5, 60.5, 1e3, 1d or a number past 2^64; 11.28.11 and 10.34.9 printed
   // those as they were, for ng update to parse with parseInt. All three failed over a key set twice.
@@ -484,24 +484,33 @@ function pnpmAge(project, version) {
   };
   const inYaml = (file) => read(file, 'minimumReleaseAge', yamlValues(readText(file), 'minimumReleaseAge'));
   const workspace = upFrom(project.dir).map((dir) => join(dir, 'pnpm-workspace.yaml')).find(existsSync);
-  const files = [workspace && inYaml(workspace), inYaml(join(pnpmConfigDir(), 'config.yaml'))];
+  const files = [workspace && inYaml(workspace), v11 && inYaml(join(pnpmConfigDir(), 'config.yaml'))];
   // pnpm parses both files whatever sets the age, and 12.16.1 did even with the workspace's packages leaving the app out.
   const refused = files.find((found) => found?.refused);
   if (refused) return { manager: 'pnpm', unknown: refused.refused };
 
   // 12.16.1 read the name in any case and the value trimmed, and passed over one that is no whole number.
-  const name = envNamed(/^pnpm_config_minimum_release_age$/i);
+  const name = v11 && envNamed(/^pnpm_config_minimum_release_age$/i);
   let found = /^(?:0|[1-9]\d*)$/.test(name ? process.env[name].trim() : '') ? { value: process.env[name].trim(), from: name } : null;
   if (!found && files[0]) {
     // pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and look no
-    // further up.
+    // further up; pnpm 10.34.9 applied the nearest whatever its packages.
     const rel = relative(dirname(workspace), project.dir).split(sep).join('/');
-    const patterns = rel ? yamlList(readText(workspace), 'packages') : null;
-    const covers = !rel || (patterns === undefined ? 'a packages list the plan can\'t read' : takesIn(patterns ?? [], rel));
+    const patterns = rel && v11 ? yamlList(readText(workspace), 'packages') : null;
+    const covers = !rel || !v11 || (patterns === undefined ? 'a packages list the plan can\'t read' : takesIn(patterns ?? [], rel));
     if (typeof covers === 'string') return { manager: 'pnpm', unknown: `${workspace} sets minimumReleaseAge, but whether it covers this app turns on ${covers}, so a release younger than that age can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
     if (covers) found = files[0];
   }
-  found ??= files[1];
+  // pnpm 10.34.9 read minimum-release-age from npm_config_ and .npmrc as npm does, so the plan's npm listing holds it.
+  // shortcut: pnpm 10's own global rc goes unread, and npm's global npmrc counts though pnpm skips it; read pnpm's rc
+  // if a team on pnpm 10 sets the age there.
+  const npmrc = () => {
+    if (config['minimum-release-age'] == null) return null;
+    const from = envNamed(/^npm_config_minimum_release_age$/i) ?? [join(project.dir, '.npmrc'), project.pnpmRoot && join(project.pnpmRoot, '.npmrc'), config.userconfig]
+      .find((file) => file && /^\s*minimum-release-age\s*=/m.test(readText(file) ?? '')) ?? 'npm config';
+    return read(from, 'minimum-release-age', [String(config['minimum-release-age']).trim()]);
+  };
+  found ??= v11 ? files[1] : npmrc();
   if (found?.unclear) return { manager: 'pnpm', unknown: found.unclear };
   const minutes = found ? Number(found.value) : semver.gte(version, semver.coerce(AGE_DEFAULT_FROM.pnpm)) ? 1440 : 0;
   return minutes > 0 ? { manager: 'pnpm', version, setting: 'minimum-release-age', minutes, ...(found ? {} : { default: true }), ngUpdateReads: true, from: found?.from ?? 'default' } : null;
@@ -646,7 +655,7 @@ async function releaseAge(project, config) {
   if (pm !== 'pnpm' && pm !== 'yarn') return null;
   const found = pinnedVersion(project, pm) ?? await askVersion(project, pm);
   if (found.unknown) return { manager: pm, unknown: found.unknown };
-  return pm === 'pnpm' ? pnpmAge(project, found.version) : yarnAge(project, found.version);
+  return pm === 'pnpm' ? pnpmAge(project, found.version, config) : yarnAge(project, found.version);
 }
 
 // ---- Judging one release against one Angular major ------------------------------------------------------------

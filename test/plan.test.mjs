@@ -1926,6 +1926,22 @@ test('yarn fills a setting from the environment, reads the rc file YARN_RC_FILEN
   assert.equal((await ageOf(rc('npmMinimalAgeGate: 10\nnpmMinimalAgeGate: 20\n'), yarn))?.minutes, 20);
 });
 
+test('pnpm 10 applies the nearest pnpm-workspace.yaml whatever its packages, then .npmrc and npm_config_, and holds nothing back by default', async () => {
+  // pnpm 10.34.9, offline: the nearest yaml applied though its packages left the app out, and beat
+  // npm_config_minimum_release_age and .npmrc, which it read as npm does; no pnpm_config_ variable or config.yaml counted.
+  const pnpm10 = { manager: { '--version': '10.34.9' } };
+  const parent = webApp({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\npackages:\n  - other/*\n' });
+  assert.equal((await ageOf(parent, pnpm10))?.minutes, 60);
+  const rc = pnpm21({}, { files: { '.npmrc': 'minimum-release-age=40\n' } });
+  assert.deepEqual(await ageOf(rc, pnpm10), { manager: 'pnpm', version: '10.34.9', setting: 'minimum-release-age', minutes: 40, ngUpdateReads: true, from: join(rc.dir, '.npmrc') });
+  assert.equal((await ageOf(pnpm21({}, { files: { '.npmrc': 'minimum-release-age=40\n', 'pnpm-workspace.yaml': 'minimumReleaseAge: 10\n' } }), pnpm10))?.minutes, 10);
+  assert.deepEqual(await ageOf(pnpm21({}), { ...pnpm10, env: { npm_config_minimum_release_age: '50' } }).then((a) => [a?.minutes, a?.from]), [50, 'npm_config_minimum_release_age']);
+  assert.equal(await ageOf(pnpm21({}), { ...pnpm10, env: { pnpm_config_minimum_release_age: '20', ...xdgWith('minimumReleaseAge: 31\n') } }), null);
+  // pnpm 10.34.9 printed 1d as it was, and ng update parses that with parseInt, so the plan can't say what holds.
+  const day = pnpm21({}, { files: { '.npmrc': 'minimum-release-age=1d\n' } });
+  assert.equal(await ageOf(day, pnpm10), `${join(day.dir, '.npmrc')} sets minimum-release-age to "1d", which is no whole number of minutes, and the plan can't tell what pnpm 10.34.9 holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
+});
+
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
   const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
