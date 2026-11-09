@@ -32,7 +32,7 @@ Run `git status --short`. Commits are the safety net for this whole process, so 
 node $SCRIPTS/plan.mjs --to <major>     # omit --to for the latest Angular
 ```
 
-It reads `package.json`, the lockfile and npm, asks pnpm or yarn for its minimum release age, and changes nothing. Exit 0 means the target is reachable or there's nothing to do, 2 means blocked before the target, 1 means no plan could be made. On exit 1, report the error and stop: a version guessed from memory or from the numbers is how upgrades go wrong, because library versions often don't match Angular's (`@clr/angular` 18.5.0 supports Angular 22) and an old release can claim to support a major it predates.
+It reads `package.json`, the lockfile and npm, and the package manager's minimum release age from its settings files and the environment. It runs nothing from the repo and changes nothing. Exit 0 means the target is reachable or there's nothing to do, 2 means blocked before the target, 1 means no plan could be made. On exit 1, report the error and stop: a version guessed from memory or from the numbers is how upgrades go wrong, because library versions often don't match Angular's (`@clr/angular` 18.5.0 supports Angular 22) and an old release can claim to support a major it predates.
 
 Show the person the result in a few lines: where they can get to, what blocks anything further, and which libraries are unconfirmed.
 
@@ -50,7 +50,7 @@ Before changing anything, if you're on the default branch, create `upgrade/angul
 
 ## 3. Record the starting point
 
-Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. If the plan listed `release age` under `Could not check`, plan again now: the install fetches the pnpm or yarn the project pins, and a major the plan called reachable can be waiting on a young release. Then record, before changing anything:
+Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. If the plan listed `release age` under `Could not check`, plan again now: the install can fetch the pnpm or yarn whose version the plan couldn't learn, and a major the plan called reachable can be waiting on a young release. Then record, before changing anything:
 
 ```sh
 npx --no-install ng build
