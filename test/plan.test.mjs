@@ -1871,6 +1871,16 @@ test('pnpm 11 and 12 take the age from pnpm_config_minimum_release_age, then the
   assert.deepEqual(await ageOf(p, { manager: pnpm12 }), { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 10, ngUpdateReads: true, from: join(p.dir, 'pnpm-workspace.yaml') });
 });
 
+test('on Windows, with no XDG_CONFIG_HOME, pnpm 11 and 12 read their config.yaml from LOCALAPPDATA', { skip: process.platform !== 'win32' && 'pnpm keeps it in LOCALAPPDATA on Windows only' }, async () => {
+  // pnpm 12.16.1 and 11.28.11, offline, read 31 from %LOCALAPPDATA%\pnpm\config\config.yaml. The plan's own tests set
+  // XDG_CONFIG_HOME, which comes first, so this is the only one that reads the place pnpm uses by default.
+  const local = app({ files: { 'pnpm/config/config.yaml': 'minimumReleaseAge: 31\n' } }).dir;
+  for (const version of ['12.16.1', '11.28.11']) {
+    const age = await ageOf(pnpm21({}), { manager: { '--version': version }, env: { XDG_CONFIG_HOME: undefined, LOCALAPPDATA: local } });
+    assert.deepEqual([age?.minutes, age?.from], [31, join(local, 'pnpm', 'config', 'config.yaml')], version);
+  }
+});
+
 test('pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and never look past the nearest', async () => {
   // pnpm 12.16.1 and 11.28.11, the app at apps/web: a yaml above it with packages [apps/*], ["**"], [apps/**] or
   // [./apps/*/] applied, and none with no packages, [other/*], or [apps/*, !apps/web]. The app's own yaml beat its
