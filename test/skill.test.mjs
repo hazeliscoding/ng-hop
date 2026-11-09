@@ -226,6 +226,11 @@ test('a major waiting on young releases is a question for the person, never a co
   const line = skill.split('\n').find((l) => l.includes('waiting until'));
   assert.ok(line, 'SKILL.md has to answer the line plan.mjs prints');
   for (const word of [/\bwait\b/, /exempt/, /approv/, /Sooner/, /No sooner way/]) assert.match(line, word);
+  // A release the registry gives no publish time has no time to wait for, which yarn from 4.11 and pnpm 10 hold back.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /waiting on a publish time from the registry/, 'positive control: the plan prints it');
+  assert.match(line, /`waiting on a publish time from the registry`/);
+  assert.match(skillStep(5), /`waiting on a publish time from the registry`/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /`waiting on a publish time from the registry`/);
 });
 
 test('the release-age section gives each manager\'s own error, since that is what the next agent searches for', () => {
