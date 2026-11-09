@@ -1102,8 +1102,16 @@ async function buildPlan({ projectDir, to, next = false }) {
   // bun and ng update do; follow them if a registry ever sends one.
   const holdsUndated = age?.manager === 'yarn' ? semver.gte(age.version, '4.11.0') : age?.manager === 'pnpm' && semver.lt(age.version, '11.0.0');
   const undated = (doc, v) => Boolean(doc?.versions?.[v]) && doc.time?.[v] === undefined;
+  // pnpm 11.28.11 drops a package's times when any release lacks one, and 11.28.11, 12.4.2 and 12.16.1 then check none of
+  // its releases against the age, and pnpm view prints them no times, so ng update skips none either. Each document is
+  // looked through once, since a registry can list thousands of releases.
+  // shortcut: with minimumReleaseAgeIgnoreMissingTime false, which the plan doesn't read, they fail on such a package
+  // instead, with ERR_PNPM_MISSING_TIME; read it if a team sets it.
+  const dropsTimes = age?.manager === 'pnpm' && semver.gte(age.version, '11.0.0');
+  const checked = new WeakMap();
+  const checksNone = (doc) => dropsTimes && Boolean(doc) && (checked.get(doc) ?? checked.set(doc, Object.keys(doc.versions).some((v) => !doc.time?.[v])).get(doc));
   // Younger than the age by its publish time, as ng update reads it too.
-  const tooRecent = (doc, v) => { const at = Date.parse(doc?.time?.[v] ?? ''); return Boolean(age) && !Number.isNaN(at) && (age.before ? at > Date.parse(age.before) : now - at < age.minutes * 60e3); };
+  const tooRecent = (doc, v) => { const at = Date.parse(doc?.time?.[v] ?? ''); return Boolean(age) && !Number.isNaN(at) && !checksNone(doc) && (age.before ? at > Date.parse(age.before) : now - at < age.minutes * 60e3); };
   // A release the age holds back isn't out yet.
   const young = (doc, v) => tooRecent(doc, v) || (holdsUndated && undated(doc, v));
   // When a held release is old enough: null under npm's before, which only moving it changes, and for one with no

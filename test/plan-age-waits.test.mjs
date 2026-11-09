@@ -244,13 +244,26 @@ test('with no publish time, tooling that follows Angular\'s major, a patch and A
   assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
 });
 
-test('a release with no publish time counts as old enough, as ng update and pnpm count it', async () => {
-  // pnpm 12.16.1 under minimumReleaseAgeStrict installed a release the registry gave no time for.
-  const lib = (time) => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0', ...time } });
-  const r = await plan(world(lib({})), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
-  assert.equal(libIn(r, 22, 'ui-lib').to, '22.0.0');
-  const dated = await plan(world(lib({ ago: 10 })), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
-  assert.equal(dated.code, 2, 'the control: the same release dated ten minutes ago waits');
+test('npm, bun and ng update count a release with no publish time old enough, and pnpm 11 and 12 then check none of its package', async () => {
+  // npm 11.19.0 installed it under before and under min-release-age, as npm-pick-manifest's isBefore passes a release with
+  // no time, bun 1.4.2 under minimumReleaseAge, and ng update 22.2.6's isReleaseAgeSatisfied counts it old enough. pnpm
+  // 11.28.11 drops a package's times when any release lacks one (dropIncompletePublishTimes), and 11.28.11, 12.4.2 and
+  // 12.16.1 then installed its release from 5 minutes before, warning: The metadata of lib is missing the "time" field;
+  // skipping the minimumReleaseAge check for this package. pnpm view printed it no time either, so ng update skips none.
+  const before = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  const bun = app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'bun.lock': '{}', 'bunfig.toml': '[install]\nminimumReleaseAge = 86400\n' } });
+  for (const proj of [npmApp(before), bun]) {
+    const r = await plan(world(undated()), proj, { to: 22 });
+    assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], r.stderr);
+  }
+  // 21.0.0 has no time, and 22.0.0 is ten minutes old.
+  const young = undated({ '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+  for (const version of ['11.28.11', '12.16.1']) {
+    const r = await plan(world(young), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': version } });
+    assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], `${version}: ${r.stderr}`);
+  }
+  const dated = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.equal(dated.code, 2, 'the control: with 21.0.0 dated too, pnpm 12 holds 22.0.0 back');
 });
 
 test('a release younger than pnpm\'s minimum release age makes its major wait, with when, instead of printing a command ng update refuses', async () => {
@@ -399,6 +412,8 @@ test('on a --next hop, a CLI prerelease younger than the age makes the major wai
   // A CLI can come out hours after core: 22.1.0 did, three hours later.
   const packages = nextWorld('23.0.0-rc.1');
   const cli = packages.find((p) => p.name === '@angular/cli');
+  // Every release dated, since pnpm 11 and 12 check none of a package with one that isn't.
+  for (const v of Object.keys(cli.versions)) cli.time[v] = '2026-05-28T00:00:00.000Z';
   cli.time['23.0.0-rc.1'] = new Date(Date.now() - 30 * 60e3).toISOString();
   const proj = () => app({ deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '22.2.0', cli: '22.2.0' })) } });
   const r = await plan(packages, proj(), { next: true, manager: pnpm12 });
