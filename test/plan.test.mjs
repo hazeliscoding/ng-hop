@@ -1818,6 +1818,20 @@ test('npm\'s before is a date, so a release after it waits with no time to wait 
   assert.equal(after.code, 0, after.stderr);
 });
 
+test('npm 11.10 to 11.14 turn min-release-age into a before that many days back, which ng update reads, so the wait has a time', async () => {
+  // npm 11.13.0 with min-release-age=1 listed min-release-age as null and before as a day back to the second, and
+  // `npm config get before` printed that date. Here the project's npm-version stands in for that npm.
+  const rc = (minutes) => `npm-version=11.13.0\nbefore=${new Date(Date.now() - minutes * 60e3).toISOString()}\n`;
+  const lib = youngLib();
+  const r = await plan(world(lib), npmApp(rc(1440)), { to: 22 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.releaseAge, { manager: 'npm', setting: 'min-release-age', minutes: 1440, ngUpdateReads: true });
+  assert.equal(r.plan.waiting.until, ripeAt(lib, '22.0.0', 1440));
+  assert.equal(r.plan.waiting.noSooner, 'ng update applies npm\'s min-release-age to every package and reads no exemption list');
+  const set = await plan(world(youngLib()), npmApp(rc(1470)), { to: 22 });
+  assert.equal(set.plan.releaseAge.setting, 'before', 'the control: a before half an hour off a whole day is one someone set');
+});
+
 test('a major out for less than the minimum release age waits as a whole, and Angular itself never goes in first', async () => {
   const [core, compiler] = angular({ 20: '2025-05-28', 21: '2025-11-19' });
   for (const doc of [core, compiler]) youngPatch(doc, '22.0.0', '21.0.0', 120);

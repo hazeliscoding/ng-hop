@@ -400,11 +400,15 @@ function readProject(dir) {
 async function releaseAge(project, config) {
   const pm = project.packageManager;
   if (pm === 'npm') {
-    // ng update reads only `before`. npm's install also applies min-release-age, in days, from npm 11.10, and an older
-    // npm lists that key as a string and applies nothing.
-    if (config.before) return { manager: pm, setting: 'before', before: new Date(config.before).toISOString(), ngUpdateReads: true };
-    const days = config['min-release-age'];
-    return typeof days === 'number' && days > 0 ? { manager: pm, setting: 'min-release-age', minutes: days * 1440, ngUpdateReads: false } : null;
+    // ng update reads only `before`. npm's install also applies min-release-age, in days, from npm 11.10, and npm 10 lists
+    // that key as a string and applies nothing. npm 11.10 to 11.14 turn it into a `before` that many days back as they
+    // load, which ng update reads too, and 11.10 to 11.13 list that in its place.
+    // shortcut: on those npms a `before` someone set a whole number of days back, to the minute, reads as min-release-age.
+    const back = (Date.now() - Date.parse(config.before)) / 864e5;
+    const derived = semver.satisfies(semver.coerce(config['npm-version']) || '0.0.0', '>=11.10.0 <11.15.0') && Math.abs(back - Math.round(back)) * 1440 < 1;
+    const days = typeof config['min-release-age'] === 'number' ? config['min-release-age'] : derived ? Math.round(back) : 0;
+    if (days > 0) return { manager: pm, setting: 'min-release-age', minutes: days * 1440, ngUpdateReads: Boolean(config.before) };
+    return config.before ? { manager: pm, setting: 'before', before: new Date(config.before).toISOString(), ngUpdateReads: true } : null;
   }
   if (pm === 'bun') {
     // ng update asks bun nothing, and bun's install reads minimumReleaseAge, in seconds.
@@ -1056,7 +1060,7 @@ async function buildPlan({ projectDir, to, next = false }) {
       const noSooner = angularHeld.length ? `Angular ${major} itself ${age.before ? 'is newer than npm\'s before' : `is too young until ${minute(angularHeld.map((h) => h.until).sort().at(-1), true)}`}`
         : !ngUpdateSkips ? null
         : migrating ? `${migrating.name} ships migrations, which installing it first would skip`
-        : !['pnpm', 'yarn'].includes(project.packageManager) ? 'ng update applies npm\'s before to every package and reads no exemption list'
+        : !['pnpm', 'yarn'].includes(project.packageManager) ? `ng update applies npm's ${age.setting} to every package and reads no exemption list`
         : null;
       const first = [updateCommand(project), ...held.map((h) => `--install-first ${h.name}`), framework, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
       Object.assign(hop, {
