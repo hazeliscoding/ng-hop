@@ -1930,8 +1930,8 @@ test('no settings file a repo writes can stall the plan, with a long run of spac
 });
 
 test('the version comes from the nearest package.json pin, its packageManager or devEngines, and then nothing is asked', async () => {
-  // Corepack reads packageManager first, a +sha suffix included, then devEngines.packageManager, one entry or a list,
-  // whose range counts here by its lowest version. pnpm holds nothing back by default before pnpm 11.
+  // Corepack reads packageManager, a +sha suffix included, or devEngines.packageManager with an exact version. pnpm holds
+  // nothing back by default before pnpm 11.
   const pinned = (pkg) => app({ files: {
     'package.json': JSON.stringify({ name: 'mono', ...pkg }),
     'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }),
@@ -1939,8 +1939,7 @@ test('the version comes from the nearest package.json pin, its packageManager or
   } });
   const cases = [
     [{ packageManager: 'pnpm@11.2.0+sha512.0123abc' }, '11.2.0'],
-    [{ devEngines: { packageManager: { name: 'pnpm', version: '^11.2.0' } } }, '11.2.0'],
-    [{ devEngines: { packageManager: [{ name: 'yarn', version: '4.18.1' }, { name: 'pnpm', version: '11.2.0' }] } }, '11.2.0'],
+    [{ devEngines: { packageManager: { name: 'pnpm', version: '11.2.0' } } }, '11.2.0'],
   ];
   for (const [pkg, version] of cases) {
     const p = pinned(pkg);
@@ -1955,6 +1954,27 @@ test('the version comes from the nearest package.json pin, its packageManager or
   assert.equal(await ageOf(latest, { manager: pnpm12 }), `${join(latest.dir, 'package.json')} pins "pnpm@latest" in packageManager, which names no pnpm version, so the plan can't tell pnpm's minimum release age, and a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
   const tagged = pinned({ devEngines: { packageManager: { name: 'pnpm', version: 'latest' } } });
   assert.match(await ageOf({ dir: join(tagged.dir, 'apps', 'web') }, { manager: pnpm12 }), /package\.json pins "latest" in devEngines\.packageManager, which names no pnpm version, /);
+});
+
+test('a devEngines range or list only says which version may run, so the person\'s own is asked, and a packageManager above pins first', async () => {
+  // yarn 4.18.1, run without Corepack under devEngines ^4.0.0, printed its default of a day, where the plan read the
+  // range's lowest version, 4.0.0, which holds nothing back. Corepack 0.35.0 wants an exact version, ignores a list, and
+  // walks past a package.json with no packageManager to a parent's: under one pinning pnpm 12.16.1, an app whose
+  // devEngines named 10.34.9 ran 12.16.1.
+  const web = { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' };
+  const yarn = app({ files: { 'package.json': JSON.stringify({ name: 'app', devEngines: { packageManager: { name: 'yarn', version: '^4.0.0' } }, dependencies: web }), 'yarn.lock': '' } });
+  const ranged = await plan(world(), yarn, { to: 22, manager: { '--version': '4.18.1' } });
+  assert.deepEqual([ranged.plan.releaseAge?.version, ranged.plan.releaseAge?.minutes, ranged.asked.map((a) => a.args)], ['4.18.1', 1440, ['--version']]);
+  const mono = (root, own = {}) => {
+    const p = app({ files: { 'package.json': JSON.stringify({ name: 'mono', ...root }), 'apps/web/package.json': JSON.stringify({ name: 'web', ...own, dependencies: web }), 'apps/web/pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })) } });
+    return { dir: join(p.dir, 'apps', 'web') };
+  };
+  for (const packageManager of [{ name: 'pnpm', version: '^11.2.0' }, [{ name: 'yarn', version: '4.18.1' }, { name: 'pnpm', version: '11.2.0' }]]) {
+    const age = await ageOf(mono({ devEngines: { packageManager } }), { manager: pnpm12 });
+    assert.match(age, /package\.json asks for pnpm "\^?11\.2\.0" in devEngines\.packageManager, and the pnpm the plan found is 12\.16\.1, so the plan can't tell pnpm's minimum release age, /, JSON.stringify(packageManager));
+  }
+  const above = await plan(world(), mono({ packageManager: 'pnpm@12.16.1' }, { devEngines: { packageManager: { name: 'pnpm', version: '10.34.9' } } }), { to: 22, manager: pnpm12 });
+  assert.deepEqual([above.plan.releaseAge?.version, above.asked], ['12.16.1', []]);
 });
 
 test('a devEngines pin for pnpm or yarn doesn\'t stop npm from reading the registry settings, wherever it sits', async () => {

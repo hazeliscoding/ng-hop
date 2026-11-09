@@ -610,11 +610,14 @@ function yarnAge(project, version) {
   return minutes > 0 ? { manager: 'yarn', version, setting: 'npmMinimalAgeGate', minutes, ...(found ? {} : { default: true }), ngUpdateReads: /^\d+$/.test(String(minutes)), from: found?.from ?? 'default' } : null;
 }
 
+const ageUnread = (pm, why) => ({ unknown: `${why}, so the plan can't tell ${pm}'s minimum release age, and a release younger than that can still stop a command; ask the person to check it with ${pm === 'pnpm' ? 'pnpm config get minimum-release-age' : 'yarn config get npmMinimalAgeGate'}` });
+
 // The pnpm or yarn a command in the app runs: the release yarnPath names, which yarn hands over to unless ignorePath is
-// set, then the nearest package.json that pins the manager, by packageManager with any +sha suffix, or by
-// devEngines.packageManager, one entry or a list, whose range counts by its lowest version. null: nothing pins it.
+// set, then the nearest package.json whose packageManager pins the manager, with any +sha suffix, and only then the
+// nearest devEngines.packageManager, as Corepack 0.35.0 walks past a package.json with no packageManager to a parent's.
+// An exact version there pins it. A range, or a list, which Corepack ignores, only says which versions may run, so it
+// comes back as { range, from } for the person's own to be asked. null: nothing pins it.
 function pinnedVersion(project, pm) {
-  const unread = (why) => ({ unknown: `${why}, so the plan can't tell ${pm}'s minimum release age, and a release younger than that can still stop a command; ask the person to check it with ${pm === 'pnpm' ? 'pnpm config get minimum-release-age' : 'yarn config get npmMinimalAgeGate'}` });
   if (pm === 'yarn') {
     const path = yarnSetting(project.dir, 'yarnPath');
     if (path && !/^(?:true|1)$/.test(yarnSetting(project.dir, 'ignorePath')?.value ?? '')) {
@@ -623,19 +626,18 @@ function pinnedVersion(project, pm) {
       return version ? { version } : { unknown: `${path.from} sets yarnPath to "${plainLine(path.value, 60)}", whose name holds no version, and the plan doesn't run the repo's yarn to ask, so a release younger than yarn's minimum release age can still stop a command; ask the person to check it with yarn config get npmMinimalAgeGate` };
     }
   }
-  for (const dir of upFrom(project.dir)) {
-    const file = join(dir, 'package.json');
-    let pkg;
-    try { pkg = JSON.parse(readFileSync(file, 'utf8')); } catch { continue; }
-    if (typeof pkg?.packageManager === 'string' && pkg.packageManager.startsWith(`${pm}@`)) {
-      const version = semver.valid(pkg.packageManager.slice(pm.length + 1).split('+')[0]);
-      return version ? { version } : unread(`${file} pins "${plainLine(pkg.packageManager, 60)}" in packageManager, which names no ${pm} version`);
-    }
-    const engine = [].concat(pkg?.devEngines?.packageManager ?? []).find((entry) => entry?.name === pm && entry.version);
-    if (engine) {
-      const version = semver.validRange(engine.version) && semver.minVersion(engine.version)?.version;
-      return version ? { version } : unread(`${file} pins "${plainLine(String(engine.version), 60)}" in devEngines.packageManager, which names no ${pm} version`);
-    }
+  const manifests = upFrom(project.dir).map((dir) => join(dir, 'package.json')).flatMap((file) => { try { return [[file, JSON.parse(readFileSync(file, 'utf8'))]]; } catch { return []; } });
+  for (const [file, pkg] of manifests) {
+    if (typeof pkg?.packageManager !== 'string' || !pkg.packageManager.startsWith(`${pm}@`)) continue;
+    const version = semver.valid(pkg.packageManager.slice(pm.length + 1).split('+')[0]);
+    return version ? { version } : ageUnread(pm, `${file} pins "${plainLine(pkg.packageManager, 60)}" in packageManager, which names no ${pm} version`);
+  }
+  for (const [file, pkg] of manifests) {
+    const engines = pkg?.devEngines?.packageManager;
+    const engine = [].concat(engines ?? []).find((entry) => entry?.name === pm && entry.version);
+    if (!engine) continue;
+    if (!semver.validRange(engine.version)) return ageUnread(pm, `${file} pins "${plainLine(String(engine.version), 60)}" in devEngines.packageManager, which names no ${pm} version`);
+    return semver.valid(engine.version) && !Array.isArray(engines) ? { version: semver.valid(engine.version) } : { range: engine.version, from: file };
   }
   return null;
 }
@@ -727,7 +729,12 @@ async function releaseAge(project, config) {
     return seconds > 0 ? { manager: pm, setting: 'minimumReleaseAge', minutes: seconds / 60, ngUpdateReads: false } : null;
   }
   if (pm !== 'pnpm' && pm !== 'yarn') return null;
-  const found = pinnedVersion(project, pm) ?? await askVersion(project, pm);
+  const pinned = pinnedVersion(project, pm);
+  const asked = !pinned || pinned.range ? await askVersion(project, pm) : pinned;
+  // Under a devEngines range the person's own manager runs only if the range takes it in.
+  const found = pinned?.range && asked.version && !semver.satisfies(asked.version, pinned.range)
+    ? ageUnread(pm, `${pinned.from} asks for ${pm} "${plainLine(pinned.range, 60)}" in devEngines.packageManager, and the ${pm} the plan found is ${asked.version}`)
+    : asked;
   if (found.unknown) return { manager: pm, unknown: found.unknown };
   return pm === 'pnpm' ? pnpmAge(project, found.version, config) : yarnAge(project, found.version);
 }
