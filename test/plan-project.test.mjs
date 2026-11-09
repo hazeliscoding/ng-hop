@@ -235,6 +235,18 @@ test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and old
   }
 });
 
+test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm reads only the workspace root\'s', async () => {
+  // In apps/web, pnpm 11.0.0, 11.28.11 and 12.16.1 read the registry the root's .npmrc named and passed over the app's
+  // own, which pnpm 10.34.9 read over the root's. So the plan asks the registry pnpm asks for the team's scope.
+  for (const version of ['11.0.0', '12.16.1']) {
+    const hits = [];
+    const r = await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': version }, registryOptions: { hits } });
+    assert.equal(r.code, 0, `${version}: ${r.stderr}`);
+    assert.ok(hits.includes('@acme/ui-core'), `${version} asks the root's registry: ${hits.join(', ')}`);
+  }
+  blockedOnUiCore(await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': '10.34.9' } }));
+});
+
 test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a mirror set at the root stays', async () => {
   // npm's listing for the app's folder holds every default, the registry included, so laying all of it over the root's
   // would undo the root's mirror. The user config makes that default a registry nothing answers on.

@@ -91,7 +91,8 @@ async function runNpm(npm, args, options) {
 
 // ---- Registry access ------------------------------------------------------------------------------------------
 
-// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then the app's own folder. npm: its script.
+// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then on pnpm 10 the app's own folder.
+// npm: its script.
 function registryClient(config, dirs, npm) {
   const cache = new Map();
   const baseFor = (name) => {
@@ -101,8 +102,8 @@ function registryClient(config, dirs, npm) {
   };
 
   // npm holds any private-registry credentials, so an auth failure on the direct path falls back to it, told the registry
-  // the plan chose. npm reads one folder's .npmrc, and a pnpm workspace's token can be in the root's or the app's, so an
-  // auth failure in one folder tries the next. --workspaces=false keeps npm in the folder it's given.
+  // the plan chose. npm reads one folder's .npmrc, and a pnpm 10 workspace's token can be in the root's or the app's, so
+  // an auth failure in one folder tries the next. --workspaces=false keeps npm in the folder it's given.
   async function npmView(name, spec, maxBuffer) {
     const scope = name.startsWith('@') ? `${name.split('/')[0]}:` : '';
     for (const [i, cwd] of dirs.entries()) {
@@ -781,12 +782,23 @@ async function askVersion(project, pm) {
   }
 }
 
+// The version of the pnpm or yarn a command in the app runs, as { version }, or { unknown } with why it went unread.
+async function managerVersion(project, pm) {
+  const pinned = pinnedVersion(project, pm);
+  const asked = !pinned || pinned.range ? await askVersion(project, pm) : pinned;
+  // Under a devEngines range the person's own manager runs only if the range takes it in.
+  return pinned?.range && asked.version && !semver.satisfies(asked.version, pinned.range)
+    ? ageUnread(pm, `${pinned.from} asks for ${pm} "${plainLine(pinned.range, 60)}" in devEngines.packageManager, and the ${pm} the plan found is ${asked.version}`)
+    : asked;
+}
+
 // From Angular CLI 22.1, ng update asks the package manager for its minimum release age and skips any younger release,
 // reading no exemption list, and the manager's own install holds it back too. These rules were read in @angular/cli
 // 22.2.6's package-manager-descriptor.js and parsers.js, so compare a newer CLI's. pnpm and yarn are never asked in the
 // project, since a repo's .yarnrc.yml can make yarn run the repo's code: the plan reads what they would answer from
-// their files and the environment. null: no age set; { manager, unknown }: why it went unread, and what to do.
-async function releaseAge(project, config) {
+// their files and the environment. found: managerVersion's answer for pnpm and yarn. null: no age set;
+// { manager, unknown }: why it went unread, and what to do.
+function releaseAge(project, config, found) {
   const pm = project.packageManager;
   if (pm === 'npm') {
     // ng update reads only `before`. npm's install also applies min-release-age, in days, from npm 11.10, and npm 10 lists
@@ -814,12 +826,6 @@ async function releaseAge(project, config) {
     return seconds > 0 ? { manager: pm, setting: 'minimumReleaseAge', minutes: seconds / 60, ngUpdateReads: false } : null;
   }
   if (pm !== 'pnpm' && pm !== 'yarn') return null;
-  const pinned = pinnedVersion(project, pm);
-  const asked = !pinned || pinned.range ? await askVersion(project, pm) : pinned;
-  // Under a devEngines range the person's own manager runs only if the range takes it in.
-  const found = pinned?.range && asked.version && !semver.satisfies(asked.version, pinned.range)
-    ? ageUnread(pm, `${pinned.from} asks for ${pm} "${plainLine(pinned.range, 60)}" in devEngines.packageManager, and the ${pm} the plan found is ${asked.version}`)
-    : asked;
   if (found.unknown) return { manager: pm, unknown: found.unknown };
   return pm === 'pnpm' ? pnpmAge(project, found.version, config) : yarnAge(project, found.version);
 }
@@ -1069,16 +1075,21 @@ async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const assets = angularAssets(projectDir);
   const pins = nodePins(projectDir);
-  // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10 and older lay the app's own over
-  // it, where npm reads one folder's. So npm is asked at the root, then for the keys the app's own file sets, since its
-  // listing holds every default too. --workspaces=false keeps npm in the app's folder below a root that declares them.
+  // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10.34.9 lays the app's own over it,
+  // where pnpm 11.0.0, 11.28.11 and 12.16.1 passed over the app's, and npm reads one folder's. So npm is asked at the
+  // root, then on pnpm 10 for the keys the app's own file sets, since its listing holds every default too.
+  // --workspaces=false keeps npm in the app's folder below a root that declares them.
+  // shortcut: with pnpm's version unknown, the app's keys count, as pnpm 10 reads them; ask the person for the version if
+  // an app's .npmrc ever names a registry its root's doesn't.
   const npm = npmScript(project);
   const npmConfig = (cwd, args = []) => runNpm(npm, ['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const configDir = project.pnpmRoot || projectDir;
   const config = await npmConfig(configDir);
+  const found = ['pnpm', 'yarn'].includes(project.packageManager) ? await managerVersion(project, project.packageManager) : null;
   const appRc = join(projectDir, '.npmrc');
-  if (configDir !== projectDir && existsSync(appRc)) {
+  const appKeys = configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
+  if (appKeys) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
     // Its keys as npm 11.19.0's ini and pnpm 10.34.9's read them: lines split at \r or \n, each up to its first =, or
     // whole with none, trimmed. One pattern over the file backtracked, its \s* running on over blank lines and its key
@@ -1091,8 +1102,8 @@ async function buildPlan({ projectDir, to, next = false }) {
       if (key && Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
     }
   }
-  const registry = registryClient(config, [...new Set([configDir, projectDir])], npm);
-  const asked = await releaseAge(project, config);
+  const registry = registryClient(config, appKeys ? [configDir, projectDir] : [configDir], npm);
+  const asked = releaseAge(project, config, found);
   let age = asked?.unknown ? null : asked;
   const now = Date.now();
   // pnpm 11.23.0 added dropIncompletePublishTimes (pnpm/pnpm#13750), which drops a package's times when any release
