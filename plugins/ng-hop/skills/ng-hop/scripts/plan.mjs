@@ -5,7 +5,7 @@
 // and it never changes the project.
 // Exit codes: 0 the target is reachable (or nothing to do), 2 blocked before the target, 1 could not plan.
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
@@ -621,15 +621,35 @@ function pinnedVersion(project, pm) {
   return null;
 }
 
+// A folder's identity, which no spelling of its path changes: its device and file id, read as bigints since NTFS file
+// ids pass 2^53. null on a filesystem that keeps no file ids.
+const idOf = (path) => { try { const { dev, ino } = statSync(path, { bigint: true }); return ino ? `${dev}:${ino}` : null; } catch { return null; } };
+
+// Which of the app's own folders a path is in: the app's, its pnpm workspace's, its git repository's, or, for a repo
+// copied without .git, a folder up from the app holding the .yarnrc.yml or pnpm-workspace.yaml the plan reads as the
+// app's, short of the home folder, where the person's own are. Folders are told by identity, up from the path as
+// written, which a child keeps as its working folder on Windows and yarn walks up from, and up from its real path: a
+// junction in the repo, or an 8.3 short name such as NG-HOP~1 that fs.realpathSync keeps, got past comparing paths.
+function repoPart(project, path) {
+  const rc = process.env[envNamed(/^yarn_rc_filename$/i)] || '.yarnrc.yml';
+  const settings = upFrom(project.dir).filter((dir) => !inside(homedir(), dir) && [rc, 'pnpm-workspace.yaml'].some((name) => existsSync(join(dir, name))));
+  const parts = [[project.dir, 'folder'], [project.pnpmRoot, 'pnpm workspace'], [gitRoot(project.dir), 'git repository'], ...settings.map((dir) => [dir, 'repository'])].filter(([dir]) => dir);
+  const ids = new Map();
+  for (const [dir, what] of parts) { const id = idOf(dir); if (id && !ids.has(id)) ids.set(id, what); }
+  const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  for (const dir of [...upFrom(resolve(path)), ...upFrom(real(path))]) { const what = ids.get(idOf(dir)); if (what) return what; }
+  // shortcut: where the filesystem keeps no file ids, real paths are compared, which a junction or an 8.3 name gets
+  // past; compare realpathSync.native's too if such a filesystem ever matters.
+  return parts.find(([dir]) => inside(real(path), real(dir)))?.[1];
+}
+
 // Only a pnpm or yarn nothing pins is asked, and only its version, from a new empty folder outside the repo: run from
 // the app, pnpm 12.16.1's --version wrote into a pinned project's lockfile, and yarn 4.18.1's ran the repo's yarnPath.
 // A folder inside the repo, or a manager found there, would bring that back, so neither is used. The folder is made in
 // the home folder, since both read settings from every folder above where they run, yarn 4.18.1 loading a plugin from
 // any of them and pnpm 10 and 11 a .pnpmfile.cjs, and every account can write to Linux's shared /tmp.
 async function askVersion(project, pm) {
-  const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
-  const homes = [[project.dir, 'folder'], [project.pnpmRoot, 'pnpm workspace'], [gitRoot(project.dir), 'git repository']].filter(([dir]) => dir);
-  const within = (path) => homes.find(([dir]) => inside(real(path), real(dir)))?.[1];
+  const within = (path) => repoPart(project, path);
   const home = homedir();
   const homeIn = within(home);
   if (homeIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the home folder, ${home}, is inside the app's ${homeIn}, where ${pm} would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, outside the repo, or with ${pm}'s version in package.json's packageManager` };

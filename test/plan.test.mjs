@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { after, test } from 'node:test';
 import { managerCommand } from '../plugins/ng-hop/skills/ng-hop/scripts/manager.mjs';
@@ -1763,6 +1763,32 @@ test('a pnpm or yarn inside the repo isn\'t run, wherever the plan finds it', as
   assert.deepEqual(ran(proj.dir), []);
   assert.match(age, /^pnpm wasn't asked for its version, which its minimum release age depends on, since the one the plan found, .*pnpm\.cjs, is inside the app's folder and is the repo's code, so a release younger than that age can still stop a command; /);
   assert.equal((await ageOf(pnpm21({}), { manager: pnpm12 })).minutes, 1440, 'the control: one outside it answers');
+});
+
+test('the repo\'s folders are told by what they are, not how a path spells them, and with no .git by the settings the plan reads', async () => {
+  // A child keeps the spelling of its working folder on Windows, and yarn walks up from that, so a home folder reached
+  // through a junction in the repo put yarn in the repo, though its real path was outside.
+  const repo = yarn21({ files: { '.yarnrc.yml': 'plugins:\n  - path: ./plugin.cjs\n', 'plugin.cjs': MARKER } });
+  symlinkSync(app({ files: { 'home/.keep': '' } }).dir, join(repo.dir, '.cache'), 'junction');
+  const home = join(repo.dir, '.cache', 'home');
+  const r = await plan(world(), repo, { to: 22, manager: { '--version': '4.18.1' }, env: { HOME: home, USERPROFILE: home } });
+  assert.deepEqual([r.asked, ran(repo.dir)], [[], []]);
+  assert.match(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, /since the home folder, .*, is inside the app's folder, /);
+  // A repo copied without .git: the folder whose .yarnrc.yml the plan reads as the app's is the repo's.
+  const mono = app({ files: { '.yarnrc.yml': 'npmMinimalAgeGate: 60\n', 'tools/yarn.cjs': MARKER, 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), 'apps/web/yarn.lock': '' } });
+  const age = await ageOf({ dir: join(mono.dir, 'apps', 'web') }, { env: { npm_execpath: join(mono.dir, 'tools', 'yarn.cjs') } });
+  assert.deepEqual(ran(mono.dir), []);
+  assert.match(age, /since the one the plan found, .*yarn\.cjs, is inside the app's repository and is the repo's code, /);
+});
+
+test('a manager named through an 8.3 short name into the repo isn\'t run either', { skip: process.platform !== 'win32' && 'only Windows has 8.3 names' }, async (t) => {
+  // fs.realpathSync keeps a short name such as NG-HOP~1, so comparing paths missed that it was the project's.
+  const proj = pnpm21({}, { files: { 'tools/pnpm.cjs': MARKER } });
+  const short = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${proj.dir}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true }).stdout.trim();
+  if (!short || short.toLowerCase() === proj.dir.toLowerCase()) return t.skip('this volume keeps no 8.3 names');
+  const age = await ageOf(proj, { env: { npm_execpath: join(short, 'tools', 'pnpm.cjs') } });
+  assert.deepEqual(ran(proj.dir), []);
+  assert.match(age, /, is inside the app's folder and is the repo's code, /);
 });
 
 test('with the home folder inside the project or its repo, the plan asks nothing, and says why release age went unchecked', async () => {
