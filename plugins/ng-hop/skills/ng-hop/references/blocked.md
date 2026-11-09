@@ -30,7 +30,7 @@ The plan prints a major as `waiting until` a time when a release it needs is you
 
 - **Which releases, and until when:** the major's lines and its `Blockers` give each one's publish time and when it's old enough.
 - **Whose they are:** the team's own, just published (confirm with `npm view <package> repository.url author`), or anyone else's.
-- **Whether there's a sooner way:** `No sooner way:` means there's none, because Angular itself is too young, or a library ships migrations that installing it first would skip. Then only waiting gets past it.
+- **Whether there's a sooner way:** `No sooner way:` says why there's none: Angular itself is too young, a library ships migrations that installing it first would skip, `ng update` applies npm's setting itself and reads no exemption list, or the project's npm has no `min-release-age-exclude`, which npm 11.17 added. Then only waiting gets past it, or under npm's `before` only moving that setting.
 
 **Wait** costs only the time shown. Recommend it for anyone else's library.
 
