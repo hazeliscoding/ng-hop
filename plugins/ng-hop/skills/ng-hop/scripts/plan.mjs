@@ -427,28 +427,66 @@ function readProject(dir) {
 
 // One YAML scalar: quotes taken off, or a trailing comment, which in a plain one starts at " #". The comment goes from one
 // space before the #, and the spaces before that after it, since \s+# backtracked: 150,000 spaces with no # took 21 s.
-const scalar = (text) => { const value = text.trim(); const quoted = /^(["'])(.*)\1(?:\s+#.*)?$/.exec(value); return quoted ? quoted[2] : value.replace(/(?:^|\s)#.*$/, '').trimEnd(); };
-// Every value of a top-level key in a YAML file, read line by line like the lockfile readers, since YAML isn't worth a
-// dependency. A key set twice gives two.
-const yamlValues = (text, key) => [...(text ?? '').matchAll(new RegExp(`^\\uFEFF?["']?${key}["']?[ \\t]*:(.*)$`, 'gm'))].map((m) => scalar(m[1]));
+// undefined for a form the plan doesn't follow: a tag, anchor or alias, a block or flow value, a quote left open, a list
+// item, or a key and value of its own.
+const scalar = (text) => {
+  const value = text.trim();
+  const quoted = /^(["'])(.*)\1(?:\s+#.*)?$/.exec(value);
+  if (quoted) return quoted[2];
+  const plain = value.replace(/(?:^|\s)#.*$/, '').trimEnd();
+  return /^(?:[!&*|>{[@`%"']|[-?:](?:\s|$))|:(?:\s|$)/.test(plain) ? undefined : plain;
+};
+
+// The top level of a YAML file, read line by line like the lockfile readers, since YAML isn't worth a dependency: each
+// key with its line, what follows its colon and the lines below it, and odd, the first line there that is no key the
+// plan can read, such as a flow document or a key with no space after its colon. The top level is at the first line's
+// indentation, since pnpm 12.16.1, 11.28.11 and 10.34.9 and yarn 4.18.1 read a file indented as a whole too.
+function yamlTop(text) {
+  // Blank lines and comments go, and the --- and ... around a document.
+  const lines = (text ?? '').replace(/^\uFEFF/, '').split(/\r?\n/).map((line, i) => ({ line: i + 1, text: line }))
+    .filter(({ text: line }) => !/^\s*(?:#.*)?$/.test(line) && !/^(?:---|\.\.\.)(?:\s|$)/.test(line));
+  const indent = (line) => /^ */.exec(line)[0].length;
+  const top = indent(lines[0]?.text ?? '');
+  const keys = [];
+  let odd = null;
+  for (const entry of lines) {
+    const key = indent(entry.text) === top && /^ *(?:"([^"]*)"|'([^']*)'|([^\s"'#:{}[\],&*!|>%@`?-][^\s#]*?)) *:(?: (.*))?$/.exec(entry.text);
+    if (key) keys.push({ ...entry, key: key[1] ?? key[2] ?? key[3], rest: key[4] ?? '', below: [] });
+    // A list under a key can start at the key's own indentation.
+    else if (keys.length && (indent(entry.text) > top || (indent(entry.text) === top && /^ *- /.test(entry.text)))) keys.at(-1).below.push(entry);
+    else odd ??= entry;
+  }
+  return { keys, odd };
+}
+
+// Every value of a top-level key, a key set twice giving two: a plain or quoted one on its line, or alone on the line
+// below, as pnpm and yarn read it. A form the plan doesn't follow gives that line, { line, text }, instead: a tag, a
+// value over more than one line, or a top level the plan can't read.
+function yamlValues(text, key) {
+  const { keys, odd } = yamlTop(text);
+  if (odd) return [odd];
+  return keys.filter((k) => k.key === key).map((k) => {
+    const [only, ...more] = k.below;
+    if (!only) return scalar(k.rest) ?? k;
+    return !more.length && scalar(k.rest) === '' ? scalar(only.text) ?? only : k;
+  });
+}
+
+// Why a setting went unread: the line of its file the plan doesn't follow, quoted and short.
+const unreadLine = (file, { line, text }) => `line ${line} of ${file}, "${plainLine(text, 60)}", is in a form the plan can't read`;
 
 // A top-level list: block items under the key, indented or not, or one flow list on its line. null for no list, and
 // undefined for a shape the plan can't read.
 function yamlList(text, key) {
-  const lines = (text ?? '').split(/\r?\n/);
-  const at = lines.findIndex((line) => new RegExp(`^\\uFEFF?["']?${key}["']?[ \\t]*:`).test(line));
-  if (at < 0) return null;
-  const rest = scalar(lines[at].slice(lines[at].indexOf(':') + 1));
-  if (/^\[.*\]$/.test(rest)) return rest.slice(1, -1).split(',').map(scalar).filter(Boolean);
-  if (rest) return /^(?:null|~)$/.test(rest) ? null : undefined;
-  const items = [];
-  for (const line of lines.slice(at + 1)) {
-    const item = /^\s*-\s+(.*)$/.exec(line);
-    if (item) items.push(scalar(item[1]));
-    else if (/^\S/.test(line)) break;
-    else if (!/^\s*(?:#.*)?$/.test(line)) return undefined;
-  }
-  return items;
+  const { keys, odd } = yamlTop(text);
+  const entry = keys.find((k) => k.key === key);
+  if (odd || !entry) return odd ? undefined : null;
+  const rest = entry.rest.replace(/(?:^|\s)#.*$/, '').trim();
+  if (rest && entry.below.length) return undefined;
+  if (rest && !/^\[.*\]$/.test(rest)) return /^(?:null|~)$/.test(rest) ? null : undefined;
+  const items = rest ? rest.slice(1, -1).split(',').map(scalar).filter((item) => item !== '')
+    : entry.below.map(({ text: line }) => { const item = /^\s*-\s+(.*)$/.exec(line); return item ? scalar(item[1]) : undefined; });
+  return items.includes(undefined) ? undefined : items;
 }
 
 // A pnpm workspace pattern as a test of a folder path, for the *, ** and leading ./ that pnpm 11's micromatch call reads,
@@ -531,6 +569,7 @@ function pnpmAge(project, version, config) {
   const read = (from, key, values) => {
     if (values.length > 1) return { refused: `${from} sets ${key} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` };
     const [value] = values;
+    if (typeof value === 'object') return { unread: ageUnread('pnpm', unreadLine(from, value)).unknown };
     if (value === undefined || /^(?:|null|~)$/.test(value)) return null;
     if ((v12 ? /^\+?(?:0|[1-9]\d*)$|^0x[\da-f]+$/i : /^\+?\d+$|^0x[\da-f]+$/i).test(value) && Number(value) < 2 ** 64) return { value, from, key };
     const shown = `${from} sets ${key} to "${plainLine(value, 60)}"`;
@@ -540,9 +579,10 @@ function pnpmAge(project, version, config) {
   const inYaml = (file) => read(file, 'minimumReleaseAge', yamlValues(readText(file), 'minimumReleaseAge'));
   const workspace = upFrom(project.dir).map((dir) => join(dir, 'pnpm-workspace.yaml')).find(existsSync);
   const files = [workspace && inYaml(workspace), v11 && inYaml(join(pnpmConfigDir(), 'config.yaml'))];
-  // pnpm parses both files whatever sets the age, and 12.16.1 did even with the workspace's packages leaving the app out.
-  const refused = files.find((found) => found?.refused);
-  if (refused) return { manager: 'pnpm', unknown: refused.refused };
+  // pnpm parses both files whatever sets the age, and 12.16.1 did even with the workspace's packages leaving the app out,
+  // so a line the plan can't read in either can be one every pnpm command fails on.
+  const stops = files.find((found) => found?.refused || found?.unread);
+  if (stops) return { manager: 'pnpm', unknown: stops.refused ?? stops.unread };
 
   // 12.16.1 read the name in any case and the value trimmed, and passed over one that is no whole number.
   const name = v11 && envNamed(/^pnpm_config_minimum_release_age$/i);
@@ -582,8 +622,8 @@ function yarnSetting(dir, key) {
   if (name) return { value: process.env[name], from: name };
   const rc = process.env[envNamed(/^yarn_rc_filename$/i)] || '.yarnrc.yml';
   for (const file of [...upFrom(dir), homedir()].map((d) => join(d, rc))) {
-    const values = yamlValues(readText(file), key);
-    if (values.length) return { value: values.at(-1), from: file };
+    const value = yamlValues(readText(file), key).at(-1);
+    if (value !== undefined) return typeof value === 'object' ? { unread: unreadLine(file, value), from: file } : { value, from: file };
   }
   return null;
 }
@@ -615,6 +655,7 @@ function yarnAge(project, version) {
   // yarn 4.9.4 knew no npmMinimalAgeGate, and ng update counts a question yarn fails as no age.
   if (semver.lt(version, '4.10.0')) return null;
   const found = yarnSetting(project.dir, 'npmMinimalAgeGate');
+  if (found?.unread) return { manager: 'yarn', ...ageUnread('yarn', found.unread) };
   const minutes = found ? yarnMinutes(found.value, version) : semver.gte(version, semver.coerce(AGE_DEFAULT_FROM.yarn)) ? 1440 : 0;
   const shown = found && `${found.from} sets npmMinimalAgeGate to "${plainLine(found.value, 60)}"`;
   if (minutes === undefined) return { manager: 'yarn', unknown: `${shown}, which yarn ${version} refuses: every yarn command fails on it until it is a number with an optional unit (ms, s, m, h, d or w), so ask the person to fix it` };
@@ -632,8 +673,9 @@ const ageUnread = (pm, why) => ({ unknown: `${why}, so the plan can't tell ${pm}
 // versions may run, so it comes back as { range, from } for the person's own to be asked. null: nothing pins it.
 function pinnedVersion(project, pm) {
   if (pm === 'yarn') {
-    const path = yarnSetting(project.dir, 'yarnPath');
-    if (path && !/^(?:true|1)$/.test(yarnSetting(project.dir, 'ignorePath')?.value ?? '')) {
+    const path = yarnSetting(project.dir, 'yarnPath'), ignore = yarnSetting(project.dir, 'ignorePath');
+    if (path && !/^(?:true|1)$/.test(ignore?.value ?? '')) {
+      if (path.unread || ignore?.unread) return ageUnread('yarn', path.unread ?? ignore.unread);
       // yarn set version names the file after the release, and the plan never runs the repo's copy to ask.
       const version = semver.valid(/^yarn-(.+)\.c?js$/.exec(path.value.split(/[\\/]/).pop())?.[1] ?? '');
       return version ? { version } : { unknown: `${path.from} sets yarnPath to "${plainLine(path.value, 60)}", whose name holds no version, and the plan doesn't run the repo's yarn to ask, so a release younger than yarn's minimum release age can still stop a command; ask the person to check it with yarn config get npmMinimalAgeGate` };
