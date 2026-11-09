@@ -1800,3 +1800,16 @@ test('a follower whose only release that fits is too young waits with its major,
   assert.equal(r.code, 2, r.stderr);
   assert.deepEqual(r.plan.blockers.map((b) => [b.name, b.kind]), [['@nebular/eva-icons', 'too-young']]);
 });
+
+test('on a --next hop, a CLI prerelease younger than the age makes the major wait until the CLI is old enough', async () => {
+  // A CLI can come out hours after core: 22.1.0 did, three hours later.
+  const packages = nextWorld('23.0.0-rc.1');
+  const cli = packages.find((p) => p.name === '@angular/cli');
+  cli.time['23.0.0-rc.1'] = new Date(Date.now() - 30 * 60e3).toISOString();
+  const proj = () => app({ deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '22.2.0', cli: '22.2.0' })) } });
+  const r = await plan(packages, proj(), { next: true, manager: pnpm12 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.waiting.held.map((h) => [h.name, h.version, h.until]), [['@angular/cli', '23.0.0-rc.1', ripeAt(cli, '23.0.0-rc.1', 1440)]]);
+  assert.match(r.plan.waiting.noSooner, /^Angular 23 itself is too young/);
+  assert.equal((await plan(packages, proj(), { next: true })).code, 0, 'the control: with no age, the prerelease is the hop');
+});
