@@ -1836,6 +1836,29 @@ test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pn
   for (const files of [{ 'pnpm-workspace.yml': 'minimumReleaseAge: 60\n' }, { 'pnpm-workspace.yaml': 'settings:\n  minimumReleaseAge: 60\n' }]) assert.equal((await ageWith(files))?.from, 'default', JSON.stringify(files));
 });
 
+test('no settings file a repo writes can stall the plan, with a long run of spaces or a packages pattern full of wildcards', async () => {
+  // Cutting a comment backtracked over a run of spaces, and the packages patterns over wildcards: 150,000 spaces took
+  // 21 s, 16 ** parts against an app 16 folders down 47 s, and 8 *s against a folder name 60 letters long 56 s.
+  const below = (pattern, rel) => {
+    const p = app({ files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60\npackages:\n  - '${pattern}'\n`, [`${rel}/package.json`]: JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), [`${rel}/pnpm-lock.yaml`]: pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })) } });
+    return { dir: join(p.dir, rel) };
+  };
+  const cases = [
+    [pnpm21({}, { files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60${' '.repeat(150000)}x\n` } }), /sets minimumReleaseAge to "60 x", which pnpm 12\.16\.1 refuses/],
+    [below(`apps/${'*a'.repeat(8)}b`, `apps/${'a'.repeat(60)}`), 1440],
+    [below(`${'**/'.repeat(16)}x`, Array.from({ length: 16 }, (_, i) => `d${i}`).join('/')), 1440],
+  ];
+  for (const [proj, expected] of cases) {
+    const started = Date.now();
+    const age = await ageOf(proj, { manager: pnpm12 });
+    assert.ok(Date.now() - started < 15e3, `planning took ${Date.now() - started} ms`);
+    if (expected instanceof RegExp) assert.match(age, expected); else assert.equal(age?.minutes, expected);
+  }
+  // The controls: the same patterns still take in an app they name.
+  assert.equal((await ageOf(below(`${'**/'.repeat(16)}d15`, Array.from({ length: 16 }, (_, i) => `d${i}`).join('/')), { manager: pnpm12 }))?.minutes, 60);
+  assert.equal((await ageOf(below(`apps/${'*a'.repeat(8)}`, `apps/${'a'.repeat(60)}`), { manager: pnpm12 }))?.minutes, 60);
+});
+
 test('the version comes from the nearest package.json pin, its packageManager or devEngines, and then nothing is asked', async () => {
   // Corepack reads packageManager first, a +sha suffix included, then devEngines.packageManager, one entry or a list,
   // whose range counts here by its lowest version. pnpm holds nothing back by default before pnpm 11.

@@ -406,8 +406,9 @@ function readProject(dir) {
 
 // ---- Release age: read as pnpm and yarn read it, from their files and the environment ---------------------------
 
-// One YAML scalar: quotes taken off, or a trailing comment, which in a plain one starts at " #".
-const scalar = (text) => { const value = text.trim(); const quoted = /^(["'])(.*)\1(?:\s+#.*)?$/.exec(value); return quoted ? quoted[2] : value.replace(/(?:^|\s+)#.*$/, ''); };
+// One YAML scalar: quotes taken off, or a trailing comment, which in a plain one starts at " #". The comment goes from one
+// space before the #, and the spaces before that after it, since \s+# backtracked: 150,000 spaces with no # took 21 s.
+const scalar = (text) => { const value = text.trim(); const quoted = /^(["'])(.*)\1(?:\s+#.*)?$/.exec(value); return quoted ? quoted[2] : value.replace(/(?:^|\s)#.*$/, '').trimEnd(); };
 // Every value of a top-level key in a YAML file, read line by line like the lockfile readers, since YAML isn't worth a
 // dependency. A key set twice gives two.
 const yamlValues = (text, key) => [...(text ?? '').matchAll(new RegExp(`^\\uFEFF?["']?${key}["']?[ \\t]*:(.*)$`, 'gm'))].map((m) => scalar(m[1]));
@@ -431,25 +432,53 @@ function yamlList(text, key) {
   return items;
 }
 
-// A pnpm workspace pattern as a regular expression over a folder path ending in a slash, for the *, ** and leading ./
-// that pnpm 11's micromatch call reads, where a wildcard skips a name starting with a dot unless dot is set. null for
-// other glob syntax, such as braces.
+// A pnpm workspace pattern as a test of a folder path, for the *, ** and leading ./ that pnpm 11's micromatch call reads,
+// where a wildcard skips a name starting with a dot unless dot is set. null for other glob syntax, such as braces. The
+// repo writes the pattern, and as a regular expression it backtracked for minutes, 16 ** parts against an app 16
+// folders down for 47 s and 8 *s against a name 60 letters long for 56 s, so it is matched name by name, each part
+// against each name once.
 function workspaceGlob(glob, dot) {
   if (/[?[\]{}()!\\]/.test(glob)) return null;
-  const name = dot ? '' : '(?!\\.)';
-  const body = posix.normalize(glob).replace(/\/$/, '').split('/')
-    .map((part) => (part === '**' ? `(?:${name}[^/]+/)*` : `${part.startsWith('*') ? name : ''}${part.replace(/[.+^$|]/g, '\\$&').replace(/\*+/g, '[^/]*')}/`)).join('');
   // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, where 11.28.11 didn't.
-  return new RegExp(`^${body}$`, process.platform === 'win32' ? 'i' : '');
+  const fold = (text) => (process.platform === 'win32' ? text.toLowerCase() : text);
+  const parts = fold(posix.normalize(glob)).replace(/\/$/, '').split('/');
+  const hidden = (name) => !dot && name.startsWith('.');
+  // One name against one part whose * takes any run of characters: the greedy match, going back only to the last *.
+  const fits = (part, name) => {
+    if (part.startsWith('*') && hidden(name)) return false;
+    let p = 0, n = 0, star = -1, from = 0;
+    while (n < name.length) {
+      if (part[p] === '*') { star = p++; from = n; }
+      else if (part[p] === name[n]) { p++; n++; }
+      else if (star >= 0) { p = star + 1; n = ++from; }
+      else return false;
+    }
+    while (part[p] === '*') p++;
+    return p === part.length;
+  };
+  return (rel) => {
+    const names = fold(rel).split('/');
+    // ok[j]: whether the parts from this one on take in the names from j on, from the last part back. ** takes any
+    // number of names, and any other part one.
+    let ok = names.map(() => false).concat(true);
+    for (const part of [...parts].reverse()) {
+      const next = ok;
+      ok = next.map(() => false);
+      for (let j = names.length; j >= 0; j--) {
+        ok[j] = part === '**' ? next[j] || (j < names.length && !hidden(names[j]) && ok[j + 1]) : j < names.length && fits(part, names[j]) && next[j + 1];
+      }
+    }
+    return ok[0];
+  };
 }
 
 // Whether a pnpm-workspace.yaml's packages take in the app at rel, as pnpm 11's isWorkspaceProjectDir decides: some
 // pattern matches and no ! pattern does, whatever their order. A string instead names a pattern the plan can't read.
 function takesIn(patterns, rel) {
   const globs = patterns.map((p) => [p, p.startsWith('!'), workspaceGlob(p.replace(/^!/, ''), p.startsWith('!'))]);
-  const unread = globs.find(([, , re]) => !re);
+  const unread = globs.find(([, , covers]) => !covers);
   if (unread) return `a packages pattern the plan can't read, "${plainLine(unread[0], 60)}"`;
-  return globs.some(([, not, re]) => !not && re.test(`${rel}/`)) && !globs.some(([, not, re]) => not && re.test(`${rel}/`));
+  return globs.some(([, not, covers]) => !not && covers(rel)) && !globs.some(([, not, covers]) => not && covers(rel));
 }
 
 // An environment variable named in any case, as it is spelled there.
