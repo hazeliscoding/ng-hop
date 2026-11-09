@@ -1611,10 +1611,11 @@ test('a lockfile that cannot be read falls back instead of making up a version',
 const pnpm12 = { '--version': '12.16.1' };
 const pnpm21 = (deps, { pin, files = {} } = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, pin, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0', lib: '21.0.0' })), ...files } });
 const yarn21 = ({ pin, files = {} } = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, pin, files: { 'yarn.lock': '', ...files } });
-// An Angular 21 app on pnpm at apps/web, below files of its own. Its own lockfile keeps the age files the only change.
-const webApp = (files = {}) => {
-  const p = app({ files: { 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), 'apps/web/pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })), ...files } });
-  return { dir: join(p.dir, 'apps', 'web'), root: p.dir };
+// An Angular 21 app on pnpm at apps/web, or another folder, below files of its own. Its own lockfile keeps the age files
+// the only change.
+const webApp = (files = {}, at = 'apps/web') => {
+  const p = app({ files: { [`${at}/package.json`]: JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), [`${at}/pnpm-lock.yaml`]: pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })), ...files } });
+  return { dir: join(p.dir, ...at.split('/')), root: p.dir };
 };
 // The release age the plan read, or why it couldn't.
 const ageOf = async (proj, options) => {
@@ -1891,6 +1892,8 @@ test('pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its pac
     ['', 1440], ['packages:\n  - other/*\n', 1440], ["packages:\n  - apps/*\n  - '!apps/web'\n", 1440],
   ];
   for (const [packages, minutes] of cases) assert.equal((await ageOf(webApp(parent(packages)), { manager: pnpm12 }))?.minutes, minutes, packages);
+  // pnpm 12.16.1 left out an app in a folder whose name starts with a dot, apps/.web, from both apps/* and **.
+  for (const packages of ['packages:\n  - apps/*\n', "packages:\n  - '**'\n"]) assert.equal((await ageOf(webApp(parent(packages), 'apps/.web'), { manager: pnpm12 }))?.minutes, 1440, packages);
   const own = (text) => webApp({ ...parent('packages:\n  - apps/*\n'), 'apps/web/pnpm-workspace.yaml': text });
   assert.equal((await ageOf(own('minimumReleaseAge: 70\n'), { manager: pnpm12 })).minutes, 70);
   assert.deepEqual((await ageOf(own('packages:\n  - .\n'), { manager: pnpm12 })).from, 'default');
