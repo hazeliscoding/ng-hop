@@ -598,8 +598,10 @@ function pnpmAge(project, version, config) {
   let found = /^(?:0|[1-9]\d*)$/.test(name ? process.env[name].trim() : '') ? { value: process.env[name].trim(), from: name, key: 'minimum-release-age' } : null;
   if (!found && files[0]) {
     // pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and look no
-    // further up; pnpm 10.34.9 applied the nearest whatever its packages.
-    const rel = relative(dirname(workspace), project.dir).split(sep).join('/');
+    // further up; pnpm 10.34.9 applied the nearest whatever its packages. pnpm 11.28.11 matched the names the folders
+    // have on disk, from fs.realpath.native, whatever the spelling of the folder it ran from.
+    const onDisk = (dir) => { try { return v12 ? dir : realpathSync.native(dir); } catch { return dir; } };
+    const rel = relative(onDisk(dirname(workspace)), onDisk(project.dir)).split(sep).join('/');
     // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, where 11.28.11 didn't.
     const patterns = rel && v11 ? yamlList(readText(workspace), 'packages') : null;
     const covers = !rel || !v11 || (patterns === undefined ? 'a packages list the plan can\'t read' : takesIn(patterns ?? [], rel, v12 && process.platform === 'win32'));

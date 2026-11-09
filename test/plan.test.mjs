@@ -1914,11 +1914,22 @@ test('pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its pac
   assert.match(await ageOf(webApp(parent('packages:\n  apps: web\n')), { manager: pnpm12 }), /turns on a packages list the plan can't read, so /);
 });
 
-test('on Windows, pnpm 12 takes a packages pattern in to the app whatever its case, and pnpm 11 only in the case it has', { skip: process.platform !== 'win32' && 'pnpm 12 folds case on Windows only' }, async () => {
-  // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, and 11.28.11 didn't.
-  const parent = () => webApp({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\npackages:\n  - Apps/*\n' });
-  assert.equal((await ageOf(parent(), { manager: { '--version': '11.28.11' } }))?.minutes, 1440);
-  assert.equal((await ageOf(parent(), { manager: pnpm12 }))?.minutes, 60, 'the control: pnpm 12');
+test('on Windows, pnpm 12 takes a packages pattern in to the app whatever its case, and pnpm 11 only in the case its folders have on disk', { skip: process.platform !== 'win32' && 'pnpm 12 folds case on Windows only' }, async () => {
+  // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, and 11.28.11 didn't. 11.28.11 matched the names the folders
+  // have on disk, whatever the spelling of the folder it ran from: from APPS/WEB, APPS/* left apps/web out and apps/*
+  // took it in, and from apps/web, apps/web left out an app on disk at Apps/Web.
+  const parent = (pattern, at) => webApp({ 'pnpm-workspace.yaml': `minimumReleaseAge: 60\npackages:\n  - ${pattern}\n` }, at);
+  const spelled = (proj, rel) => ({ dir: join(proj.root, ...rel.split('/')) });
+  const cases = [
+    [parent('Apps/*'), 1440],
+    [spelled(parent('APPS/*'), 'APPS/WEB'), 1440],
+    [spelled(parent('apps/*'), 'Apps/web'), 60],
+    [spelled(parent('apps/web', 'Apps/Web'), 'apps/web'), 1440],
+  ];
+  for (const [proj, minutes] of cases) {
+    assert.equal((await ageOf(proj, { manager: { '--version': '11.28.11' } }))?.minutes, minutes, proj.dir);
+    assert.equal((await ageOf(proj, { manager: pnpm12 }))?.minutes, 60, `the control: pnpm 12, ${proj.dir}`);
+  }
 });
 
 test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pnpm 12 refuses unknown, naming the file and the value', async () => {
