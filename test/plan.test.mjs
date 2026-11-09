@@ -1751,7 +1751,8 @@ test('a relative PATH entry into the project never runs the pnpm, npm or node it
   // would be passed over as the repo's code, and the age left unknown, with nothing run either way.
   const own = fakeManager('pnpm', pnpm12);
   writeFileSync(join(dirname(own.file), 'pnpm.cmd'), '@"%~dp0\\pnpm.cjs" %*\r\n');
-  writeFileSync(join(dirname(own.file), 'pnpm'), `#!/bin/sh\nexec '${process.execPath}' "$(dirname "$0")/pnpm.cjs" "$@"\n`);
+  // Its script by full path, since this PATH has no dirname on Linux and macOS, where Node's folder holds only Node's.
+  writeFileSync(join(dirname(own.file), 'pnpm'), `#!/bin/sh\nexec '${process.execPath}' '${own.file}' "$@"\n`);
   chmodSync(join(dirname(own.file), 'pnpm'), 0o755);
   const env = { PATH: ['bin', dirname(own.file), dirname(process.execPath)].join(delimiter), npm_execpath: undefined, COREPACK_ROOT: undefined };
   const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
