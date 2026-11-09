@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -60,20 +60,27 @@ const updateCommand = (project) => (project.packageManager === 'pnpm' ? `pnpm ex
   : project.packageManager === 'yarn' ? `node ${updateScript()}`
   : `${runnerFor(project)} ng update`);
 
-// Runs npm with no shell. On Windows npm is a .cmd file, which Node only starts through a shell, and a shell would
-// read `>=` in a version range as a redirect, so this calls npm's own script with Node instead.
-function runNpm(args, options) {
-  if (process.platform !== 'win32') return exec('npm', args, options);
-  const script = [process.env.npm_execpath, join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')]
-    .find((path) => path && /npm-cli\.c?js$/.test(path) && existsSync(path));
-  if (!script) throw new PlanError('Could not find npm next to Node, and the plan needs it to read the registry settings.');
-  return exec(process.execPath, [script, ...args], options);
+// npm's own script, which the plan runs with this Node and no shell. On Windows npm is a .cmd file, which Node only
+// starts through a shell, and a shell would read `>=` in a version range as a redirect. npm runs in the project, where a
+// bare npm, or the node its #!/usr/bin/env node names, is looked up through a relative PATH entry such as
+// node_modules/.bin, and a relative npm_execpath from there too, so either could be the repo's own. So the plan takes
+// npm_execpath when it names npm's script by an absolute path, then on Linux and macOS the npm on an absolute PATH
+// entry, followed to its script, then the npm next to Node, and passes over any inside the repo.
+function npmScript(project) {
+  const path = Object.entries(process.env).find(([key]) => key.toLowerCase() === 'path')?.[1] || '';
+  const onPath = process.platform === 'win32' ? [] : path.split(delimiter).filter(isAbsolute).map((dir) => { try { return realpathSync(join(dir, 'npm')); } catch { return null; } });
+  const nextToNode = ['node_modules', join('..', 'lib', 'node_modules')].map((dir) => join(dirname(process.execPath), dir, 'npm', 'bin', 'npm-cli.js'));
+  const script = [process.env.npm_execpath, ...onPath, ...nextToNode].find((file) => file && isAbsolute(file) && /npm-cli\.c?js$/.test(file) && existsSync(file) && !repoPart(project, file));
+  if (!script) throw new PlanError('Could not find npm outside the repo, next to Node or on PATH, and the plan needs it to read the registry settings.');
+  return script;
 }
+
+const runNpm = (npm, args, options) => exec(process.execPath, [npm, ...args], options);
 
 // ---- Registry access ------------------------------------------------------------------------------------------
 
-// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then the app's own folder.
-function registryClient(config, dirs) {
+// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then the app's own folder. npm: its script.
+function registryClient(config, dirs, npm) {
   const cache = new Map();
   const baseFor = (name) => {
     const scope = name.startsWith('@') ? name.split('/')[0] : null;
@@ -88,7 +95,7 @@ function registryClient(config, dirs) {
     const scope = name.startsWith('@') ? `${name.split('/')[0]}:` : '';
     for (const [i, cwd] of dirs.entries()) {
       try {
-        return await runNpm(['view', spec, '--json', `--${scope}registry=${baseFor(name)}`, '--workspaces=false'], { cwd, maxBuffer });
+        return await runNpm(npm, ['view', spec, '--json', `--${scope}registry=${baseFor(name)}`, '--workspaces=false'], { cwd, maxBuffer });
       } catch (err) {
         if (i === dirs.length - 1 || !/E40[13]/.test(`${err.stdout || ''}${err.message || ''}`)) throw err;
       }
@@ -960,7 +967,8 @@ async function buildPlan({ projectDir, to, next = false }) {
   // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10 and older lay the app's own over
   // it, where npm reads one folder's. So npm is asked at the root, then for the keys the app's own file sets, since its
   // listing holds every default too. --workspaces=false keeps npm in the app's folder below a root that declares them.
-  const npmConfig = (cwd, args = []) => runNpm(['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
+  const npm = npmScript(project);
+  const npmConfig = (cwd, args = []) => runNpm(npm, ['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
   const configDir = project.pnpmRoot || projectDir;
   const config = await npmConfig(configDir);
@@ -969,7 +977,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
     for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
   }
-  const registry = registryClient(config, [...new Set([configDir, projectDir])]);
+  const registry = registryClient(config, [...new Set([configDir, projectDir])], npm);
   const asked = await releaseAge(project, config);
   const age = asked?.unknown ? null : asked;
   const now = Date.now();

@@ -1737,11 +1737,13 @@ test('the plan asks from a folder in the home folder, since any account can leav
   assert.ok(!inside(r.asked[0].cwd, tmp), `asked from ${r.asked[0].cwd}`);
 });
 
-test('a relative PATH entry into the project never runs the pnpm it holds', async () => {
+test('a relative PATH entry into the project never runs the pnpm, npm or node it holds', async () => {
   // A relative PATH entry is looked up from the folder a command starts in, so from the project, bin/pnpm here would be
   // the project's own code, as the control shows. Without npm_execpath or COREPACK_ROOT, PATH is where pnpm is found.
-  const proj = pnpm21({}, { files: { 'bin/pnpm.cjs': MARKER, 'bin/pnpm.cmd': '@"%~dp0\\pnpm.cjs" %*\r\n', 'bin/pnpm': `#!/usr/bin/env node\n${MARKER}` } });
-  chmodSync(join(proj.dir, 'bin', 'pnpm'), 0o755);
+  // npm runs in the project, so on Linux and macOS a bare npm, or the node its #!/usr/bin/env node names, was too.
+  const shell = '#!/bin/sh\n: > "$0.ran"\necho {}\n';
+  const proj = pnpm21({}, { files: { 'bin/pnpm.cjs': MARKER, 'bin/pnpm.cmd': '@"%~dp0\\pnpm.cjs" %*\r\n', 'bin/pnpm': `#!/usr/bin/env node\n${MARKER}`, 'bin/npm': shell, 'bin/node': shell } });
+  for (const name of ['pnpm', 'npm', 'node']) chmodSync(join(proj.dir, 'bin', name), 0o755);
   const env = { PATH: ['bin', dirname(process.execPath)].join(delimiter), npm_execpath: undefined, COREPACK_ROOT: undefined };
   const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
   let found;
@@ -1754,6 +1756,18 @@ test('a relative PATH entry into the project never runs the pnpm it holds', asyn
   assert.ok(inside(found.prefix[0] ?? found.file, proj.dir), `the control: from the project, PATH finds ${found.prefix[0] ?? found.file}`);
   await plan(world(), proj, { to: 22, env });
   assert.deepEqual(ran(proj.dir), []);
+});
+
+test('npm is never one the repo holds, through a relative npm_execpath or one into the repo', async () => {
+  // A relative npm_execpath was checked from the folder the plan started in and run from the one npm runs in, both the
+  // project here, as SKILL.md runs the plan. This npm answers with the fake registry, so a plan that ran it went on.
+  const npm = `${MARKER}console.log(JSON.stringify({ registry: process.env.npm_config_registry }));\n`;
+  for (const relative of [true, false]) {
+    const proj = app({ deps: base, lock: lockBase, files: { 'node_modules/npm/bin/npm-cli.js': npm } });
+    const execpath = join(...(relative ? [] : [proj.dir]), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    const r = await plan(world(), proj, { to: 21, env: { npm_execpath: execpath } });
+    assert.deepEqual([r.code, ran(proj.dir)], [0, []], execpath);
+  }
 });
 
 test('a pnpm or yarn inside the repo isn\'t run, wherever the plan finds it', async () => {
