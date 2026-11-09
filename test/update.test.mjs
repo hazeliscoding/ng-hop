@@ -243,6 +243,22 @@ test('pnpm updater: pnpm can\'t record itself in the lockfile, which stopped ng 
   assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: f.project, encoding: 'utf8' }).stdout, '');
 });
 
+// pnpm 10.34.9, in a project whose packageManager pins another pnpm, fetched that pnpm first for every command, --version
+// and list included, unless npm_config_manage_package_manager_versions was false, and offline each one failed: Command
+// failed with exit code 1: ... pnpm.cjs add pnpm@10.0.0.
+const pinnedDriver = `if (process.env.npm_config_manage_package_manager_versions !== 'false') { console.error('Command failed with exit code 1: pnpm add pnpm@10.0.0'); process.exit(1); }
+`;
+
+test('pnpm updater: pnpm 10 doesn\'t fetch the pnpm a project pins, which failed every pnpm command offline', async () => {
+  const f = fixture(); writeFileSync(f.driver, pinnedDriver + driverSource);
+  const fetched = spawnSync(process.execPath, [f.driver], { cwd: f.project, env: { ...process.env, npm_config_manage_package_manager_versions: 'true' }, encoding: 'utf8' });
+  assert.match(fetched.stderr, /Command failed/, 'positive control: the stand-in fetches the pin under any other value');
+  // The person's own setting is overridden, as the first test overrides ng_disable_version_check.
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_config_manage_package_manager_versions: 'true' } });
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(f.read().calls, 1);
+});
+
 // ---- installing a library first ------------------------------------------------------------------------------------
 
 // Stands in for pnpm, yarn and npm, and logs each call. `add` saves each spec in package.json, in the section it's
