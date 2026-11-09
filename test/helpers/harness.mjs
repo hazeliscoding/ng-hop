@@ -125,9 +125,10 @@ export async function startRegistry(packages, { requireAuth = false, failWith = 
   return { url: `http://127.0.0.1:${server.address().port}/`, close: () => new Promise((r) => server.close(r)) };
 }
 
-export function project({ deps = {}, devDeps = {}, lock = null, files = {}, nx = false } = {}) {
+// pin: package.json's packageManager, such as pnpm@12.16.1.
+export function project({ deps = {}, devDeps = {}, lock = null, files = {}, nx = false, pin } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ng-hop-test-'));
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'app', dependencies: deps, devDependencies: devDeps }));
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'app', ...(pin ? { packageManager: pin } : {}), dependencies: deps, devDependencies: devDeps }));
   if (lock) {
     const packages = Object.fromEntries(Object.entries(lock).map(([n, version]) => [`node_modules/${n}`, { version }]));
     writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages }));
@@ -150,17 +151,24 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
   });
 }
 
-// A stand-in for pnpm or yarn, which the plan asks for its minimum release age through npm_execpath, the first place
+// A stand-in for pnpm or yarn, which the plan asks for an unpinned version through npm_execpath, the first place
 // managerCommand looks. answers maps the arguments to what it prints, or to { stderr } for what it prints as it fails;
-// anything else, or null, exits 1. Each question is logged with the pnpm_config_pm_on_fail and Corepack settings it ran
-// under.
+// anything else, or null, exits 1. Each question is logged with the folder it ran in, and the pnpm_config_pm_on_fail,
+// Corepack and YARN_IGNORE_PATH settings it ran under. Like yarn 4.18.1, the yarn one loads the plugins and, without
+// YARN_IGNORE_PATH, the yarnPath that a .yarnrc.yml in that folder names, so running it in a repo runs the repo's code.
 export function fakeManager(name, answers) {
   const dir = mkdtempSync(join(tmpdir(), 'ng-hop-pm-'));
   const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
-  writeFileSync(file, `const fs = require('fs');
+  writeFileSync(file, `const fs = require('fs'), path = require('path');
 const args = process.argv.slice(2).join(' ');
 const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE];
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack }) + '\\n');
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack, ignorePath: process.env.YARN_IGNORE_PATH ?? null }) + '\\n');
+const rc = path.join(process.cwd(), '.yarnrc.yml');
+if (${JSON.stringify(name)} === 'yarn' && fs.existsSync(rc)) {
+  for (const [, key, file] of fs.readFileSync(rc, 'utf8').matchAll(/^(yarnPath:|\\s*- path:)\\s*(\\S+)/gm)) {
+    if (key !== 'yarnPath:' || !process.env.YARN_IGNORE_PATH) require(path.resolve(process.cwd(), file));
+  }
+}
 const answer = ${JSON.stringify(answers)}[args];
 if (answer == null) process.exit(1);
 if (answer.stderr) { console.error(answer.stderr); process.exit(1); }
@@ -172,8 +180,9 @@ console.log(answer);
 
 // own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
 // .npmrc the way a team sets it up. rcDir puts that .npmrc in another folder, such as a pnpm workspace's root, and auth
-// makes the registry want the token the .npmrc then holds. manager: what the project's pnpm or yarn answers, by default
-// a version with no minimum release age. env: more of the plan's environment, over what the tests run with.
+// makes the registry want the token the .npmrc then holds. manager: what an unpinned pnpm or yarn answers, by default a
+// version with no minimum release age. env: more of the plan's environment, over what the tests run with. The plan gets
+// an empty home and XDG_CONFIG_HOME of its own, so no ~/.yarnrc.yml or pnpm config.yaml on this machine counts.
 export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager, env = {} } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
@@ -181,16 +190,19 @@ export async function plan(packages, proj, { to, next = false, text = false, reg
   if (company) writeFileSync(join(own.rcDir || proj.dir, '.npmrc'), `${own.scope}:registry=${company.url}\n${token}`);
   const yarn = existsSync(join(proj.dir, 'yarn.lock'));
   const fake = fakeManager(yarn ? 'yarn' : 'pnpm', manager ?? { '--version': yarn ? '4.9.4' : '10.33.0' });
+  const home = mkdtempSync(join(tmpdir(), 'ng-hop-home-'));
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
     if (next) args.push('--next');
     if (!text) args.push('--json');
-    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file, ...env }, node });
+    const isolated = { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config') };
+    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file, ...isolated, ...env }, node });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null, asked: fake.asked() };
   } finally {
     await registry.close();
     if (company) await company.close();
     fake.remove();
+    rmSync(home, { recursive: true, force: true });
   }
 }
