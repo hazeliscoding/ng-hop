@@ -1978,6 +1978,9 @@ test('a value on the line below its key, or in a file indented as a whole, is re
     const p = yarn21({ files: { '.yarnrc.yml': `${text}\n` } });
     assert.equal(await ageOf(p, { manager: { '--version': '4.18.1' } }), unread(join(p.dir, '.yarnrc.yml'), 1, text, 'yarn config get npmMinimalAgeGate'), text);
   }
+  // A yarnPath the plan can't read leaves yarn's version unknown too, since it names the release yarn hands over to.
+  const path = yarn21({ pin: 'yarn@4.18.1', files: { '.yarnrc.yml': 'yarnPath: &p .yarn/releases/yarn-4.10.1.cjs\n' } });
+  assert.equal(await ageOf(path, { manager: { '--version': '4.18.1' } }), unread(join(path.dir, '.yarnrc.yml'), 1, 'yarnPath: &p .yarn/releases/yarn-4.10.1.cjs', 'yarn config get npmMinimalAgeGate'));
 });
 
 test('no settings file a repo writes can stall the plan, with a long run of spaces or a packages pattern full of wildcards', async () => {
