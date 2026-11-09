@@ -1218,7 +1218,8 @@ function render(plan) {
     // On a patch, ng update skips young releases from the installed CLI 22.1 on.
     const skips = Boolean(age?.ngUpdateReads) && semver.gte(p.angular, NG_UPDATE_AGE);
     const held = plan.patchesHeld || [];
-    const until = held.length && (held.some((h) => !h.until) ? 'npm\'s before moves' : minute(held.map((h) => h.until).sort().at(-1), true));
+    // The first to be old enough, since each patch is an upgrade on its own.
+    const until = held.length && (held.some((h) => !h.until) ? 'npm\'s before moves' : minute(held.map((h) => h.until).sort()[0], true));
     lines.push(`Already on Angular ${plan.target}. ${plan.patches ? (plan.next ? `${plan.next} is a prerelease of it.` : 'Only patch releases are available.') : held.length ? `Nothing to upgrade until ${until}:` : 'Nothing to upgrade.'}`);
     for (const b of plan.patches?.packages || []) lines.push(`  ${b.name}: ${b.from} -> ${b.to}${b.held ? `; ${newer(b.held, skips)}` : ''}`);
     for (const h of held) lines.push(`  ${h.name}: ${h.version} is ${youngFor(h, skips)}`);

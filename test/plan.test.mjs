@@ -1862,7 +1862,8 @@ test('a CLI younger than the age holds its major back though core is old enough,
 test('on the target major, a patch too young is named, and the newest old enough is offered', async () => {
   const [core, compiler] = angular();
   youngPatch(core, '22.3.0', '22.2.0');
-  const cli = pkg('@angular/cli', { '22.0.0': { at: '2026-05-27' }, '22.2.0': { at: '2026-05-28' }, '22.3.0': { ago: 30 } });
+  // The CLI comes out after core, by 3 hours 41 at 22.2.0.
+  const cli = pkg('@angular/cli', { '22.0.0': { at: '2026-05-27' }, '22.2.0': { at: '2026-05-28' }, '22.3.0': { ago: 10 } });
   const packages = () => [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), cli];
   const proj = (v = '22.0.0') => app({ deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: v, cli: v })) } });
   const r = await plan(packages(), proj(), { to: 22, manager: pnpm12 });
@@ -1878,7 +1879,9 @@ test('on the target major, a patch too young is named, and the newest old enough
   assert.equal(none.plan.patches, undefined);
   assert.deepEqual(none.plan.patchesHeld, [{ name: '@angular/core', version: '22.3.0', until: ripeAt(core, '22.3.0', 1440) }, { name: '@angular/cli', version: '22.3.0', until: ripeAt(cli, '22.3.0', 1440) }]);
   const noneText = (await plan(packages(), proj('22.2.0'), { to: 22, text: true, manager: pnpm12 })).stdout;
-  assert.match(noneText, /^Already on Angular 22\. Nothing to upgrade until \d{4}-\d\d-\d\d \d\d:\d\d UTC:$/m);
+  // Core's patch is old enough first, and from then it's an upgrade on its own.
+  const [, coreUntil] = /^ {2}@angular\/core: 22\.3\.0 is too young for pnpm and ng update until (\d{4}-\d\d-\d\d \d\d:\d\d UTC)$/m.exec(noneText) || [];
+  assert.match(noneText, new RegExp(`^Already on Angular 22\\. Nothing to upgrade until ${coreUntil}:$`, 'm'));
   assert.match(noneText, /^ {2}@angular\/cli: 22\.3\.0 is too young for pnpm and ng update until \d{4}-\d\d-\d\d \d\d:\d\d UTC$/m);
   assert.doesNotMatch(noneText, /Run: /);
 });
