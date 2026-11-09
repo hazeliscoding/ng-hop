@@ -262,7 +262,7 @@ test('with no publish time, tooling that follows Angular\'s major, a patch and A
   assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
 });
 
-test('with one release that has no publish time and one too young, only the young one goes in first, so the other's migrations still run', async () => {
+test('with one release that has no publish time and one too young, only the young one goes in first, so the other\'s migrations still run', async () => {
   // ui-a's 22.0.0 has no time and ships migrations, and ui-b's came out ten minutes ago. ng update takes ui-a's, so the
   // exemption alone gets it past yarn, and installing it first would only skip its migrations, while ng update skips
   // ui-b's until it's old enough.
