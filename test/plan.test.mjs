@@ -2225,6 +2225,21 @@ test('an age too long to give a date for is unknown, naming where it is set, and
   assert.deepEqual([near.code, near.plan.waiting?.until.slice(0, 2), seconds.code, seconds.plan.waiting?.until.slice(0, 2)], [2, '98', 2, '23'], near.stderr + seconds.stderr);
 });
 
+test('a release the registry dates so late that the age ends past the year 9999 leaves the age unknown, naming it, and the plan neither crashes nor gives a time', async () => {
+  // Under pnpm 12.16.1's default age of a day, a registry dating ui-lib 22.0.0 +275760-09-12, the last day a Date holds,
+  // stopped the plan with RangeError: Invalid time value, and 9999-12-31 printed BLOCKED until +010000-01-01 12 UTC.
+  const dated = (time) => { const lib = youngLib(); lib.time['22.0.0'] = time; return world(lib); };
+  for (const time of ['+275760-09-12T12:00:00.000Z', '9999-12-31T12:00:00.000Z']) {
+    const r = await plan(dated(time), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22, text: true });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.stdout.includes(`\n  release age: the registry says ui-lib 22.0.0 came out at "${time}", and pnpm's minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ui-lib time.`), r.stdout);
+    assert.doesNotMatch(r.stdout, /until|waiting/);
+  }
+  // The control: a release dated in the year 9000 is too young for a day after that, and the plan waits for it.
+  const r = await plan(dated('9000-01-01T00:00:00.000Z'), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22 });
+  assert.deepEqual([r.code, r.plan.waiting?.until], [2, '9000-01-02T00:00:00.000Z'], r.stderr);
+});
+
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
   const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
