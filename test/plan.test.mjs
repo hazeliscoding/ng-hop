@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { after, test } from 'node:test';
 import { managerCommand } from '../plugins/ng-hop/skills/ng-hop/scripts/manager.mjs';
@@ -1740,14 +1740,20 @@ test('the plan asks from a folder in the home folder, since any account can leav
   assert.ok(!inside(r.asked[0].cwd, tmp), `asked from ${r.asked[0].cwd}`);
 });
 
-test('a relative PATH entry into the project never runs the pnpm, npm or node it holds', async () => {
+test('a relative PATH entry into the project never runs the pnpm, npm or node it holds, and the pnpm asked is the one outside it', async () => {
   // A relative PATH entry is looked up from the folder a command starts in, so from the project, bin/pnpm here would be
   // the project's own code, as the control shows. Without npm_execpath or COREPACK_ROOT, PATH is where pnpm is found.
   // npm runs in the project, so on Linux and macOS a bare npm, or the node its #!/usr/bin/env node names, was too.
   const shell = '#!/bin/sh\n: > "$0.ran"\necho {}\n';
   const proj = pnpm21({}, { files: { 'bin/pnpm.cjs': MARKER, 'bin/pnpm.cmd': '@"%~dp0\\pnpm.cjs" %*\r\n', 'bin/pnpm': `#!/usr/bin/env node\n${MARKER}`, 'bin/npm': shell, 'bin/node': shell } });
   for (const name of ['pnpm', 'npm', 'node']) chmodSync(join(proj.dir, 'bin', name), 0o755);
-  const env = { PATH: ['bin', dirname(process.execPath)].join(delimiter), npm_execpath: undefined, COREPACK_ROOT: undefined };
+  // The person's own pnpm, outside the repo and after bin on PATH, is the one asked: the repo's, found from the project,
+  // would be passed over as the repo's code, and the age left unknown, with nothing run either way.
+  const own = fakeManager('pnpm', pnpm12);
+  writeFileSync(join(dirname(own.file), 'pnpm.cmd'), '@"%~dp0\\pnpm.cjs" %*\r\n');
+  writeFileSync(join(dirname(own.file), 'pnpm'), `#!/bin/sh\nexec '${process.execPath}' "$(dirname "$0")/pnpm.cjs" "$@"\n`);
+  chmodSync(join(dirname(own.file), 'pnpm'), 0o755);
+  const env = { PATH: ['bin', dirname(own.file), dirname(process.execPath)].join(delimiter), npm_execpath: undefined, COREPACK_ROOT: undefined };
   const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
   let found;
   try {
@@ -1757,8 +1763,12 @@ test('a relative PATH entry into the project never runs the pnpm, npm or node it
     for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
   assert.ok(inside(found.prefix[0] ?? found.file, proj.dir), `the control: from the project, PATH finds ${found.prefix[0] ?? found.file}`);
-  await plan(world(), proj, { to: 22, env });
-  assert.deepEqual(ran(proj.dir), []);
+  const r = await plan(world(), proj, { to: 22, env });
+  try {
+    assert.deepEqual([ran(proj.dir), own.asked().map((a) => a.args), r.plan.releaseAge?.version], [[], ['--version'], '12.16.1']);
+  } finally {
+    own.remove();
+  }
 });
 
 test('npm is never one the repo holds, through a relative npm_execpath or one into the repo', async () => {
