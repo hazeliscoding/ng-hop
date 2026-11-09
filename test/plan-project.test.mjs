@@ -269,6 +269,33 @@ test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a m
   }
 });
 
+test('pnpm: a registry line with no value stops the plan with a reason naming where it is, instead of a crash', async () => {
+  // npm 11.19.0 listed registry as true for `registry` alone on a line, which pnpm 10.34.9 refused in an app's own
+  // .npmrc: `registry` should be a string. The plan stopped with TypeError: url.endsWith is not a function.
+  const mirror = await startRegistry(world());
+  const home = app({}).dir;
+  const run = async (files, version) => {
+    const w = acmeWorkspace({ files: { 'user.npmrc': '', ...files } });
+    const pnpm = fakeManager('pnpm', { '--version': version });
+    try {
+      return { w, ...await runScript(PLAN, ['--project', w.dir, '--to', '21'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file, HOME: home, USERPROFILE: home } }) };
+    } finally {
+      pnpm.remove();
+    }
+  };
+  try {
+    const own = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': 'registry\r\nsave-exact=true\r\n' }, '10.34.9');
+    assert.deepEqual([own.code, own.stderr.trim()], [1, `${join(own.w.dir, '.npmrc')} sets registry without an address, which npm reads as true and pnpm 10 refuses, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+    const root = await run({ '.npmrc': '@acme:registry\nsave-exact=true\n' }, '10.34.9');
+    assert.deepEqual([root.code, root.stderr.trim()], [1, `An .npmrc npm reads in ${root.w.root} sets @acme:registry without an address, which npm reads as true, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+    // The control: pnpm 12.16.1 reads only the root's .npmrc, so the app's line counts for nothing.
+    const later = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': 'registry\r\nsave-exact=true\r\n' }, '12.16.1');
+    assert.equal(later.code, 0, later.stderr);
+  } finally {
+    await mirror.close();
+  }
+});
+
 test('pnpm: a lockfile in a parent folder with no workspace file has nothing to do with the app', async () => {
   const p = app({ deps: {}, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('apps/web')), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { '@angular/core': '^20.0.0' } }) } });
   const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 21 });

@@ -1089,6 +1089,7 @@ async function buildPlan({ projectDir, to, next = false }) {
   const found = ['pnpm', 'yarn'].includes(project.packageManager) ? await managerVersion(project, project.packageManager) : null;
   const appRc = join(projectDir, '.npmrc');
   const appKeys = configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
+  const fromApp = new Set();
   if (appKeys) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
     // Its keys as npm 11.19.0's ini and pnpm 10.34.9's read them: lines split at \r or \n, each up to its first =, or
@@ -1099,8 +1100,15 @@ async function buildPlan({ projectDir, to, next = false }) {
     // quoted key, or one holding ; or #, goes unread; follow ini's decode() if a team writes either.
     for (const line of readFileSync(appRc, 'utf8').split(/[\r\n]+/)) {
       const key = /^([^=]+)(?:=.*)?$/.exec(line)?.[1].trim();
-      if (key && Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
+      if (key && Object.hasOwn(appConfig, key)) { config[key] = appConfig[key]; fromApp.add(key); }
     }
+  }
+  // npm reads a registry named with no value, alone on its line, as true, which is no address: pnpm 10.34.9 refused one
+  // in an app's own .npmrc, `registry` should be a string, and the plan stopped with a TypeError.
+  const blank = Object.keys(config).find((key) => /(?:^|:)registry$/.test(key) && typeof config[key] !== 'string');
+  if (blank) {
+    const own = fromApp.has(blank);
+    throw new PlanError(`${own ? appRc : `An .npmrc npm reads in ${configDir}`} sets ${blank} without an address, which npm reads as ${plainLine(JSON.stringify(config[blank]), 60)}${own ? ' and pnpm 10 refuses' : ''}, so the plan can't tell which registry to ask; ask the person to fix that line.`);
   }
   const registry = registryClient(config, appKeys ? [configDir, projectDir] : [configDir], npm);
   const asked = releaseAge(project, config, found);
