@@ -613,10 +613,10 @@ function yarnAge(project, version) {
 const ageUnread = (pm, why) => ({ unknown: `${why}, so the plan can't tell ${pm}'s minimum release age, and a release younger than that can still stop a command; ask the person to check it with ${pm === 'pnpm' ? 'pnpm config get minimum-release-age' : 'yarn config get npmMinimalAgeGate'}` });
 
 // The pnpm or yarn a command in the app runs: the release yarnPath names, which yarn hands over to unless ignorePath is
-// set, then the nearest package.json whose packageManager pins the manager, with any +sha suffix, and only then the
-// nearest devEngines.packageManager, as Corepack 0.35.0 walks past a package.json with no packageManager to a parent's.
-// An exact version there pins it. A range, or a list, which Corepack ignores, only says which versions may run, so it
-// comes back as { range, from } for the person's own to be asked. null: nothing pins it.
+// set, then the nearest package.json whose packageManager pins the manager, with any +sha suffix, and only then
+// devEngines.packageManager, read from the topmost package.json alone, as Corepack 0.35.0's loadSpec walks past any
+// with no packageManager. An exact version there pins it. A range, or a list, which Corepack ignores, only says which
+// versions may run, so it comes back as { range, from } for the person's own to be asked. null: nothing pins it.
 function pinnedVersion(project, pm) {
   if (pm === 'yarn') {
     const path = yarnSetting(project.dir, 'yarnPath');
@@ -632,14 +632,12 @@ function pinnedVersion(project, pm) {
     const version = semver.valid(pkg.packageManager.slice(pm.length + 1).split('+')[0]);
     return version ? { version } : ageUnread(pm, `${file} pins "${plainLine(pkg.packageManager, 60)}" in packageManager, which names no ${pm} version`);
   }
-  for (const [file, pkg] of manifests) {
-    const engines = pkg?.devEngines?.packageManager;
-    const engine = [].concat(engines ?? []).find((entry) => entry?.name === pm && entry.version);
-    if (!engine) continue;
-    if (!semver.validRange(engine.version)) return ageUnread(pm, `${file} pins "${plainLine(String(engine.version), 60)}" in devEngines.packageManager, which names no ${pm} version`);
-    return semver.valid(engine.version) && !Array.isArray(engines) ? { version: semver.valid(engine.version) } : { range: engine.version, from: file };
-  }
-  return null;
+  const [file, pkg] = manifests.at(-1) ?? [];
+  const engines = pkg?.devEngines?.packageManager;
+  const engine = [].concat(engines ?? []).find((entry) => entry?.name === pm && entry.version);
+  if (!engine) return null;
+  if (!semver.validRange(engine.version)) return ageUnread(pm, `${file} pins "${plainLine(String(engine.version), 60)}" in devEngines.packageManager, which names no ${pm} version`);
+  return semver.valid(engine.version) && !Array.isArray(engines) ? { version: semver.valid(engine.version) } : { range: engine.version, from: file };
 }
 
 // A folder's identity, which no spelling of its path changes: its device and file id, read as bigints since NTFS file

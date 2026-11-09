@@ -1975,6 +1975,10 @@ test('a devEngines range or list only says which version may run, so the person\
   }
   const above = await plan(world(), mono({ packageManager: 'pnpm@12.16.1' }, { devEngines: { packageManager: { name: 'pnpm', version: '10.34.9' } } }), { to: 22, manager: pnpm12 });
   assert.deepEqual([above.plan.releaseAge?.version, above.asked], ['12.16.1', []]);
+  // With no packageManager anywhere, Corepack's loadSpec ends on the topmost package.json and reads devEngines from that
+  // one alone, so an app's own below a root that names no manager pins nothing.
+  const below = await plan(world(), mono({}, { devEngines: { packageManager: { name: 'pnpm', version: '10.34.9' } } }), { to: 22, manager: pnpm12 });
+  assert.deepEqual([below.plan.releaseAge?.version, below.asked.map((a) => a.args)], ['12.16.1', ['--version']]);
 });
 
 test('a devEngines pin for pnpm or yarn doesn\'t stop npm from reading the registry settings, wherever it sits', async () => {
