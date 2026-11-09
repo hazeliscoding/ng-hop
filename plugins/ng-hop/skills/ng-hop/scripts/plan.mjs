@@ -518,14 +518,16 @@ const tooLong = (minutes, shown) => (Date.now() + minutes * 60e3 >= Date.UTC(100
 // pnpm's minimum-release-age for the app, the first source that sets it winning, as found offline. pnpm 12.16.1 and
 // 11.28.11: pnpm_config_minimum_release_age, the nearest pnpm-workspace.yaml if it applies to the app, then pnpm's
 // config.yaml. pnpm 10.34.9: the nearest pnpm-workspace.yaml whatever its packages, then npm_config_ and .npmrc.
-// shortcut: pnpm 11 also read an empty or fractional pnpm_config_ value, and a null in a file, which 12 passes over;
-// pnpm_config_workspace_dir moved the workspace 11 and 12 read; and pnpm before 10.16 holds nothing back by this
-// setting at install, though ng update reads what it prints. Follow those if a team sets the age that way.
+// shortcut: pnpm 11 also read an empty pnpm_config_ value as 0, -5 and 20.5 as they were, and +20 and 020 as 20, and a
+// null in a file, where 12 passes over each; pnpm_config_workspace_dir moved the workspace 11 and 12 read; and pnpm
+// before 10.16 holds nothing back by this setting at install, though ng update reads what it prints. Follow those if a
+// team sets the age that way.
 function pnpmAge(project, version, config) {
   const v11 = semver.gte(version, '11.0.0'), v12 = semver.gte(version, '12.0.0');
   // A file's value, or why it can't be read. 12.16.1 read 60, "60", +60 and 0x3C as 60, passed over an empty value or
   // null, and failed on every command over 060, -5, 60.5, 1e3, 1d or a number past 2^64; 11.28.11 and 10.34.9 printed
-  // those as they were, for ng update to parse with parseInt. All three failed over a key set twice.
+  // -5, 60.5 and 1d as they were, and 060, 1e3 and 99999999999999999999 as 60, 1000 and 100000000000000000000, for ng
+  // update to parse with parseInt. All three failed over a key set twice.
   const read = (from, key, values) => {
     if (values.length > 1) return { refused: `${from} sets ${key} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` };
     const [value] = values;
