@@ -1609,10 +1609,10 @@ const pnpm21 = (deps) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@an
 const youngLib = () => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
 const ripeAt = (doc, v, minutes) => new Date(Date.parse(doc.time[v]) + minutes * 60e3).toISOString();
 const youngPatch = (doc, v, from, ago = 30) => { doc.versions[v] = { ...doc.versions[from], version: v }; doc.time[v] = new Date(Date.now() - ago * 60e3).toISOString(); doc['dist-tags'].latest = v; };
-// M7's libraries: 21.4.0 accepts Angular 21 only, and 22.0.0 came out `ago` minutes ago.
+// M7's libraries: 21.4.0 accepts Angular 21 only, and ui-core's 22.0.0 came out `ago` minutes ago, ui-forms' 0.6 s after.
 const acme = (ago, extra = {}) => [
   pkg('@acme/ui-core', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@angular/common': '^21.2.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@angular/common': '^22.0.0' }, ago, ...extra } }),
-  pkg('@acme/ui-forms', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@acme/ui-core': '^21.4.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@acme/ui-core': '^22.0.0' }, ago } }),
+  pkg('@acme/ui-forms', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@acme/ui-core': '^21.4.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@acme/ui-core': '^22.0.0' }, ago: ago - 0.01 } }),
 ];
 const acmeDeps = { '@acme/ui-core': '^21.4.0', '@acme/ui-forms': '^21.4.0' };
 const npmApp = (rc) => app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', 'ui-lib': '21.0.0' }, files: { '.npmrc': rc } });
@@ -1636,6 +1636,8 @@ test('a package manager that can\'t be asked leaves release age unchecked, and s
   const asked = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.ok(!asked.plan.unchecked.some((u) => u.name === 'release age'), 'positive control');
   assert.equal(asked.code, 2);
+  const odd = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { ...pnpm12, '--version': 'oops' } });
+  assert.match(odd.plan?.unchecked.find((u) => u.name === 'release age')?.reason ?? odd.stderr, /\(it printed "oops" for its version\)/);
 });
 
 test('why release age went unchecked keeps the manager\'s whole last line, and says to plan again once dependencies are installed', async () => {
@@ -1649,13 +1651,17 @@ test('the plan only asks the package manager, and keeps pnpm from recording itse
   // pnpm 12.16.1's --version, in a project whose package.json pins pnpm, wrote packageManagerDependencies into
   // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore. update.mjs's npm_config_pm_on_fail=error didn't stop it.
   // On Windows a name has no case, and Node passes on the first spelling in sort order, so the person's own uppercase
-  // setting would win over the plan's.
-  process.env.PNPM_CONFIG_PM_ON_FAIL = 'download';
+  // setting would win over the plan's. Corepack stays offline too, so the plan never downloads a package manager.
+  const set = { PNPM_CONFIG_PM_ON_FAIL: 'download', COREPACK_ENABLE_NETWORK: '1' };
+  const saved = Object.fromEntries(Object.keys(set).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, set);
   let r;
-  try { r = await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 }); } finally { delete process.env.PNPM_CONFIG_PM_ON_FAIL; }
+  try { r = await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 }); } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
   assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true });
   assert.deepEqual(r.asked.map((a) => a.args).sort(), ['--version', 'config get minimum-release-age']);
-  for (const a of r.asked) assert.equal(a.pmOnFail, 'ignore');
+  for (const a of r.asked) assert.deepEqual([a.pmOnFail, a.corepack], ['ignore', ['0', '0', '0']]);
 });
 
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
@@ -1764,7 +1770,8 @@ test('a release younger than pnpm\'s minimum release age makes its major wait, w
   assert.equal(r.plan.reachable, 21);
   assert.deepEqual(r.plan.hops, [], 'a command that would fail is never a hop');
   assert.deepEqual(r.plan.blockers.map((b) => [b.major, b.name, b.kind, b.version]), [[22, '@acme/ui-core', 'too-young', '22.0.0'], [22, '@acme/ui-forms', 'too-young', '22.0.0']]);
-  assert.equal(r.plan.waiting.until, [ripeAt(packages[0], '22.0.0', 1440), ripeAt(packages[1], '22.0.0', 1440)].sort().at(-1));
+  assert.equal(r.plan.waiting.until, ripeAt(packages[1], '22.0.0', 1440), 'until the last of them is old enough');
+  assert.match(r.plan.blockers[0].reason, /; from Angular CLI 22\.1, ng update skips it until then too and reads no exemption list$/);
   assert.equal(r.plan.ownBlockers, undefined, 'they are upgraded already, so upgrading them first is no answer');
   assert.ok(r.plan.waiting.sooner.endsWith(' --install-first @acme/ui-core --install-first @acme/ui-forms @angular/core@22 @angular/cli@22 @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0'), r.plan.waiting.sooner);
   const text = (await plan(world(), pnpm21(acmeDeps), { to: 22, text: true, own: { scope: '@acme', packages }, manager: pnpm12 })).stdout;
@@ -1794,10 +1801,15 @@ test('yarn 4.18.1 holds a release back by npmMinimalAgeGate, while yarn 4.9.4, w
   assert.equal(r.code, 2, r.stderr);
   assert.equal(r.plan.blockers[0].kind, 'too-young');
   assert.ok(r.plan.waiting.sooner.startsWith(`node ${quotePath(UPDATE)} --install-first ui-lib @angular/core@22`), r.plan.waiting.sooner);
+  // A question it fails counts as no age, as ng update counts it, so nothing goes unchecked either.
   for (const version of ['4.9.4', '1.22.22']) {
     const free = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': version } });
     assert.equal(free.code, 0, `${version}: ${free.stderr}`);
+    assert.deepEqual([free.plan.releaseAge, free.plan.unchecked.filter((u) => u.name === 'release age')], [null, []], version);
   }
+  // ng update's parser takes a unit too, as in 3d.
+  const days = await plan(world(), proj(), { to: 22, manager: { '--version': '4.18.1', 'config get npmMinimalAgeGate': '3d' } });
+  assert.equal(days.plan.releaseAge.minutes, 3 * 1440);
 });
 
 test('npm\'s min-release-age holds a release back at install, where ng update reads only before, so an approved exemption is enough', { skip: !npmKnowsAge && 'this npm has no min-release-age' }, async () => {

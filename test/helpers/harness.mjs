@@ -152,13 +152,15 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
 
 // A stand-in for pnpm or yarn, which the plan asks for its minimum release age through npm_execpath, the first place
 // managerCommand looks. answers maps the arguments to what it prints, or to { stderr } for what it prints as it fails;
-// anything else, or null, exits 1. Each question is logged with the pnpm_config_pm_on_fail it ran under.
+// anything else, or null, exits 1. Each question is logged with the pnpm_config_pm_on_fail and Corepack settings it ran
+// under.
 export function fakeManager(name, answers) {
   const dir = mkdtempSync(join(tmpdir(), 'ng-hop-pm-'));
   const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
   writeFileSync(file, `const fs = require('fs');
 const args = process.argv.slice(2).join(' ');
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, pmOnFail: process.env.pnpm_config_pm_on_fail ?? null }) + '\\n');
+const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE];
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack }) + '\\n');
 const answer = ${JSON.stringify(answers)}[args];
 if (answer == null) process.exit(1);
 if (answer.stderr) { console.error(answer.stderr); process.exit(1); }
