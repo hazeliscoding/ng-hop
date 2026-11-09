@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // pnpm and yarn execution transport. The plan selects versions; Angular still checks Git and peers and runs migrations.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { managerCommand } from './manager.mjs';
@@ -196,9 +197,18 @@ function main() {
   // script's own, checked above.
   const update = positionals.filter((spec) => !firstNames.includes(spec.slice(0, spec.lastIndexOf('@'))));
   const dirty = inlined || first.length ? ['--allow-dirty'] : [];
-  const args = yarn ? ['exec', '--yes', `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
+  // npm checks devEngines.packageManager in the package.json of the folder it runs for, and npm 11.19.0 and 10.9.9
+  // refused a yarn project whose pin there names yarn: EBADDEVENGINES. So npm runs for an empty folder of its own, which
+  // --prefix names, and still starts the CLI in the project. It reads that folder's .npmrc as the project's, so the
+  // project's goes in, for its registry and token.
+  // shortcut: --prefix also moves npm's global npmrc into that folder, and the .npmrc of an npm workspace root above the
+  // project, which npm read in place of the project's, goes unread; pass either along if a team keeps its registry there.
+  const folder = yarn ? mkdtempSync(join(tmpdir(), 'ng-hop-npm-')) : null;
+  if (folder && existsSync(join(cwd, '.npmrc'))) copyFileSync(join(cwd, '.npmrc'), join(folder, '.npmrc'));
+  const args = yarn ? ['exec', '--yes', `--prefix=${folder}`, `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
   const run = (argv) => spawnSync(runner.file, [...runner.prefix, ...argv], options);
   const result = run(args);
+  if (folder) rmSync(folder, { recursive: true, force: true });
   let exitCode = result.status ?? 1;
   let catalog = null, install = null;
   if (inlined) {

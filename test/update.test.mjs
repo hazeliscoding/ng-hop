@@ -167,8 +167,46 @@ test('yarn updater: the target CLI runs from npm\'s own cache, so Angular never 
   writeFileSync(npm, driverSource);
   const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm } });
   assert.equal(r.code, 0, r.stderr || r.stdout);
-  assert.deepEqual(f.read().args, ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', ...packages]);
+  // npm runs for a folder of its own, as the devEngines test below explains.
+  assert.deepEqual(f.read().args.filter((arg) => !arg.startsWith('--prefix=')), ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', ...packages]);
   assert.equal(f.read().dispatch, 'true', 'the target CLI keeps control instead of handing back to the app\'s old one');
+});
+
+// Stands in for npm 11.19.0, which checks devEngines.packageManager in the package.json of the folder it runs for, the one
+// --prefix names or else the nearest up from where it runs, and refuses one naming another manager.
+const devEnginesDriver = `const nodeFs = require('node:fs'), nodePath = require('node:path');
+const prefix = process.argv.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
+let folder = prefix ?? process.cwd();
+while (!prefix && !nodeFs.existsSync(nodePath.join(folder, 'package.json')) && nodePath.dirname(folder) !== folder) folder = nodePath.dirname(folder);
+const manifest = nodePath.join(folder, 'package.json');
+const pin = nodeFs.existsSync(manifest) ? JSON.parse(nodeFs.readFileSync(manifest, 'utf8')).devEngines?.packageManager : null;
+if (pin && pin.name !== 'npm') { console.error('npm error code EBADDEVENGINES'); process.exit(1); }
+nodeFs.writeFileSync(process.env.TEST_RC, nodeFs.existsSync(nodePath.join(folder, '.npmrc')) ? nodeFs.readFileSync(nodePath.join(folder, '.npmrc'), 'utf8') : '(none)');
+` + driverSource;
+
+test('yarn updater: npm runs the target CLI for an empty folder of its own, since it refuses a project whose devEngines names yarn', async () => {
+  // npm 11.19.0, and 10.9.9 on Linux, stopped the hop's npm exec in a yarn project whose devEngines.packageManager named
+  // yarn: EBADDEVENGINES Invalid name "yarn" does not match "npm" for "packageManager". With --prefix naming an empty
+  // folder, npm read no pin and still ran the CLI in the project, and it reads the .npmrc in that folder, which holds the
+  // project's registry and token.
+  const f = fixture();
+  rmSync(join(f.project, 'pnpm-lock.yaml'));
+  writeFileSync(join(f.project, 'yarn.lock'), '# yarn lockfile\n');
+  writeFileSync(join(f.project, 'package.json'), '{"private":true,"dependencies":{"@angular/core":"21.2.0"},"devEngines":{"packageManager":{"name":"yarn","version":"4.18.1"}}}\n');
+  writeFileSync(join(f.project, '.npmrc'), 'registry=https://npm.example.invalid/\n');
+  const git = (args) => spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: f.project, encoding: 'utf8' });
+  git(['add', '--all']); git(['commit', '-m', 'yarn']);
+  const npm = join(f.root, 'npm-cli.js'), rc = join(f.root, 'rc.txt');
+  writeFileSync(npm, devEnginesDriver);
+  const refused = spawnSync(process.execPath, [npm, 'exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update'], { cwd: f.project, env: { ...process.env, ...f.env, TEST_RC: rc }, encoding: 'utf8' });
+  assert.match(refused.stderr, /EBADDEVENGINES/, 'positive control: the stand-in refuses the project as npm does');
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm, TEST_RC: rc } });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  const called = f.read();
+  const prefix = called.args.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
+  assert.ok(prefix && !existsSync(prefix), `npm ran for a folder of its own, removed after: ${called.args.join(' ')}`);
+  assert.equal(realpathSync(called.cwd), realpathSync(f.project), 'the CLI still runs in the project');
+  assert.equal(readFileSync(rc, 'utf8'), 'registry=https://npm.example.invalid/\n', 'npm reads the project\'s .npmrc');
 });
 
 test('pnpm updater: executable shims are resolved without running a command shell', async () => {
@@ -290,7 +328,7 @@ test('yarn updater: --install-first installs through the project\'s yarn, and th
   const f = firstFixture(acme, { yarn: true });
   const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
   assert.equal(r.code, 0, r.stderr || r.stdout);
-  assert.deepEqual(f.log(), [
+  assert.deepEqual(f.log().map((call) => call.filter((arg) => !arg.startsWith('--prefix='))), [
     ['add', '@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0'],
     ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', '@angular/core@22', '@angular/cli@22', '--allow-dirty'],
   ]);

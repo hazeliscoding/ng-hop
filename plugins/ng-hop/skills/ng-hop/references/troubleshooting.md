@@ -126,7 +126,7 @@ npm error EBADDEVENGINES Invalid devEngines.packageManager
 npm error EBADDEVENGINES Invalid name "pnpm" does not match "npm" for "packageManager"
 ```
 
-npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists.
+npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists. A yarn hop's `update.mjs` still runs the target CLI through npm, for an empty folder of its own with a copy of the project's `.npmrc`, so the pin doesn't stop it.
 
 ```text
 Error: ERR_PNPM_BAD_CONFIG_DEP
