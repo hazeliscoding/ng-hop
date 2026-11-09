@@ -1832,6 +1832,17 @@ test('npm 11.10 to 11.14 turn min-release-age into a before that many days back,
   assert.equal(set.plan.releaseAge.setting, 'before', 'the control: a before half an hour off a whole day is one someone set');
 });
 
+test('an npm before 11.17 has no min-release-age-exclude, so there is no sooner way, and npm exempts a package, not a release', async () => {
+  // npm 11.16.0 has no such setting: it warned `Unknown project config "min-release-age-exclude"`. Node 24.18 bundles it.
+  // ng update below 22.1 doesn't apply before, so only the install holds the release back.
+  const lib = pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', ago: 10 } });
+  const proj = (version) => app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.1.0' }, files: { '.npmrc': `npm-version=${version}\nbefore=${new Date(Date.now() - 60 * 60e3).toISOString()}\n` } });
+  const old = await plan(world(lib), proj('11.16.0'), { to: 21, text: true });
+  assert.match(old.stdout, /^ {2}No sooner way: this npm has no min-release-age-exclude, which npm 11\.17 added\.$/m, old.stdout);
+  const now = await plan(world(lib), proj('11.17.0'), { to: 21, text: true });
+  assert.match(now.stdout, /^ {2}Sooner, once the person approves exempting ui-lib and that is committed by itself: npx --no-install ng update /m, now.stdout);
+});
+
 test('a major out for less than the minimum release age waits as a whole, and Angular itself never goes in first', async () => {
   const [core, compiler] = angular({ 20: '2025-05-28', 21: '2025-11-19' });
   for (const doc of [core, compiler]) youngPatch(doc, '22.0.0', '21.0.0', 120);

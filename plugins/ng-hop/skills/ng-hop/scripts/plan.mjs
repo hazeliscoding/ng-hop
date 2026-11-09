@@ -1056,9 +1056,11 @@ async function buildPlan({ projectDir, to, next = false }) {
       // Sooner takes the person's approved exemption. Where ng update skips young releases itself, the libraries go in
       // first through update.mjs, on pnpm and yarn, never Angular or a library whose migrations that would skip.
       const migrating = held.find((h) => h.migrations);
+      // npm 11.16 and older know no min-release-age-exclude, and warn that it's an unknown setting, though they list it.
+      const excludes = project.packageManager !== 'npm' || semver.gte(semver.coerce(config['npm-version']) || '0.0.0', '11.17.0');
       // Angular's own time, since a later library's can set the From time, and once Angular is old enough a way can open.
       const noSooner = angularHeld.length ? `Angular ${major} itself ${age.before ? 'is newer than npm\'s before' : `is too young until ${minute(angularHeld.map((h) => h.until).sort().at(-1), true)}`}`
-        : !ngUpdateSkips ? null
+        : !ngUpdateSkips ? (excludes ? null : 'this npm has no min-release-age-exclude, which npm 11.17 added')
         : migrating ? `${migrating.name} ships migrations, which installing it first would skip`
         : !['pnpm', 'yarn'].includes(project.packageManager) ? `ng update applies npm's ${age.setting} to every package and reads no exemption list`
         : null;
@@ -1265,7 +1267,9 @@ function render(plan) {
     else {
       // Never a Run: line: the person decides between waiting and an exemption.
       if (hop.until) lines.push(`  From ${minute(hop.until, true)}: ${hop.command}`);
-      lines.push(hop.sooner ? `  Sooner, once the person approves exempting ${hop.held.map((h) => `${h.name} ${h.version}`).join(' and ')} and that is committed by itself: ${hop.sooner}` : `  No sooner way: ${hop.noSooner}.`);
+      // pnpm and yarn can exempt one release, and npm and bun only a package, every release of it.
+      const exempt = (h) => (['npm', 'bun'].includes(age.manager) ? h.name : `${h.name} ${h.version}`);
+      lines.push(hop.sooner ? `  Sooner, once the person approves exempting ${hop.held.map(exempt).join(' and ')} and that is committed by itself: ${hop.sooner}` : `  No sooner way: ${hop.noSooner}.`);
     }
   }
   if (plan.blockers.length) {
