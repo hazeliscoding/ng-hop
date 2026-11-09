@@ -1,0 +1,2 @@
+# LF everywhere, so a Windows checkout and the dev container see the same files.
+* text=auto eol=lf

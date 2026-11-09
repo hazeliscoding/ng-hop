@@ -1,0 +1,37 @@
+.masthead {
+  padding: 2rem 2rem 1rem;
+}
+
+.masthead h1 {
+  margin: 0;
+}
+
+.masthead p {
+  margin: 0.25rem 0 0;
+  color: var(--acme-muted);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.5rem;
+  padding: 1rem 2rem 2rem;
+}
+
+.requests {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.requests li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.requests span {
+  color: var(--acme-muted);
+}

@@ -1,0 +1,6 @@
+# The team decided which dependencies may run install scripts: none of these need theirs to build or serve.
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false

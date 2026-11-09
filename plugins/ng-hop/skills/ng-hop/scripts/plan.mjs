@@ -3,7 +3,7 @@
 // It reads package.json, the lockfile and npm, and never changes the project.
 // Exit codes: 0 the target is reachable (or nothing to do), 2 blocked before the target, 1 could not plan.
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
@@ -61,7 +61,8 @@ function runNpm(args, options) {
 
 // ---- Registry access ------------------------------------------------------------------------------------------
 
-function registryClient(config, cwd) {
+// dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then the app's own folder.
+function registryClient(config, dirs) {
   const cache = new Map();
   const baseFor = (name) => {
     const scope = name.startsWith('@') ? name.split('/')[0] : null;
@@ -69,10 +70,23 @@ function registryClient(config, cwd) {
     return url.endsWith('/') ? url : `${url}/`;
   };
 
-  // npm holds any private-registry credentials, so an auth failure on the direct path falls back to it.
+  // npm holds any private-registry credentials, so an auth failure on the direct path falls back to it, told the registry
+  // the plan chose. npm reads one folder's .npmrc, and a pnpm workspace's token can be in the root's or the app's, so an
+  // auth failure in one folder tries the next. --workspaces=false keeps npm in the folder it's given.
+  async function npmView(name, spec, maxBuffer) {
+    const scope = name.startsWith('@') ? `${name.split('/')[0]}:` : '';
+    for (const [i, cwd] of dirs.entries()) {
+      try {
+        return await runNpm(['view', spec, '--json', `--${scope}registry=${baseFor(name)}`, '--workspaces=false'], { cwd, maxBuffer });
+      } catch (err) {
+        if (i === dirs.length - 1 || !/E40[13]/.test(`${err.stdout || ''}${err.message || ''}`)) throw err;
+      }
+    }
+  }
+
   async function viaNpm(name) {
     try {
-      const { stdout } = await runNpm(['view', `${name}@>=0.0.0-0`, '--json'], { cwd, maxBuffer: 512 * 1024 * 1024 });
+      const { stdout } = await npmView(name, `${name}@>=0.0.0-0`, 512 * 1024 * 1024);
       const docs = [].concat(JSON.parse(stdout));
       const versions = Object.fromEntries(docs.map((d) => [d.version, d]));
       return { name, versions, time: docs[0]?.time || {}, 'dist-tags': docs[0]?.['dist-tags'] || {} };
@@ -85,7 +99,7 @@ function registryClient(config, cwd) {
 
   async function viaNpmRelease(name, version) {
     try {
-      const { stdout } = await runNpm(['view', `${name}@${version}`, '--json'], { cwd, maxBuffer: 64 * 1024 * 1024 });
+      const { stdout } = await npmView(name, `${name}@${version}`, 64 * 1024 * 1024);
       const found = [].concat(stdout.trim() ? JSON.parse(stdout) : []);
       return found[found.length - 1] || null;
     } catch (err) {
@@ -118,7 +132,17 @@ function registryClient(config, cwd) {
   const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
   // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
   const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
-  return { get, release };
+  // A scope with a registry of its own, apart from the default one, is how a company publishes its packages, and how a
+  // vendor ships licensed ones. A mirror set as the default registry for everything says nothing about who owns a
+  // package, so only a scope's own counts.
+  const own = (name) => {
+    const scope = name.startsWith('@') ? name.split('/')[0] : null;
+    const base = (url) => (url.endsWith('/') ? url : `${url}/`);
+    const url = scope && config[`${scope}:registry`];
+    return url && base(url) !== base(config.registry || 'https://registry.npmjs.org/') ? base(url) : null;
+  };
+
+  return { get, release, own };
 }
 
 async function mapLimited(items, fn) {
@@ -226,6 +250,80 @@ function readBunLock(dir) {
       .map(([key, value]) => [key, value[0].slice(value[0].lastIndexOf('@') + 1)]));
   } catch {
     return {};
+  }
+}
+
+// Where the repo pins the Node its team runs: version files, package.json, a dev container or Dockerfile, CI workflows.
+// The upgrade passes on this machine and then fails on theirs, so each is checked against every major's Node range.
+// In the enterprise run, an agent searched JSON and YAML for pins and missed the dev container's Dockerfile.
+function nodePins(dir) {
+  let root = dir;
+  while (!existsSync(join(root, '.git')) && dirname(root) !== root) root = dirname(root);
+  if (!existsSync(join(root, '.git'))) root = dir;
+  const pins = [];
+  const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } };
+  const add = (path, value, kind = 'version') => pins.push({ file: relative(dir, path).replace(/\\/g, '/'), value: String(value).trim(), kind });
+  const bases = [...new Set([dir, root])];
+  for (const base of bases) {
+    for (const name of ['.nvmrc', '.node-version']) { const text = read(join(base, name)); if (text?.trim()) add(join(base, name), text.trim().split('\n')[0]); }
+    // asdf writes nodejs, and mise reads node too.
+    const tools = /^node(?:js)?\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
+    if (tools) add(join(base, '.tool-versions'), tools[1]);
+    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
+      const text = read(join(base, docker)) || '';
+      // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
+      const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
+      for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
+    }
+    // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
+    const devcontainer = (read(join(base, '.devcontainer', 'devcontainer.json')) || '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+    if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
+    const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+    if (feature) add(join(base, '.devcontainer', 'devcontainer.json'), feature);
+    // A workspace keeps engines and volta at its root too, and Volta's members extend the root's.
+    try {
+      const pkg = JSON.parse(read(join(base, 'package.json')) || '{}');
+      if (pkg.engines?.node) add(join(base, 'package.json'), pkg.engines.node, 'engines');
+      if (pkg.volta?.node) add(join(base, 'package.json'), pkg.volta.node);
+    } catch { /* a broken package.json pins nothing, and readProject reports the app's */ }
+  }
+  const workflows = join(root, '.github', 'workflows');
+  for (const name of existsSync(workflows) ? readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f)).sort() : []) {
+    // A comment line goes with its line break, and one after a value goes too, so neither ends a list of versions.
+    const text = (read(join(workflows, name)) || '').replace(/\r/g, '').replace(/^[ \t]*#.*\n?/gm, '').replace(/[ \t]+#.*$/gm, '');
+    // setup-node takes node-version, or a matrix key through ${{ matrix.<key> }}, each as 20, [20, 22] or one "- 20" a
+    // line. A matrix key is read only inside a matrix, since outside it a "version" can be pnpm/action-setup's.
+    const matrix = [...text.matchAll(/^([ \t]*)matrix:(.*\n(?:\1[ \t]+.*\n?|[ \t]*\n)*)/gm)].map((m) => m[2]).join('\n');
+    const keys = new Set([...text.matchAll(/node-version:\s*\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g)].map((m) => m[1]));
+    keys.delete('node-version');
+    for (const [source, key] of [[text, 'node-version'], ...[...keys].map((k) => [matrix, k])]) {
+      for (const [, value] of source.matchAll(new RegExp(`(?<![\\w-])${key}:[ \\t]*([^#\\n]*(?:\\n[ \\t]*-[ \\t]+[^#\\n]*)*)`, 'g'))) {
+        for (const v of value.replace(/[[\]'"]|\n[ \t]*-/g, ',').split(',')) if (/^\s*v?\d/.test(v)) add(join(workflows, name), v);
+      }
+    }
+  }
+  return pins;
+}
+
+// Whether a pin keeps the team on a Node the range accepts. A bare major such as "22" floats to its newest release, so
+// it fits when any release of that major does; a fixed version has to be in the range itself.
+function pinFits(pin, range) {
+  try {
+    // ">=24" allows Node 24.0, which Angular 22 refuses, so the lowest Node an engines range allows has to be accepted.
+    // "*", which semver also makes of ">=0", allows any Node and pins none.
+    if (pin.kind === 'engines') { const valid = semver.validRange(pin.value), min = valid && valid !== '*' && semver.minVersion(valid); return !min || semver.satisfies(min, range); }
+    // A dev container image's tag can start with the image's own version, as typescript-node:5.2-24-bookworm does, so
+    // the Node in it is the two-digit major after that, and a tag that is only the image's version (5-trixie) says none.
+    // shortcut: an image's own version freezes the Node inside it, so only its major is known from the tag; read the
+    // image's NODE_VERSION if a frozen pin below the range's floor ever matters.
+    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
+    if (!version) return true;
+    const parts = version.split('.');
+    const asRange = parts.length === 3 ? version : `${version}.x`;
+    return semver.intersects(asRange, range);
+  } catch {
+    return true; // a number semver can't hold, past 2^53, says nothing about the team's Node
   }
 }
 
@@ -534,9 +632,20 @@ async function broughtLicenses(registry, lib, before, after) {
 async function buildPlan({ projectDir, to, next = false }) {
   const project = readProject(projectDir);
   const assets = angularAssets(projectDir);
-  const { stdout: configText } = await runNpm(['config', 'list', '--json'], { cwd: projectDir })
+  const pins = nodePins(projectDir);
+  // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10 and older lay the app's own over
+  // it, where npm reads one folder's. So npm is asked at the root, then for the keys the app's own file sets, since its
+  // listing holds every default too. --workspaces=false keeps npm in the app's folder below a root that declares them.
+  const npmConfig = (cwd, args = []) => runNpm(['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
-  const registry = registryClient(JSON.parse(configText), projectDir);
+  const configDir = project.pnpmRoot || projectDir;
+  const config = await npmConfig(configDir);
+  const appRc = join(projectDir, '.npmrc');
+  if (configDir !== projectDir && existsSync(appRc)) {
+    const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
+    for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
+  }
+  const registry = registryClient(config, [...new Set([configDir, projectDir])]);
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
   // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.
@@ -752,7 +861,10 @@ async function buildPlan({ projectDir, to, next = false }) {
     let node = { range: nodeRange, status: 'unknown' };
     if (nodeRange && semver.validRange(nodeRange)) {
       const version = process.version.replace(/^v/, '');
-      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.ltr(version, nodeRange) ? 'too-old' : 'unsupported';
+      // A Node in a gap of the range, as 24.14 is in Angular 22's, is too old: a newer one fits, and ng won't start on it.
+      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old';
+      const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
+      if (below.length) node.pins = below;
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
@@ -853,6 +965,47 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
   }
 
+  // A blocker from a scope the npm config gives a registry of its own may be the team's library, which can be upgraded
+  // first rather than waited for. A licensed vendor's registry is set up the same way, so the plan says only what the
+  // config shows. When several are the team's, one can need another, and the one it needs has to be published first.
+  const own = plan.blockers.filter((b) => b.major === blockedAt && registry.own(b.name));
+  if (own.length) {
+    for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; your npm config sets a registry for ${b.name.split('/')[0]}, ${b.ownRegistry}`; }
+    const names = new Set(own.map((b) => b.name));
+    // An optional peer is one a library works with, not one it needs.
+    const needs = new Map(own.map((b) => {
+      const manifest = docs.get(b.name)?.versions?.[b.installed || b.latest] || {};
+      return [b.name, Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })
+        .filter((n) => names.has(n) && n !== b.name && (manifest.dependencies?.[n] || !manifest.peerDependenciesMeta?.[n]?.optional))];
+    }));
+    const order = [];
+    // Every library n needs, directly or through others, that isn't in the order yet.
+    const reach = (n, seen = new Set()) => { for (const d of needs.get(n)) if (!order.includes(d) && !seen.has(d)) { seen.add(d); reach(d, seen); } return seen; };
+    // Before anything is in the order, that's every library n needs.
+    const all = new Map([...names].map((n) => [n, reach(n)]));
+    // A library and the ones that need it back go into the order as one group, so one that only needs them comes after
+    // all of them, not between them.
+    const cycle = (n) => [...names].filter((m) => m === n || (all.get(n).has(m) && all.get(m).has(n)));
+    const groups = [];
+    for (const n of [...names].sort()) if (!groups.some((g) => g.includes(n))) groups.push(cycle(n));
+    while (order.length < names.size) {
+      for (const g of groups.filter((g) => !order.includes(g[0]) && g.every((m) => needs.get(m).every((d) => order.includes(d) || g.includes(d))))) {
+        while (g.some((m) => !order.includes(m))) {
+          const ready = g.filter((m) => !order.includes(m) && needs.get(m).every((d) => order.includes(d))).sort();
+          // Inside a group nothing may be ready. One whose every need leads back to it starts.
+          order.push(...(ready.length ? ready : [g.find((m) => !order.includes(m) && [...reach(m)].every((d) => reach(d).has(m)))]));
+        }
+      }
+    }
+    plan.ownBlockers = order;
+    const each = order.map((n) => (needs.get(n).length ? `${n}, which needs ${needs.get(n).join(' and ')}` : n));
+    // Libraries that need each other, directly or through others, go out together, however many there are.
+    const groupOf = (n) => order.filter((m) => all.get(n).has(m) && all.get(m).has(n));
+    const together = order.filter((n) => groupOf(n)[0] === n).map(groupOf).map((g) => `${g.slice(0, -1).join(', ')} and ${g.at(-1)}`);
+    const scopes = [...new Set(order.map((n) => n.split('/')[0]))];
+    const several = order.length > 1;
+    plan.notes.push(`${several ? `${order.slice(0, -1).join(', ')} and ${order.at(-1)} come` : `${order[0]} comes`} from the ${scopes.length > 1 ? 'registries' : 'registry'} your npm config sets for ${scopes.join(' and ')}. If ${several ? 'they are' : 'it is'} your team's, ${several ? 'each' : 'it'} can be upgraded first, with a release that accepts Angular ${blockedAt}${several ? `, in this order: ${each.join(', then ')}` : ''}.${together.length ? ` ${together.join(', and ')} need each other, so no order works for them: upgrade and publish them together.` : ''}`);
+  }
   if (blockedAt !== null) plan.status = 'blocked';
   else if (target === currentMajor) {
     plan.status = 'already-there';
@@ -867,6 +1020,11 @@ async function buildPlan({ projectDir, to, next = false }) {
         : semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`);
       if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
     }
+    // A pin the last upgrade left behind still fails the team, so it's named here too, against this major's range.
+    const installed = project.installed('@angular/core')?.version;
+    const range = installed && (await registry.release('@angular/core', installed).catch(() => null))?.engines?.node;
+    const below = range && semver.validRange(range) ? pins.filter((p) => !pinFits(p, range)).map(({ file, value }) => ({ file, value })) : [];
+    if (below.length) plan.nodePins = { range, pins: below };
     if (behind.length) {
       // Only a CLI that has to move bootstraps a temporary copy of itself.
       const update = behind.some((b) => b.name === '@angular/cli') ? updateCommand(project) : `${runnerFor(project)} ng update`;
@@ -905,6 +1063,7 @@ function render(plan) {
       for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
       lines.push(`  Run: ${plan.patches.command}`);
     }
+    if (plan.nodePins) lines.push(`  Node pins below what Angular ${plan.target} needs (${plan.nodePins.range}), in the repo: ${plan.nodePins.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
   }
   else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
   else lines.push(plan.reachable === semver.major(p.angular)
@@ -914,6 +1073,7 @@ function render(plan) {
   for (const hop of plan.hops) {
     lines.push('', `Angular ${hop.major} (${hop.angular})`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
+    if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
       lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);

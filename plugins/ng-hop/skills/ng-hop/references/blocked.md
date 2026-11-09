@@ -10,8 +10,11 @@ For each blocker, from the plan and a quick search:
 - **How much the app uses it:** count the files that import it (for example `git grep -l "<package>" -- src`). Three files and three hundred are different decisions.
 - **Whether it's used at all.** If nothing imports it, removing it clears the blocker, and that's your recommendation. Search for its imports and selectors across `src` instead of reading a few files, because a template can sit inside a component's `.ts` file.
 - **Any sign of support on the way:** a prerelease in the plan's output, or an open issue or pull request on its repository. Say what you found, and say so if you didn't look.
+- **Whether it's the person's own.** The plan says when a blocker's scope has a registry of its own in their npm config, and in which order to upgrade several. That's how a company publishes its own libraries, but it's also how a vendor ships a paid one: Font Awesome Pro's customers point `@fortawesome` at Font Awesome's registry, and Infragistics' point `@infragistics` at theirs. So confirm it's the team's before recommending they upgrade it first: its repository and author (`npm view <package> repository.url author`) should be theirs, and if that doesn't settle it, ask. Their own library's source is usually in a repository of its own, so ask where.
 
 ## The choices
+
+**Upgrade it first.** When the blocker is the team's own library, waiting would only wait on themselves. Work in that library's repository, with this skill and `references/libraries.md`, to the Angular major the plan names, in the order it gives, and publish once they say so. Libraries the plan says need each other have no order between them, so upgrade and publish them together. Then come back to the app and run the plan again. Recommend this for their own libraries, once you've confirmed they are, and say which needs which. A vendor's library behind a registry of its own is a maintained library like any other, so for one of those, waiting is usually right.
 
 **Wait.** Stay on the ceiling, with the work committed, and run the plan again later. It costs nothing and the app is already further along than it was. This is the usual recommendation for a maintained library, especially when the Angular major is recent.
 
@@ -26,6 +29,10 @@ For each blocker, from the plan and a quick search:
 Name the blocker, give your recommendation and the reason, and ask. For example:
 
 > You're on Angular 21 now, committed and passing. `@nebular/theme` is the one thing blocking 22: its latest release is from January and requires Angular 21, and 14 files import it. I'd wait, because it has had a release for every Angular major so far. Do you want to wait, replace it, or try forcing it?
+
+Or, when the blockers are their own:
+
+> This app is on Angular 21, and only your own libraries block 22: `@acme/ui-core` and `@acme/ui-forms`, both from your registry, both requiring Angular 21. I'd upgrade them first, `@acme/ui-core` and then `@acme/ui-forms`, which needs it, publish both, and then come back for this app. Where is their repository, and shall I start there?
 
 ## Only if they choose to force
 

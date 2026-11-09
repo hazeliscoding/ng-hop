@@ -1,0 +1,110 @@
+<div class="panel term" style="left:96px; top:150px; width:1100px;" data-cue="0" data-out="s21$+0.1">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code</span></div>
+      <div class="term-body">
+        <div class="you" data-cue="s19+0.2">Yes, start with acme-ui.</div>
+        <div class="cmd" style="margin-top:14px;" data-cue="s20+0.3">&hellip; cd /c/code/acme-demo/acme-ui &amp;&amp; &hellip;</div>
+        <div class="cmd" data-cue="s20+2.0">git switch -c upgrade/angular-22 &amp;&amp; &hellip; pnpm build &hellip;; pnpm test &hellip;</div>
+        <div class="dim" data-cue="s20+2.6">Switched to a new branch 'upgrade/angular-22'</div>
+        <div class="ok" data-cue="s20+5.6">Baseline: build passes, tests pass (1 + 1).</div>
+        <div class="cmd" style="margin-top:14px;" data-cue="s21+0.3">node &hellip;/guide.mjs --from 21 --to 22; &hellip;</div>
+        <div class="out" data-cue="s21+1.4">Angular 21 to 22, from the official Update Guide &hellip;</div>
+        <div class="cmd" data-cue="s21+4.3">&hellip;update.mjs @angular/core@22 @angular/cli@22 ng-packagr@22.2.6</div>
+        <div class="ok" data-cue="s21+8.2">Done in 2m 39.9s using pnpm v12.16.1</div>
+      </div>
+    </div>
+
+    <div style="position:absolute; left:1244px; top:170px; width:580px; font-size:34px; line-height:1.25; text-wrap:balance;" data-cue="s20" data-out="s21$+0.1">
+      <div style="display:flex; align-items:center; margin-bottom:26px;" data-cue="s20+2.6"><span class="num" style="flex-shrink:0;">1</span>A branch</div>
+      <div style="display:flex; align-items:center; margin-bottom:26px;" data-cue="s20+4.2"><span class="num" style="flex-shrink:0;">2</span>A starting point: both build, tests pass</div>
+      <div style="display:flex; align-items:center; margin-bottom:26px;" data-cue="s21+0.9"><span class="num" style="flex-shrink:0;">3</span>Angular's update guide, 21 &rarr; 22</div>
+      <div style="display:flex; align-items:center;" data-cue="s21+5.6"><span class="num" style="flex-shrink:0;">4</span>ng update for Angular, the CLI and ng-packagr, together</div>
+    </div>
+
+    <div class="h2" style="position:absolute; left:96px; top:150px; width:1728px;" data-cue="s22+0.2" data-out="s23$+0.1">By hand: what ng update doesn't do for a library</div>
+
+    <div class="panel term diff" style="left:96px; top:236px; width:840px;" data-cue="s22+0.6" data-out="s23">
+      <div class="term-bar"><span class="where">projects/acme/ui-core/package.json</span></div>
+      <div class="term-body">
+        <div class="dim">   "name": "@acme/ui-core",</div>
+        <div class="del">-  "version": "21.4.0",</div>
+        <div class="add" data-cue="s22+5.0">+  "version": "22.0.0",</div>
+        <div class="dim">   "peerDependencies": {</div>
+        <div class="del">-    "@angular/common": "^21.2.0",</div>
+        <div class="del">-    "@angular/core": "^21.2.0"</div>
+        <div class="add" data-cue="s22+8.8">+    "@angular/common": "^22.0.0",</div>
+        <div class="add" data-cue="s22+8.8">+    "@angular/core": "^22.0.0"</div>
+      </div>
+    </div>
+
+    <div class="panel term diff" style="left:984px; top:236px; width:840px;" data-cue="s22+1.4" data-out="s23$+0.1">
+      <div class="term-bar"><span class="where">projects/acme/ui-forms/package.json</span></div>
+      <div class="term-body">
+        <div class="dim">   "name": "@acme/ui-forms",</div>
+        <div class="del">-  "version": "21.4.0",</div>
+        <div class="add" data-cue="s22+5.6">+  "version": "22.0.0",</div>
+        <div class="dim">   "peerDependencies": {</div>
+        <div class="del">-    "@angular/common": "^21.2.0",</div>
+        <div class="del">-    "@angular/core": "^21.2.0",</div>
+        <div class="del">-    "@angular/forms": "^21.2.0",</div>
+        <div class="del">-    "@acme/ui-core": "^21.4.0"</div>
+        <div class="add" data-cue="s22+9.5">+    "@angular/common": "^22.0.0",</div>
+        <div class="add" data-cue="s22+9.5">+    "@angular/core": "^22.0.0",</div>
+        <div class="add" data-cue="s22+9.5">+    "@angular/forms": "^22.0.0",</div>
+        <div class="add" data-cue="s22+12.2">+    "@acme/ui-core": "^22.0.0"</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:236px; width:840px;" data-cue="s23+0.3" data-out="s23$+0.1">
+      <div class="term-body">
+        <div class="ok">&#10004; Built @acme/ui-core</div>
+        <div class="ok" data-cue="s23+0.4">&#10004; Built @acme/ui-forms</div>
+        <div class="ok" data-cue="s23+0.8">Tests  1 passed (1)</div>
+        <div class="out" data-cue="s23+1.2">a76bb41 chore(deps): upgrade to Angular 22</div>
+      </div>
+    </div>
+
+    <div class="panel card" style="left:96px; top:150px; width:840px;" data-cue="s24+0.3" data-out="s24$+0.1">
+      <h3>What I changed by hand</h3>
+      <p class="dim">(the parts a reviewer should read)</p>
+      <ul>
+        <li>@acme/ui-core and @acme/ui-forms go from version 21.4.0 to <b>22.0.0</b>.</li>
+        <li>Their Angular peer ranges go from ^21.2.0 to ^22.0.0, and @acme/ui-forms now needs @acme/ui-core ^22.0.0.</li>
+      </ul>
+    </div>
+
+    <div class="panel card" style="left:984px; top:150px; width:840px;" data-cue="s24+6.0" data-out="s24$+0.1">
+      <h3>What ng update changed</h3>
+      <p>Angular 22 makes components without a change-detection setting update less often by default (OnPush). The migration added <b>ChangeDetectionStrategy.Eager</b> to every component and test host so they keep the old behaviour.</p>
+    </div>
+
+    <div class="panel term diff" style="left:984px; top:566px; width:840px;" data-cue="s24+11.0" data-out="s24$+0.1">
+      <div class="term-bar"><span class="where">projects/acme/ui-core/src/lib/button.ts</span></div>
+      <div class="term-body">
+        <div class="dim"> @Component({</div>
+        <div class="dim">   selector: 'acme-button',</div>
+        <div class="add">+  changeDetection: ChangeDetectionStrategy.Eager,</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:840px;" data-cue="s25+0.3">
+      <div class="term-bar"><span class="where">ng-packagr/CHANGELOG.md</span></div>
+      <div class="term-body">
+        <div class="dim">## 22.2.0-next.1 (2026-07-29)</div>
+        <div class="dim">### Features</div>
+        <div class="warn">* ng-packagr: replace rollup with rolldown</div>
+      </div>
+    </div>
+
+    <div class="panel card aside" style="left:96px; top:392px; width:840px;" data-cue="s25+2.4">
+      <h3>Library changes</h3>
+      <p>I read ng-packagr 22's changelog &hellip; from 22.2 it bundles with Rolldown instead of Rollup.</p>
+      <p data-cue="s25+5.4">The libraries still build, but the published output comes from a different bundler, so it's worth a look once <span style="white-space:nowrap;">acme-portal</span> uses it.</p>
+    </div>
+
+    <div class="panel card stop pop" style="left:984px; top:150px; width:840px;" data-cue="s26+0.2">
+      <h3>Ready to publish</h3>
+      <p>to http://localhost:4873/ (set in .npmrc), in this order:</p>
+      <div style="display:flex; align-items:center; margin:16px 0 14px;" data-cue="s26+1.0"><span class="num">1</span>@acme/ui-core@22.0.0</div>
+      <div style="display:flex; align-items:center; margin-bottom:20px;" data-cue="s26+1.6"><span class="num">2</span>@acme/ui-forms@22.0.0</div>
+      <p data-cue="s26+2.6"><b>Shall I publish both packages now?</b></p>
+    </div>

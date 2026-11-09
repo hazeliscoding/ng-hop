@@ -185,6 +185,143 @@ test('pnpm updater: executable shims are resolved without running a command shel
   assert.equal(f.read().dispatch, 'true');
 });
 
+// ---- installing a library first ------------------------------------------------------------------------------------
+
+// Stands in for pnpm, yarn and npm, and logs each call. `add` saves each spec in package.json, in the section it's
+// already in, and changes the lockfile, as pnpm 12 and yarn 4 both do.
+const addDriver = `const fs = require('node:fs');
+const log = fs.existsSync(process.env.TEST_LOG) ? JSON.parse(fs.readFileSync(process.env.TEST_LOG, 'utf8')) : [];
+log.push(process.argv.slice(2));
+fs.writeFileSync(process.env.TEST_LOG, JSON.stringify(log));
+if (process.argv[2] === 'add') {
+  if (process.env.TEST_ADD_FAILS) { console.error('ERR_PNPM_NO_MATURE_MATCHING_VERSION'); process.exit(1); }
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  for (const spec of process.argv.slice(3).filter((arg) => !arg.startsWith('-'))) {
+    const at = spec.lastIndexOf('@'), name = spec.slice(0, at);
+    (pkg.devDependencies?.[name] ? pkg.devDependencies : pkg.dependencies)[name] = spec.slice(at + 1);
+  }
+  fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
+  fs.appendFileSync(fs.existsSync('yarn.lock') ? 'yarn.lock' : 'pnpm-lock.yaml', '# changed\\n');
+  // pnpm 12 writes an exemption itself, creating the file if it has to, for a release the list doesn't cover.
+  if (process.env.TEST_ADD_EXEMPTS) fs.writeFileSync('pnpm-workspace.yaml', "minimumReleaseAgeExclude:\\n  - '@acme/ui-core@22.0.0'\\n");
+}
+`;
+
+function firstFixture(manifest, { yarn = false, workspace } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'ng-hop install-first-')); made.push(root);
+  const project = join(root, 'app'), bin = join(root, 'bin'); mkdirSync(project); mkdirSync(bin);
+  const log = join(root, 'log.json');
+  writeFileSync(join(project, 'package.json'), `${JSON.stringify({ private: true, ...manifest }, null, 2)}\n`);
+  writeFileSync(join(project, yarn ? 'yarn.lock' : 'pnpm-lock.yaml'), '# lockfile\n');
+  if (workspace) writeFileSync(join(project, 'pnpm-workspace.yaml'), workspace);
+  writeFileSync(join(project, 'tracked.txt'), 'clean\n');
+  const git = (args) => { const r = spawnSync('git', args, { cwd: project, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  git(['init', '--initial-branch=main']); git(['add', '--all']);
+  git(['-c', 'user.name=Test fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'Fixture']);
+  // pnpm arrives through npm_execpath, as `pnpm exec` sets it. A yarn project's update runs through npm, and its
+  // install through the yarn on the path, which on Windows is a .cmd shim.
+  const driver = join(root, yarn ? 'npm-cli.js' : 'pnpm.cjs');
+  writeFileSync(driver, addDriver);
+  if (yarn && process.platform === 'win32') {
+    writeFileSync(join(bin, 'yarn.cjs'), addDriver);
+    writeFileSync(join(bin, 'yarn.cmd'), '@echo off\r\nnode "%~dp0\\yarn.cjs" %*\r\n');
+  } else if (yarn) writeFileSync(join(bin, 'yarn'), '#!' + process.execPath + '\n' + addDriver, { mode: 0o755 });
+  const pathKey = Object.keys(process.env).find(k => k.toLowerCase() === 'path') || 'PATH';
+  return {
+    project,
+    env: { npm_execpath: driver, TEST_LOG: log, COREPACK_ROOT: '', [pathKey]: bin + delimiter + process.env[pathKey] },
+    log: () => (existsSync(log) ? JSON.parse(readFileSync(log, 'utf8')) : []),
+    read: (file) => readFileSync(join(project, file), 'utf8'),
+  };
+}
+
+const acme = { dependencies: { '@angular/core': '21.2.0', '@acme/ui-core': '^21.4.0' }, devDependencies: { '@acme/ui-testing': '21.4.0' } };
+const acmeHop = ['@angular/core@22', '@angular/cli@22', '@acme/ui-core@22.0.0', '@acme/ui-testing@22.0.0'];
+const first = ['--install-first', '@acme/ui-core', '--install-first', '@acme/ui-testing'];
+
+test('pnpm updater: --install-first installs those libraries first, in the form package.json uses, then updates the rest', async () => {
+  // Angular CLI 22.1 and newer skip a release younger than pnpm's minimum release age, a day by default, and read no
+  // exemption list. An installed release is read from node_modules instead, so installing it first gets it through.
+  const f = firstFixture(acme);
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.log(), [
+    ['add', '@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0'],
+    ['dlx', '@angular/cli@22', 'update', '@angular/core@22', '@angular/cli@22', '--allow-dirty'],
+  ], 'the caret stays, an exact pin stays exact, and the update leaves out what is installed already');
+  assert.deepEqual(JSON.parse(r.stdout).installedFirst, ['@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0']);
+});
+
+test('pnpm updater: --install-first adds to the app with -w when the app is a workspace root that lists packages', async () => {
+  // pnpm 12.16.1 stopped with ERR_PNPM_ADDING_TO_ROOT in a root that listed two package patterns, until -w said the root
+  // was meant. It took the add as it was in a root with one pattern or with settings only.
+  for (const [workspace, flag, why] of [
+    ["packages:\n  - 'projects/*'\n  - 'libs/*'\n", ['-w'], 'a root that lists packages'],
+    ['minimumReleaseAge: 1440\n', [], 'a root with settings only'],
+  ]) {
+    const f = firstFixture(acme, { workspace });
+    const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
+    assert.equal(r.code, 0, r.stderr || r.stdout);
+    assert.deepEqual(f.log()[0], ['add', ...flag, '@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0'], why);
+  }
+});
+
+test('yarn updater: --install-first installs through the project\'s yarn, and the update still runs through npm', async () => {
+  const f = firstFixture(acme, { yarn: true });
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 0, r.stderr || r.stdout);
+  assert.deepEqual(f.log(), [
+    ['add', '@acme/ui-core@^22.0.0', '@acme/ui-testing@22.0.0'],
+    ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', '@angular/core@22', '@angular/cli@22', '--allow-dirty'],
+  ]);
+});
+
+test('pnpm updater: --install-first still starts from a clean tree, with the working run above as its control', async () => {
+  // Leftovers from an interrupted major dirty the same files, and ng update would skip their migrations.
+  const f = firstFixture(acme);
+  writeFileSync(join(f.project, 'package.json'), f.read('package.json').replace('^21.4.0', '^22.0.0'));
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: f.env });
+  assert.equal(r.code, 1);
+  assert.match(JSON.parse(r.stdout).error, /Repository is not clean/);
+  assert.deepEqual(f.log(), []);
+});
+
+test('pnpm updater: an install that changes more than package.json and the lockfile stops before the update', async () => {
+  // An exemption pnpm writes itself is a safeguard relaxed, which is the person's call, so it isn't carried into a hop.
+  const f = firstFixture(acme);
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: { ...f.env, TEST_ADD_EXEMPTS: '1' } });
+  assert.equal(r.code, 1);
+  const { error } = JSON.parse(r.stdout);
+  assert.match(error, /pnpm-workspace\.yaml/);
+  assert.match(error, /no update was run/);
+  assert.deepEqual(f.log().map((call) => call[0]), ['add']);
+});
+
+test('pnpm updater: a failed install stops before the update', async () => {
+  const f = firstFixture(acme);
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: { ...f.env, TEST_ADD_FAILS: '1' } });
+  assert.equal(r.code, 1);
+  assert.match(JSON.parse(r.stdout).error, /no update was run/);
+  assert.deepEqual(f.log().map((call) => call[0]), ['add']);
+});
+
+test('pnpm updater: --install-first takes only a library the command names at an exact version, with a range in package.json', async () => {
+  const cases = [
+    [['--install-first', '@angular/core'], acmeHop, acme, 'Angular itself, whose migrations ng update has to run'],
+    [['--install-first', '@acme/ui-grid'], acmeHop, acme, 'a library the command does not name'],
+    [['--install-first', '@acme/ui-core'], ['@angular/core@22', '@angular/cli@22', '@acme/ui-core@22'], acme, 'a major, not the exact version the plan names'],
+    [['--install-first', '@acme/ui-core'], acmeHop, { dependencies: { '@angular/core': '21.2.0', '@acme/ui-core': 'catalog:' } }, 'a catalog entry, which an add would turn into a plain version'],
+    [['--install-first', '@acme/ui-testing'], acmeHop, { dependencies: { '@angular/core': '21.2.0' } }, 'a library package.json does not list'],
+  ];
+  for (const [option, hop, manifest, why] of cases) {
+    const f = firstFixture(manifest);
+    const r = await runScript(UPDATE, ['--json', ...option, ...hop], { cwd: f.project, env: f.env });
+    assert.equal(r.code, 1, why);
+    assert.match(JSON.parse(r.stdout).error, /--install-first takes/, why);
+    assert.deepEqual(f.log(), [], why);
+  }
+});
+
 // ---- pnpm catalogs ------------------------------------------------------------------------------------------------
 
 // Stands in for pnpm. On `dlx … update` it plays ng update, which moves whatever versions it finds in package.json.

@@ -1,0 +1,96 @@
+<div class="panel term" style="left:96px; top:150px; width:1140px;" data-cue="0" data-out="s36+3.6">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal</span></div>
+      <div class="term-body">
+        <div class="you" data-cue="s34">Yes, exempt the two versions like we did for 21.4.0, commit that, …</div>
+        <div class="cmd" data-cue="s35+1.3">pnpm exec node …/update.mjs @angular/core@22 …</div>
+        <div class="err" data-cue="s35+2">Package "@acme/ui-core" … (requires "^21.2.0", would install "22.2.5").</div>
+        <div class="err" data-cue="s35+2.5">Incompatible peer dependencies found. …</div>
+      </div>
+    </div>
+    <div class="panel term diff" style="left:1276px; top:150px; width:548px;" data-cue="s35+0.2" data-out="s37-0.3">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">commit 792cc47</span></div>
+      <div class="term-body">
+        <div class="dim">pnpm-workspace.yaml</div>
+        <div class="out"> minimumReleaseAgeExclude:</div>
+        <div class="out">   - '@acme/ui-core@21.4.0'</div>
+        <div class="out">   - '@acme/ui-forms@21.4.0'</div>
+        <div class="add">+  - '@acme/ui-core@22.0.0'</div>
+        <div class="add">+  - '@acme/ui-forms@22.0.0'</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:540px; width:1728px;" data-cue="s36+0.3" data-out="s37-0.3">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">@angular/cli 22.2.1 · update-resolver.js</span></div>
+      <div class="term-body">
+        <div class="cmd">… sed -n 100,135p "$CLI/commands/update/update-resolver.js"</div>
+        <div class="out" data-cue="s36+1">function isReleaseAgeSatisfied(registryClient, metadata, version) {</div>
+        <div class="out" data-cue="s36+1">    const minReleaseAge = registryClient.minReleaseAge;</div>
+        <div class="dim" data-cue="s36+1">    …</div>
+        <div class="warn" data-cue="s36+1">    return Date.now() - publishTime &gt;= minReleaseAge;</div>
+        <div class="out" data-cue="s36+1">}</div>
+      </div>
+    </div>
+    <div class="panel card" style="left:96px; top:150px; width:1140px;" data-cue="s36+4.1" data-out="s37-0.3">
+      <h3>Why it still fails</h3>
+      <p>It reads pnpm's minimum-release-age setting. When that's unset, which it is here, it assumes pnpm 11+'s default of <b>24 hours</b>.</p>
+      <p data-cue="s36+8.3">It never reads <b>minimumReleaseAgeExclude</b>.</p>
+    </div>
+
+    <div class="panel card" style="left:96px; top:150px; width:700px;" data-cue="s37+1.8" data-out="s38$">
+      <h3>Option 1</h3>
+      <p><b>Wait until about 08:30 UTC tomorrow <span style="white-space:nowrap;">(9 Nov),</span></b> when 22.0.0 is 24 hours old, then rerun the same command.</p>
+    </div>
+    <div class="panel card" style="left:836px; top:150px; width:988px;" data-cue="s37+3.1" data-out="s38$">
+      <h3>Option 2</h3>
+      <p><b>Install the libraries first, then update Angular.</b></p>
+      <div class="term">
+        <div class="cmd" data-cue="s37+4.4">pnpm add @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0</div>
+        <div class="cmd" data-cue="s37+7.4">ng update @angular/core@22 @angular/cli@22</div>
+      </div>
+    </div>
+    <div class="panel card aside" style="left:96px; top:450px; width:1728px;" data-cue="s38+0.4" data-out="s38$">
+      <h3>The catch</h3>
+      <p><b>ng update</b> won't start with uncommitted changes, so the second step needs <b>--allow-dirty</b>, which is a departure from the planned command.</p>
+    </div>
+    <div class="panel card stop" style="left:96px; top:686px; width:960px;" data-cue="s38+2.8" data-out="s40-0.2">
+      <p>Shall I go ahead with option 2, or wait until tomorrow?</p>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:1728px;" data-cue="s39" data-out="s41">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal</span></div>
+      <div class="term-body">
+        <div class="you">Go with option 2.</div>
+        <div class="cmd" data-cue="s40">pnpm add @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0</div>
+        <div class="ok" data-cue="s40+0.6">+ @acme/ui-core 22.0.0</div>
+        <div class="ok" data-cue="s40+0.6">+ @acme/ui-forms 22.0.0</div>
+        <div class="cmd" data-cue="s40+1.6">… pnpm dlx @angular/cli@22 update @angular/core@22 @angular/cli@22 --allow-dirty</div>
+        <div class="ok" data-cue="s40+3.2">Updating package.json with dependency @angular/core to version 22.2.5...</div>
+        <div class="out" data-cue="s40+5">** Executing migrations of package '@angular/core' **</div>
+        <div class="out" data-cue="s40+5.7">** Executing migrations of package '@angular/cli' **</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:150px; width:960px;" data-cue="s41+0.4" data-out="s42-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal</span></div>
+      <div class="term-body">
+        <div class="cmd">npx --no-install ng build</div>
+        <div class="ok" data-cue="s41+0.9">Application bundle generation complete. [5.263 seconds] …</div>
+        <div class="cmd" data-cue="s41+1.4">npx --no-install ng test --watch=false</div>
+        <div class="ok" data-cue="s41+1.9">Tests  1 passed (1)</div>
+        <div class="cmd" data-cue="s41+2.4">node …/smoke.mjs</div>
+        <div class="ok" data-cue="s41+2.9">App check: PASS</div>
+        <div class="out" data-cue="s41+2.9">  browser: chrome, rendered content</div>
+      </div>
+    </div>
+    <div class="shot" style="left:1110px; top:150px; width:714px;" data-cue="s41+3.3"><img src="assets/portal-angular-22.png" alt="Acme Portal on Angular 22" /></div>
+    <div class="badge pop" style="left:1130px; top:622px;" data-cue="s41+4.3">Angular 22</div>
+
+    <div class="panel card" style="left:96px; top:150px; width:960px;" data-cue="s42+0.4">
+      <h3>Done by hand in the portal</h3>
+      <p><b>Install order.</b> I installed the two Acme releases with pnpm add first, then ran ng update … --allow-dirty.</p>
+      <p data-cue="s42+2.7">This was needed because Angular CLI 22's ng update applies pnpm's default 24-hour release age itself and ignores minimumReleaseAgeExclude.</p>
+    </div>
+    <div class="panel card aside" style="left:96px; top:540px; width:960px;" data-cue="s42+4.6">
+      <h3>Not checked</h3>
+      <p>The smoke check &hellip; didn't fill in or submit the request form. &hellip; it's worth trying by hand.</p>
+    </div>

@@ -1,0 +1,75 @@
+<div class="panel card" style="left:96px; top:180px; width:804px;" data-cue="0" data-out="s46-0.2">
+      <h3>The upgrade report</h3>
+      <p><b>Node:</b> Angular 22 needs Node <span style="white-space:nowrap;">^22.22.3 || ^24.15.0 || &gt;=26</span>.</p>
+      <p style="margin:0;"><span class="err">Neither repo pins a Node version</span>, but CI and build images … will fail.</p>
+    </div>
+
+    <div class="panel term" style="left:940px; top:180px; width:884px;" data-cue="s44+0.2" data-out="s46-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal dev container · ng build</span></div>
+      <div class="term-body">
+        <div class="err" data-cue="s44+2.0">Node.js version v22.12.0 detected.</div>
+        <div class="err" data-cue="s44+5.8">The Angular CLI requires a minimum Node.js version of v22.22.3 or v24.15.0 or v26.0.0.</div>
+        <div class="dim" data-cue="s44+6.8">[ELIFECYCLE] Command failed with exit code 3.</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:96px; top:520px; width:1728px;" data-cue="s45+0.2" data-out="s46-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code · acme-portal</span></div>
+      <div class="term-body">
+        <div class="you">I opened the dev container and ng build fails there: 'Node.js version v22.12.0 detected. …' Can you fix it?</div>
+        <div class="out" style="margin-top:14px;" data-cue="s45+1.6"><span class="warn">This was my mistake.</span> I checked acme-ui for Node pins &hellip; but never checked acme-portal.</div>
+      </div>
+    </div>
+
+    <div class="panel diff" style="left:96px; top:180px; width:1100px;" data-cue="s46+0.3" data-out="s48-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">acme-portal · commit 62634e2</span></div>
+      <div class="term-body">
+        <div class="out">build(devcontainer): move Node 22.12.0 to 22.23.4 for Angular 22</div>
+        <div class="dim" style="margin-top:10px;">.devcontainer/Dockerfile</div>
+        <div class="del" data-cue="s46+1.0">-FROM node:22.12.0-bookworm</div>
+        <div class="add" data-cue="s46+2.4">+FROM node:22.23.4-bookworm</div>
+      </div>
+    </div>
+
+    <div class="box teal" style="left:1240px; top:180px; width:584px;" data-cue="s46+4.5" data-out="s48-0.2"><b>Node 22.23.4</b>The newest Node 22 LTS release. It keeps your team on Node 22 and is within Angular 22's range.</div>
+
+    <div class="panel term" style="left:96px; top:540px; width:1100px;" data-cue="s46+6.5" data-out="s48-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">Claude Code · acme-portal</span></div>
+      <div class="term-body">
+        <div class="cmd">docker build -q -t acme-portal-devcheck .devcontainer</div>
+        <div class="cmd">docker run --rm … acme-portal-devcheck bash -c '…'</div>
+        <div class="ok" data-cue="s46+7.2">v22.23.4</div>
+        <div class="ok" data-cue="s46+7.7">build exit 0</div>
+        <div class="ok" data-cue="s46+8.2">test exit 0</div>
+      </div>
+    </div>
+
+    <div class="panel term" style="left:1240px; top:540px; width:584px;" data-cue="s47+0.3" data-out="s48-0.2">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">dev container, rebuilt</span></div>
+      <div class="term-body">
+        <div class="ok" data-cue="s47+1.4">node v22.23.4, pnpm 12.16.1</div>
+        <div class="ok" data-cue="s47+3.5">build exit 0</div>
+        <div class="ok" data-cue="s47+4.6">serve: 200 page has &lt;app-root&gt;</div>
+      </div>
+    </div>
+
+    <div class="pop" style="position:absolute; left:96px; top:180px; width:325px;" data-cue="s48+0.2" data-out="s49-0.2"><img src="assets/lockup-dark.svg" alt="ng-hop" style="display:block; width:100%;" /></div>
+    <div class="h2" style="position:absolute; left:470px; top:198px; width:1354px;" data-cue="s48+2.6" data-out="s49-0.2">Its plan now finds Node pins itself</div>
+
+    <div class="box" style="left:96px; top:316px; width:408px; min-height:170px;" data-cue="s48+5.2" data-out="s49-0.2"><b>Dockerfiles</b>The image in each FROM line</div>
+    <div class="box" style="left:536px; top:316px; width:408px; min-height:170px;" data-cue="s48+5.9" data-out="s49-0.2"><b>Dev containers</b>devcontainer.json's image or Node feature</div>
+    <div class="box" style="left:976px; top:316px; width:408px; min-height:170px;" data-cue="s48+6.7" data-out="s49-0.2"><b>Version files</b>.nvmrc, .node-version, .tool-versions</div>
+    <div class="box" style="left:1416px; top:316px; width:408px; min-height:170px;" data-cue="s48+7.6" data-out="s49-0.2"><b>CI workflows</b>node-version in .github/workflows</div>
+
+    <div class="panel term" style="left:96px; top:560px; width:1300px;" data-cue="s48+8.9">
+      <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="where">ng-hop plan · acme-portal</span></div>
+      <div class="term-body">
+        <div class="warn">Node pins below what Angular 22 needs (^22.22.3 || ^24.15.0 || &gt;=26.0.0), in the repo: .devcontainer/Dockerfile (node:22.12.0-bookworm)</div>
+      </div>
+    </div>
+
+    <div class="panel card aside" style="left:96px; top:180px; width:1100px;" data-cue="s49+0.3">
+      <h3>Not the same Node</h3>
+      <p><b>The agent ran</b> on the Windows host, on Node 24.20.0.</p>
+      <p style="margin:0;"><b>The team builds</b> in the dev container, on the Node its Dockerfile pins.</p>
+    </div>

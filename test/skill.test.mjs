@@ -110,6 +110,167 @@ test('the skill only aims at a prerelease when someone asks to try one', () => {
   assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /--next/);
 });
 
+// The section of troubleshooting.md that holds this text, which is also the positive control that it's still there.
+function troubleSection(text) {
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  const at = trouble.indexOf(text);
+  assert.ok(at >= 0, `troubleshooting.md has to keep ${text}`);
+  const end = trouble.indexOf('\n## ', at);
+  return trouble.slice(trouble.lastIndexOf('\n## ', at), end < 0 ? undefined : end);
+}
+const youngRelease = 'Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5")';
+
+test('a release too young for ng update is blamed on its own filter, with a check that works', () => {
+  // pnpm 12.16.1 let a release ten minutes old in when asked by name, and wrote the exemption itself. Angular CLI 22.1's
+  // resolver is what skipped it, and `pnpm config get minimumReleaseAge` printed undefined for the one-day default.
+  const section = troubleSection(youngRelease);
+  assert.doesNotMatch(section, /won't resolve a version younger/);
+  assert.match(section, /prints `undefined`/);
+  assert.match(section, /npm view <package> time/);
+});
+
+test('a release too young for ng update is covered on yarn 4.15 and newer too', () => {
+  // yarn 4.10.1 added npmMinimalAgeGate at 0, and 4.15.0 made it a day by default. 4.18.1 printed 1440 for it and
+  // refused a release itself until .yarnrc.yml preapproved it.
+  const section = troubleSection(youngRelease);
+  assert.match(section, /npmPreapprovedPackages/);
+  assert.match(section, /YN0016/);
+  const pointer = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8').split('\n').find((line) => line.includes("still quotes the old release's peers"));
+  assert.ok(pointer, 'the peer-error section has to point here');
+  assert.match(pointer, /yarn 4\.15 or newer/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4\.15 or newer/);
+});
+
+test('a release too young for ng update goes in first through update.mjs, never with --allow-dirty by hand', () => {
+  // update.mjs rejects --allow-dirty and refuses a dirty tree, so the old step couldn't run, and installing a library
+  // first skips its migrations.
+  const section = troubleSection(youngRelease);
+  assert.match(section, /--install-first/);
+  assert.match(section, /ships migrations/);
+  assert.doesNotMatch(section, /with `--allow-dirty`/);
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8'), /'install-first'/);
+});
+
+test('a release-age exemption waits for the person, like an override', () => {
+  // It turns off a guard against a compromised release, and pnpm writes one without asking.
+  const rule = skill.split('\n').find((line) => line.includes('npmPreapprovedPackages') && line.includes("without the person's approval"));
+  assert.ok(rule, 'the scope list has to name release-age exemptions');
+  assert.match(rule, /minimumReleaseAgeExclude/);
+});
+
+test('putting the tree back reaches a pnpm workspace root above the app', () => {
+  // pnpm writes an app's lockfile and exemptions at the workspace root, and git 2.55's `git restore .` run in the app's
+  // folder left them changed, so the next update.mjs refused a tree that wasn't clean.
+  const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
+  assert.ok(docs.some((d) => d.includes('`git restore :/`')), 'positive control: the docs still say how to put the tree back');
+  for (const doc of docs) assert.doesNotMatch(doc, /git restore \.(?:[\s`]|$)/m);
+});
+
+test('a scope registry ng update cannot see goes where it reads, never with a literal token', () => {
+  // Angular CLI 21.2.29, run in an app below a pnpm workspace root, asked the public registry for the team's package:
+  // up to 22.0, ng update reads only the app folder's .npmrc and the user's and global ones.
+  const section = troubleSection('404 Not Found - GET https://registry.npmjs.org/@acme%2fui-core');
+  assert.match(section, /Up to Angular CLI 22\.0/);
+  assert.match(section, /`~\/\.npmrc`/);
+  assert.match(section, /Never copy a token itself into a file git tracks/);
+});
+
+// One lettered step of the upgrade loop in SKILL.md, from its bold label to the next one.
+function step(letter) {
+  const start = skill.indexOf(`**${letter}. `);
+  assert.ok(start >= 0, `SKILL.md has a step ${letter}`);
+  const next = skill.indexOf(`**${String.fromCharCode(letter.charCodeAt(0) + 1)}. `, start);
+  return skill.slice(start, next < 0 ? undefined : next);
+}
+
+test('installing what ng update left behind watches for an exemption pnpm writes on its own', () => {
+  // pnpm 12.16.1's `pnpm add` of a release under a day old wrote one into pnpm-workspace.yaml without asking, and
+  // taking out only that entry left the release in the lockfile.
+  assert.match(step('e'), /Install anything the plan/, 'positive control: this is the step that installs');
+  assert.match(step('e'), /minimumReleaseAgeExclude/);
+});
+
+test('the skill raises the Node pins the plan names when the app is already on the target', () => {
+  // On Angular 22 with a dev container still on node:22.12.0, the plan named the pin under "Nothing to upgrade", and the
+  // skill's already-there path ended with "That's the whole job".
+  const label = skill.split('\n').find((line) => line.includes('Node pins below what Angular'));
+  assert.ok(label, 'the skill has to answer the line plan.mjs prints');
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /Node pins below what Angular/);
+  const already = skill.split('\n').find((line) => line.includes("If it's already on the target major"));
+  assert.ok(already, 'positive control: step 2 has an already-there path');
+  assert.match(already, /Node pins/);
+});
+
+test('the skill looks for Node pins past the files the plan reads', () => {
+  // The plan reads a fixed set of files, and passes over a version it can't read, such as lts/iron in .nvmrc. An agent
+  // that took its list as complete would repeat the enterprise run's missed dev container.
+  assert.match(step('e'), /Raise each Node pin the plan lists/, 'positive control: this is the step that raises pins');
+  assert.match(step('e'), /search the repo for other pins/);
+  assert.match(step('e'), /where you looked/);
+});
+
+test('a Node pin outside the app\'s folder is raised only when it builds, tests or runs this app', () => {
+  // The plan also reads the repo root's package.json, Dockerfile and workflows, which in a monorepo can belong to another
+  // service, and this app's checks can't catch what raising its Node does there.
+  assert.match(step('e'), /Raise each Node pin the plan lists/, 'positive control: this is the step that raises pins');
+  assert.match(step('e'), /starts with `\.\.\/`/);
+  assert.match(step('e'), /builds, tests or runs this app/);
+});
+
+test('a Node in a gap of Angular\'s range is too old, and a newer release of the same line can fix it', () => {
+  // Angular 22 needs ^22.22.3 || ^24.15.0 || >=26.0.0. CLI 22.2.6 exits on Node 24.14.1, where 24.15 is enough.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /'too-old'/, 'positive control: the plan prints too-old');
+  const rule = skill.split('\n').find((line) => line.includes('`Node: too-old`'));
+  assert.ok(rule, 'the skill has to answer Node: too-old');
+  assert.match(rule, /refuse to run/);
+  // CLI 22.2.6 only warns on Node 23 and 25, which sit in gaps of the same range, so the plan calls them too-old too.
+  assert.match(rule, /odd majors/);
+  assert.match(rule, /newer release of the line they're on/);
+  assert.match(rule, /`unsupported` means Node is newer than every/);
+});
+
+const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');
+
+test('a workspace of several libraries builds with its own scripts, not plain ng build', () => {
+  // Angular CLI 22.2.6's ng build at the root of acme-ui stopped with this, and step 3 says to stop when the build fails.
+  assert.match(libraries(), /Cannot determine project for command/);
+});
+
+test('the publish question says the code is unpushed, and where a dry run says it would go', () => {
+  // A dry run of pnpm 12.16.1 sent a library to its publishConfig registry over the workspace's .npmrc, npm 11.19.0 the
+  // other way round, and run from inside dist both named the public registry.
+  const publish = libraries().slice(libraries().indexOf('## Publishing waits for the person'));
+  assert.match(publish, /stop before it/, 'positive control: this is the publish step');
+  assert.match(publish, /--dry-run/);
+  assert.match(publish, /pushed/);
+});
+
+test('a blocker whose scope has a registry of its own is confirmed as the team\'s before upgrading it first', () => {
+  // Infragistics and Font Awesome Pro have customers give their scope a registry of its own, which the plan flags the
+  // same way, and for a vendor's maintained library waiting is the usual advice.
+  const blocked = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8');
+  const own = blocked.split('\n').find((line) => line.startsWith("- **Whether it's the person's own.**"));
+  assert.ok(own, 'positive control: blocked.md asks whether a blocker is theirs');
+  assert.match(own, /vendor/);
+  assert.match(own, /npm view <package> repository\.url author/);
+  assert.doesNotMatch(skill, /when the plan says it comes from their own registry/);
+});
+
+test('the team\'s libraries go only to the major the app needs next, since the app moves one major at a time', () => {
+  // On the fake registry, an app on Angular 20 whose library had a release for 22 and none for 21 was still blocked at 21.
+  assert.match(libraries(), /--to <major>/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /to the Angular major the plan names/);
+});
+
+test('the team\'s libraries that need each other are upgraded and published together, as the plan says', () => {
+  // A cycle has no order to follow, and the plan names every library in it.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /need each other, so no order works for them/, 'positive control: the plan says so');
+  const first = readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8').split('\n').find((line) => line.startsWith('**Upgrade it first.**'));
+  assert.ok(first, 'positive control: blocked.md offers to upgrade the team\'s libraries first');
+  assert.match(first, /need each other/);
+  assert.match(first, /upgrade and publish them together/);
+});
+
 test('the marketplace points at the plugin', () => {
   const market = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'));
   assert.ok(existsSync(join(ROOT, market.plugins[0].source, '.claude-plugin', 'plugin.json')));

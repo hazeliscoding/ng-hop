@@ -1,0 +1,62 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": {
+    "packageManager": "pnpm"
+  },
+  "newProjectRoot": "projects",
+  "projects": {
+    "@acme/ui-core": {
+      "projectType": "library",
+      "root": "projects/acme/ui-core",
+      "sourceRoot": "projects/acme/ui-core/src",
+      "prefix": "acme",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/acme/ui-core/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/acme/ui-core/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/acme/ui-core/tsconfig.spec.json"
+          }
+        }
+      }
+    },
+    "@acme/ui-forms": {
+      "projectType": "library",
+      "root": "projects/acme/ui-forms",
+      "sourceRoot": "projects/acme/ui-forms/src",
+      "prefix": "acme",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/acme/ui-forms/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/acme/ui-forms/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/acme/ui-forms/tsconfig.spec.json"
+          }
+        }
+      }
+    }
+  }
+}
