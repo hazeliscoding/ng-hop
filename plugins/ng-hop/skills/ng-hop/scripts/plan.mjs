@@ -613,6 +613,9 @@ async function askVersion(project, pm) {
   try {
     dir = mkdtempSync(join(tmp, 'ng-hop-'));
     const { file, prefix } = managerCommand(dir, pm);
+    const found = prefix[0] ?? file;
+    const foundIn = within(found);
+    if (foundIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the one the plan found, ${found}, is inside the app's ${foundIn} and is the repo's code, so a release younger than that age can still stop a command; plan again with a ${pm} from outside the repo, or with ${pm}'s version in package.json's packageManager` };
     const { stdout } = await exec(file, [...prefix, '--version'], { cwd: dir, env, windowsHide: true, timeout: 60e3 });
     const version = semver.valid(stdout.trim());
     return version ? { version } : failed(`it printed "${plainLine(stdout)}"`, 'plan again once the dependencies are installed');

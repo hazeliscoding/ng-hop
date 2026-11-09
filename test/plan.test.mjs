@@ -1739,6 +1739,15 @@ test('a relative PATH entry into the project never runs the pnpm it holds', asyn
   assert.deepEqual(ran(proj.dir), []);
 });
 
+test('a pnpm or yarn inside the repo isn\'t run, wherever the plan finds it', async () => {
+  // npm_execpath, COREPACK_ROOT or an absolute PATH entry can name a manager inside the repo, which is the repo's code.
+  const proj = pnpm21({}, { files: { 'tools/pnpm.cjs': MARKER } });
+  const age = await ageOf(proj, { env: { npm_execpath: join(proj.dir, 'tools', 'pnpm.cjs') } });
+  assert.deepEqual(ran(proj.dir), []);
+  assert.match(age, /^pnpm wasn't asked for its version, which its minimum release age depends on, since the one the plan found, .*pnpm\.cjs, is inside the app's folder and is the repo's code, so a release younger than that age can still stop a command; /);
+  assert.equal((await ageOf(pnpm21({}), { manager: pnpm12 })).minutes, 1440, 'the control: one outside it answers');
+});
+
 test('with the temporary folder inside the project or its repo, the plan asks nothing, and says why release age went unchecked', async () => {
   // From a folder in the repo, pnpm or yarn would read the repo's settings and run what they name.
   const proj = pnpm21({}, { files: { 'tmp/.keep': '' } });
