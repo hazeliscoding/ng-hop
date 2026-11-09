@@ -255,12 +255,14 @@ test('with no publish time, tooling that follows Angular\'s major, a patch and A
   const patchText = (await plan(undatedPatch(), on22(), { to: 22, text: true, manager: yarn18 })).stdout;
   assert.match(patchText, /^Already on Angular 22\. Nothing to upgrade until the registry gives them a publish time:$/m, patchText);
   assert.match(patchText, /^ {2}@angular\/core: 22\.3\.0 is missing its publish time on the registry, which yarn holds back$/m);
-  // Angular 23's one release has no time, so the hop has nothing yarn takes, and nothing goes in before Angular.
+  // Angular 23's one release has no time, so the hop has nothing yarn takes, and nothing goes in before Angular. Its CLI
+  // has a time, and is too young as well.
   const [core, compiler] = angular();
   for (const doc of [core, compiler]) { doc.versions['23.0.0'] = { ...doc.versions['22.2.0'], version: '23.0.0' }; doc['dist-tags'].latest = '23.0.0'; }
-  const next = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], on22(), { manager: yarn18 });
+  const cli = pkg('@angular/cli', { '22.2.0': { at: '2026-05-28' }, '23.0.0': { ago: 10 } });
+  const next = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), cli], on22(), { manager: yarn18 });
   assert.equal(next.code, 2, next.stderr);
-  assert.deepEqual(next.plan.blockers.map((b) => [b.name, b.kind, b.noPublishTime]), [['@angular/core', 'too-young', true]]);
+  assert.deepEqual(next.plan.blockers.map((b) => [b.name, b.kind, b.noPublishTime]), [['@angular/core', 'too-young', true], ['@angular/cli', 'too-young', undefined]]);
   assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
 });
 
