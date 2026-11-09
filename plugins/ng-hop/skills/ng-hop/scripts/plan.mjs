@@ -1191,7 +1191,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     .flatMap(([name, doc]) => Object.keys(doc?.versions ?? {}).filter((v) => Date.parse(doc.time?.[v] ?? '') + age.minutes * 60e3 >= Date.UTC(10000, 0)).map((v) => [name, v, doc.time[v]]))[0];
   if (late) {
     const [name, v, time] = late;
-    plan.unchecked.push({ name: 'release age', reason: `the registry says ${name} ${plainLine(v, 60)} came out at "${plainLine(time, 60)}", and ${age.manager}'s minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ${name} time` });
+    plan.unchecked.push({ name: 'release age', reason: `the registry says ${name} ${plainLine(v, 60)} came out at "${plainLine(String(time), 60)}", and ${age.manager}'s minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ${name} time` });
     age = null;
     plan.releaseAge = null;
   }

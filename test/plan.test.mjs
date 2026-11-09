@@ -2227,9 +2227,10 @@ test('an age too long to give a date for is unknown, naming where it is set, and
 
 test('a release the registry dates so late that the age ends past the year 9999 leaves the age unknown, naming it, and the plan neither crashes nor gives a time', async () => {
   // Under pnpm 12.16.1's default age of a day, a registry dating ui-lib 22.0.0 +275760-09-12, the last day a Date holds,
-  // stopped the plan with RangeError: Invalid time value, and 9999-12-31 printed BLOCKED until +010000-01-01 12 UTC.
+  // stopped the plan with RangeError: Invalid time value, and 9999-12-31 printed BLOCKED until +010000-01-01 12 UTC. A
+  // time the registry gives as a list, which Date.parse reads as its text, is quoted as text too.
   const dated = (time) => { const lib = youngLib(); lib.time['22.0.0'] = time; return world(lib); };
-  for (const time of ['+275760-09-12T12:00:00.000Z', '9999-12-31T12:00:00.000Z']) {
+  for (const time of ['+275760-09-12T12:00:00.000Z', '9999-12-31T12:00:00.000Z', ['9999-12-31T12:00:00.000Z']]) {
     const r = await plan(dated(time), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22, text: true });
     assert.equal(r.code, 0, r.stderr);
     assert.ok(r.stdout.includes(`\n  release age: the registry says ui-lib 22.0.0 came out at "${time}", and pnpm's minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ui-lib time.`), r.stdout);
