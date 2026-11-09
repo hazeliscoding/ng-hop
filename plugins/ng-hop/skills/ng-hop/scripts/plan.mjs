@@ -1655,6 +1655,8 @@ function render(plan) {
   const who = (skips) => `${age.manager}${skips ? ' and ng update' : ''}`;
   // ng update takes a release with no publish time, so only the manager holds that one back.
   const youngFor = (h, skips) => (h.noPublishTime ? `missing its publish time on the registry, which ${age.manager} holds back` : h.until ? `too young for ${who(skips)} until ${minute(h.until, true)}` : 'newer than npm\'s before');
+  // A major waiting on a release with no publish time can also wait on dated ones, which are old enough only from then.
+  const datedUntil = (hop) => !hop.until && !age.before && hop.held.map((h) => h.until).filter(Boolean).sort().at(-1);
   const newer = (h, skips) => `${h.version} is newer, but ${h.noPublishTime ? `the registry gives it no publish time, which ${age.manager} holds back` : h.until ? `too young for ${who(skips)} until ${minute(h.until, true)}` : 'npm\'s before leaves it out'}`;
   lines.push(`Angular ${p.angular} (from ${p.angularSource}), ${p.packageManager}, Node ${p.node}. Latest Angular: ${plan.latestAngular}.`);
   if (plan.status === 'already-there') {
@@ -1673,14 +1675,15 @@ function render(plan) {
   else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
   else if (plan.waiting) {
     const w = plan.waiting, stays = plan.reachable === semver.major(p.angular);
-    const until = w.until && minute(w.until, true), before = age.before && minute(age.before);
+    const until = w.until && minute(w.until, true), before = age.before && minute(age.before), dated = datedUntil(w);
+    const also = dated ? `, and releases too young for ${who(w.ngUpdateSkips)} until ${minute(dated, true)}` : '';
     lines.push(until
       ? (stays ? `Result: BLOCKED until ${until}. Angular ${w.major} needs releases too young for ${who(w.ngUpdateSkips)} until then, so this project stays on ${plan.reachable} for now.`
         : `Result: BLOCKED at Angular ${w.major} until ${until}. Angular ${plan.reachable} is the highest version everything supports today, and Angular ${w.major} needs releases too young for ${who(w.ngUpdateSkips)} until then.`)
       : before ? (stays ? `Result: BLOCKED. Angular ${w.major} needs releases newer than npm's before, ${before}, so this project stays on ${plan.reachable} until that setting moves.`
         : `Result: BLOCKED at Angular ${w.major}, which needs releases newer than npm's before, ${before}. Angular ${plan.reachable} is the highest version everything supports today.`)
-      : (stays ? `Result: BLOCKED. Angular ${w.major} needs releases with no publish time on the registry, which ${age.manager} holds back however old they are, so this project stays on ${plan.reachable} until the registry gives them one.`
-        : `Result: BLOCKED at Angular ${w.major}, which needs releases with no publish time on the registry, and ${age.manager} holds those back however old they are. Angular ${plan.reachable} is the highest version everything supports today.`));
+      : (stays ? `Result: BLOCKED. Angular ${w.major} needs releases with no publish time on the registry, which ${age.manager} holds back however old they are${also}, so this project stays on ${plan.reachable} until the registry gives them one${dated ? ' and that time has passed' : ''}.`
+        : `Result: BLOCKED at Angular ${w.major}, which needs releases with no publish time on the registry, which ${age.manager} holds back however old they are${also}. Angular ${plan.reachable} is the highest version everything supports today.`));
   }
   else lines.push(plan.reachable === semver.major(p.angular)
     ? `Result: BLOCKED. Angular ${plan.blockedAt} isn't possible today, so this project stays on ${plan.reachable} until a blocker below is resolved.`
@@ -1688,8 +1691,8 @@ function render(plan) {
   for (const note of plan.notes) lines.push(`Note: ${note}`);
   // A waiting major prints after the ones that can run today.
   for (const hop of [...plan.hops, ...(plan.waiting ? [plan.waiting] : [])]) {
-    const waits = hop === plan.waiting;
-    lines.push('', `Angular ${hop.major} (${hop.angular}${hop.angularNewer ? `; ${newer(hop.angularNewer, hop.ngUpdateSkips)}` : ''})${waits ? (hop.until ? `, waiting until ${minute(hop.until, true)}` : age.before ? ', waiting on npm\'s before' : ', waiting on a publish time from the registry') : ''}`);
+    const waits = hop === plan.waiting, dated = waits && datedUntil(hop);
+    lines.push('', `Angular ${hop.major} (${hop.angular}${hop.angularNewer ? `; ${newer(hop.angularNewer, hop.ngUpdateSkips)}` : ''})${waits ? (hop.until ? `, waiting until ${minute(hop.until, true)}` : age.before ? ', waiting on npm\'s before' : `, waiting on a publish time from the registry${dated ? `, and until ${minute(dated, true)}` : ''}`) : ''}`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {

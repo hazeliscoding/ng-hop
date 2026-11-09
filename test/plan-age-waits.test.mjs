@@ -9,6 +9,8 @@ import { app, base, evaIcons, libIn, lockBase, nebular, nebularDeps, nebularLock
 // ---- Release age: what the package manager and ng update hold back --------------------------------------------------
 
 const ripeAt = (doc, v, minutes) => new Date(Date.parse(doc.time[v]) + minutes * 60e3).toISOString();
+// When a release is old enough, as the plan prints it: rounded up to the minute, so it's never early.
+const shown = (iso) => `${new Date(Math.ceil(Date.parse(iso) / 60e3) * 60e3).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 const youngPatch = (doc, v, from, ago = 30) => { doc.versions[v] = { ...doc.versions[from], version: v }; doc.time[v] = new Date(Date.now() - ago * 60e3).toISOString(); doc['dist-tags'].latest = v; };
 // M7's libraries: 21.4.0 accepts Angular 21 only, and ui-core's 22.0.0 came out `ago` minutes ago, ui-forms' 0.6 s after.
 const acme = (ago, extra = {}) => [
@@ -271,6 +273,11 @@ test('with one release that has no publish time and one too young, only the youn
   const r = await plan(world(a, b), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0' }), { to: 22, manager: yarn18 });
   assert.equal(r.code, 2, r.stderr);
   assert.equal(r.plan.waiting.sooner, `node ${quotePath(UPDATE)} --install-first ui-b @angular/core@22 @angular/cli@22 ui-a@22.0.0 ui-b@22.0.0`);
+  // The registry dating ui-a's leaves the major waiting on ui-b's, so the result and the major give that time too.
+  const text = (await plan(world(a, b), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0' }), { to: 22, text: true, manager: yarn18 })).stdout;
+  const at = shown(ripeAt(b, '22.0.0', 1440));
+  assert.ok(text.includes(`\nResult: BLOCKED. Angular 22 needs releases with no publish time on the registry, which yarn holds back however old they are, and releases too young for yarn and ng update until ${at}, so this project stays on 21 until the registry gives them one and that time has passed.\n`), text);
+  assert.ok(text.includes(`\nAngular 22 (22.2.0), waiting on a publish time from the registry, and until ${at}\n`), text);
 });
 
 test('npm, bun and ng update count a release with no publish time old enough, and pnpm from 11.23 then checks none of its package', async () => {
