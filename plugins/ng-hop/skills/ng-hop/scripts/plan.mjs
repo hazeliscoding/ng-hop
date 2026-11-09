@@ -798,7 +798,7 @@ async function releaseAge(project, config) {
     let toml = '';
     try { toml = readFileSync(join(project.dir, 'bunfig.toml'), 'utf8'); } catch { /* no bunfig.toml, no age */ }
     // The line starts with [ \t]*, since a \s* there ran on over every blank line below it: 150,000 of them took 24 s.
-    const set =/^[ \t]*minimumReleaseAge[ \t]*=[ \t]*(\d+)/m.exec(toml)?.[1];
+    const set = /^[ \t]*minimumReleaseAge[ \t]*=[ \t]*(\d+)/m.exec(toml)?.[1];
     const seconds = Number(set) || 0;
     const long = tooLong(seconds / 60, `${join(project.dir, 'bunfig.toml')} sets minimumReleaseAge to "${plainLine(set ?? '', 60)}"`);
     if (long) return { manager: pm, unknown: long };
