@@ -855,7 +855,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     for (const name of coupledNames) {
       const doc = docs.get(name);
       const floor = current[name];
-      if (ALIGNED.test(name) && !hasAngularPeersForHop(ripe.get(name), floor, majorRange)) {
+      // Whether a package declares Angular peers isn't a question of age, so the whole document says; the pick reads ripe.
+      if (ALIGNED.test(name) && !hasAngularPeersForHop(doc, floor, majorRange)) {
         const version = semver.maxSatisfying(eligibleReleases(ripe.get(name), floor), majorRange);
         if (version) {
           libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });

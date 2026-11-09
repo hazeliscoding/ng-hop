@@ -1666,7 +1666,8 @@ test('a library whose newest release is too young moves to the newest that is ol
 });
 
 test('tooling that follows Angular\'s major, with only a release too young for the new one, says until when, or that npm\'s before leaves it out', async () => {
-  const lib = pkg('@angular-eslint/schematics', { '21.0.0': { at: '2025-12-01' }, '22.0.0': { ago: 10 } });
+  // angular-eslint's packages declared an @angular/cli peer in older releases, and whether they do isn't a question of age.
+  const lib = pkg('@angular-eslint/schematics', { '20.0.0': { peers: { '@angular/cli': '>=20.0.0 <21.0.0' }, at: '2025-06-01' }, '21.0.0': { at: '2025-12-01' }, '22.0.0': { ago: 10 } });
   const reason = (r) => r.plan.unchecked.find((u) => u.name === '@angular-eslint/schematics')?.reason;
   const r = await plan(world(lib), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.match(reason(r) ?? '', /^its 22\.x releases are too young until \d{4}-\d\d-\d\d \d\d:\d\d UTC, and it follows Angular's major$/, JSON.stringify(r.plan.unchecked));
