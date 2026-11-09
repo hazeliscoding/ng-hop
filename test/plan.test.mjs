@@ -1890,6 +1890,13 @@ test('pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its pac
   assert.match(await ageOf(webApp(parent('packages:\n  apps: web\n')), { manager: pnpm12 }), /turns on a packages list the plan can't read, so /);
 });
 
+test('on Windows, pnpm 12 takes a packages pattern in to the app whatever its case, and pnpm 11 only in the case it has', { skip: process.platform !== 'win32' && 'pnpm 12 folds case on Windows only' }, async () => {
+  // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, and 11.28.11 didn't.
+  const parent = () => webApp({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\npackages:\n  - Apps/*\n' });
+  assert.equal((await ageOf(parent(), { manager: { '--version': '11.28.11' } }))?.minutes, 1440);
+  assert.equal((await ageOf(parent(), { manager: pnpm12 }))?.minutes, 60, 'the control: pnpm 12');
+});
+
 test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pnpm 12 refuses unknown, naming the file and the value', async () => {
   // pnpm 12.16.1: 60, "60", 60 # a comment, +60 and 0x3C read as 60, and 0 as no age; 1d, -5, 60.5, 1e3, 060 and a number
   // past 2^64 made every pnpm command fail with "invalid u64". It passed over an empty value to its config.yaml, and

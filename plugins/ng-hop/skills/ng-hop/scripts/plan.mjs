@@ -456,10 +456,9 @@ function yamlList(text, key) {
 // repo writes the pattern, and as a regular expression it backtracked for minutes, 16 ** parts against an app 16
 // folders down for 47 s and 8 *s against a name 60 letters long for 56 s, so it is matched name by name, each part
 // against each name once.
-function workspaceGlob(glob, dot) {
+function workspaceGlob(glob, dot, anyCase) {
   if (/[?[\]{}()!\\]/.test(glob)) return null;
-  // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, where 11.28.11 didn't.
-  const fold = (text) => (process.platform === 'win32' ? text.toLowerCase() : text);
+  const fold = (text) => (anyCase ? text.toLowerCase() : text);
   const parts = fold(posix.normalize(glob)).replace(/\/$/, '').split('/');
   const hidden = (name) => !dot && name.startsWith('.');
   // One name against one part whose * takes any run of characters: the greedy match, going back only to the last *.
@@ -493,8 +492,9 @@ function workspaceGlob(glob, dot) {
 
 // Whether a pnpm-workspace.yaml's packages take in the app at rel, as pnpm 11's isWorkspaceProjectDir decides: some
 // pattern matches and no ! pattern does, whatever their order. A string instead names a pattern the plan can't read.
-function takesIn(patterns, rel) {
-  const globs = patterns.map((p) => [p, p.startsWith('!'), workspaceGlob(p.replace(/^!/, ''), p.startsWith('!'))]);
+// anyCase: a pattern matches whatever the case of its letters.
+function takesIn(patterns, rel, anyCase) {
+  const globs = patterns.map((p) => [p, p.startsWith('!'), workspaceGlob(p.replace(/^!/, ''), p.startsWith('!'), anyCase)]);
   const unread = globs.find(([, , covers]) => !covers);
   if (unread) return `a packages pattern the plan can't read, "${plainLine(unread[0], 60)}"`;
   return globs.some(([, not, covers]) => !not && covers(rel)) && !globs.some(([, not, covers]) => not && covers(rel));
@@ -551,8 +551,9 @@ function pnpmAge(project, version, config) {
     // pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and look no
     // further up; pnpm 10.34.9 applied the nearest whatever its packages.
     const rel = relative(dirname(workspace), project.dir).split(sep).join('/');
+    // pnpm 12.16.1 on Windows took Apps/* to cover apps/web, where 11.28.11 didn't.
     const patterns = rel && v11 ? yamlList(readText(workspace), 'packages') : null;
-    const covers = !rel || !v11 || (patterns === undefined ? 'a packages list the plan can\'t read' : takesIn(patterns ?? [], rel));
+    const covers = !rel || !v11 || (patterns === undefined ? 'a packages list the plan can\'t read' : takesIn(patterns ?? [], rel, v12 && process.platform === 'win32'));
     if (typeof covers === 'string') return { manager: 'pnpm', unknown: `${workspace} sets minimumReleaseAge, but whether it covers this app turns on ${covers}, so a release younger than that age can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
     if (covers) found = files[0];
   }
