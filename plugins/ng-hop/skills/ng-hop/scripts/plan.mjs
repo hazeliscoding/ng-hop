@@ -850,9 +850,9 @@ async function buildPlan({ projectDir, to, next = false }) {
     // minutes at 22.0.0. ng update gives a young CLI no target, and leaves it and its package group behind.
     const cliVersion = toPrerelease ? cliNext : cliDoc && (semver.maxSatisfying(oldEnough(cliDoc), majorRange) || semver.minSatisfying(inMajor(cliDoc), majorRange));
     // Angular itself can be too young: core, or the CLI.
-    // shortcut: core's time stands in for the rest of its package group, which came out up to 2 minutes 39 after it at
-    // 22.2.0, so for those minutes a hop reads as ready while ng update leaves a member behind; read their times if that
-    // window ever matters.
+    // shortcut: core's time stands in for the rest of its package group, which came out up to 2 minutes 39 seconds after
+    // it at 22.2.0, so for those minutes a hop reads as ready while ng update leaves a member behind; read their times if
+    // that window ever matters.
     const angularHeld = [['@angular/core', coreDoc, frameworkVersion], ['@angular/cli', cliDoc, cliVersion]]
       .filter(([, doc, v]) => young(doc, v)).map(([name, doc, v]) => ({ name, version: v, installed: project.installed(name)?.version ?? null, published: doc.time[v], until: ripens(doc, v) }));
     const compilerManifest = compilerDoc.versions[compilerVersion];

@@ -1854,7 +1854,8 @@ test('npm 11.10 to 11.14 turn min-release-age into a before that many days back,
 
 test('an npm before 11.17 has no min-release-age-exclude, so there is no sooner way, and npm exempts a package, not a release', async () => {
   // npm 11.16.0 has no such setting: it warned `Unknown project config "min-release-age-exclude"`. Node 24.18 bundles it.
-  // ng update below 22.1 doesn't apply before, so only the install holds the release back.
+  // Here the project's npm-version stands in for that npm. ng update below 22.1 doesn't apply before, so only the
+  // install holds the release back.
   const lib = pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', ago: 10 } });
   const proj = (version) => app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.1.0' }, files: { '.npmrc': `npm-version=${version}\nbefore=${new Date(Date.now() - 60 * 60e3).toISOString()}\n` } });
   const old = await plan(world(lib), proj('11.16.0'), { to: 21, text: true });
