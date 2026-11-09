@@ -95,6 +95,10 @@ test('pnpm runs step 3 with the settings that keep it from fetching or recording
   assert.match(three, /`pnpm_config_pm_on_fail=ignore`/);
   assert.match(three, /`npm_config_manage_package_manager_versions=false`/);
   assert.match(three, /in the environment/);
+  // The plan's own pnpm commands start a pnpm in the agent's environment too, where pnpm 12.16.1 recorded the pin before
+  // update.mjs, which gives the settings only to what it starts, refused the tree.
+  assert.match(three, /the plan's `Run:`, `Sooner` and patch commands/);
+  assert.match(step('c'), /step 3's two settings in the environment/);
   const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
   for (const doc of docs) assert.doesNotMatch(doc, /--(?:config\.)?pm-on-fail/, 'a flag never reaches the pnpm that ng starts itself');
 });
