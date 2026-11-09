@@ -50,7 +50,7 @@ Before changing anything, if you're on the default branch, create `upgrade/angul
 
 ## 3. Record the starting point
 
-Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. If the plan listed `release age` under `Could not check`, plan again now: the install can fetch the pnpm or yarn whose version the plan couldn't learn, and a major the plan called reachable can be waiting on a young release. Then record, before changing anything:
+Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. If the plan listed `release age` under `Could not check` because pnpm or yarn couldn't be asked, plan again now: the install can fetch the one whose version the plan couldn't learn, and a major the plan called reachable can be waiting on a young release. When the reason names a file, a value, the home folder or a manager inside the repo instead, no install changes it: give the person the reason and ask them. Then record, before changing anything:
 
 ```sh
 npx --no-install ng build
