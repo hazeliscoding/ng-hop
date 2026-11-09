@@ -685,6 +685,11 @@ async function askVersion(project, pm) {
   let dir;
   try {
     dir = mkdtempSync(join(home, '.ng-hop-'));
+  } catch (err) {
+    // HOME can name a folder that's gone or not the person's to write, and then no pnpm or yarn is to blame.
+    return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the plan couldn't make its empty folder in the home folder, ${home} (${err.code}), so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, set to a folder it can write, or with ${pm}'s version in package.json's packageManager` };
+  }
+  try {
     const { file, prefix } = managerCommand(dir, pm);
     const found = prefix[0] ?? file;
     const foundIn = within(found);
@@ -698,7 +703,7 @@ async function askVersion(project, pm) {
     if (err.stderr === undefined) return failed(err.message.split('. ')[0], `plan again once ${pm} is installed`);
     return failed(plainLine(err.stderr.trim() ? err.stderr.trim().split('\n').at(-1) : err.message.split('. ')[0], 200), 'plan again once the dependencies are installed');
   } finally {
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

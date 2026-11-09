@@ -1833,6 +1833,14 @@ test('with the home folder inside the project or its repo, the plan asks nothing
   assert.deepEqual((await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 })).asked.length, 1, 'the control: with the usual one, it asks');
 });
 
+test('with a home folder the plan can\'t make its empty folder in, it asks nothing, and says which folder and what to do', async () => {
+  // The folder couldn't be made, so no pnpm ran, and the reason said to plan again once pnpm is installed.
+  const missing = join(app({}).dir, 'missing');
+  const r = await plan(world(), pnpm21({}), { to: 22, manager: pnpm12, env: { HOME: missing, USERPROFILE: missing } });
+  assert.deepEqual(r.asked, []);
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm wasn't asked for its version, which its minimum release age depends on, since the plan couldn't make its empty folder in the home folder, ${missing} (ENOENT), so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, set to a folder it can write, or with pnpm's version in package.json's packageManager`);
+});
+
 test('planning a pinned pnpm 12 project changes no file in it', async () => {
   const proj = pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1', files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\n' } });
   const before = listing(proj.dir);
