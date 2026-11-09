@@ -169,6 +169,11 @@ test('a major waiting on young releases is a question for the person, never a co
   for (const word of [/\bwait\b/, /exempt/, /approv/, /Sooner/, /No sooner way/]) assert.match(line, word);
 });
 
+test('the release-age section gives each manager\'s own error, since that is what the next agent searches for', () => {
+  const section = troubleSection(youngRelease);
+  for (const text of [/ERR_PNPM_NO_MATURE_MATCHING_VERSION/, /ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION/, /npm error code ETARGET/, /blocked by minimum-release-age/]) assert.match(section, text);
+});
+
 test('putting the tree back reaches a pnpm workspace root above the app', () => {
   // pnpm writes an app's lockfile and exemptions at the workspace root, and git 2.55's `git restore .` run in the app's
   // folder left them changed, so the next update.mjs refused a tree that wasn't clean.
