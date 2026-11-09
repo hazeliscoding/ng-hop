@@ -497,6 +497,17 @@ test('on a --next hop, a CLI prerelease younger than the age makes the major wai
   assert.equal((await plan(packages, proj(), { next: true })).code, 0, 'the control: with no age, the prerelease is the hop');
 });
 
+test('on a --next hop before the CLI has a prerelease of that major, its next tag is no release with no publish time', async () => {
+  // The CLI's next tag still names a 22.3 prerelease, so the command takes @angular/cli@next, and yarn from 4.11 holds
+  // back only releases the registry lists without a time.
+  const cli = pkg('@angular/cli', { '22.0.0': { at: '2026-05-27' }, '22.2.0': { at: '2026-05-28' }, '22.3.0-rc.0': { at: '2026-10-20' } }, { next: '22.3.0-rc.0' });
+  const packages = nextWorld('23.0.0-rc.1').map((p) => (p.name === '@angular/cli' ? cli : p));
+  const r = await plan(packages, yarnApp({ '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }), { next: true, text: true, manager: yarn18 });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^Result: Angular 23\.0\.0-rc\.1, a prerelease, is reachable\.$/m);
+  assert.ok(r.stdout.includes(`\n  Run: node ${quotePath(UPDATE)} @angular/core@23.0.0-rc.1 @angular/cli@next\n`), r.stdout);
+});
+
 test('a CLI younger than the age holds its major back though core is old enough, since ng update leaves a young CLI behind', async () => {
   // On npm the CLI came out after core by 30 minutes at 22.0.0 and by 3 hours 41 at 22.2.0. CLI 22.2.6's resolver gives
   // a young CLI no target, so its package group stays on the old major while core's moves.
