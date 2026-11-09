@@ -34,7 +34,7 @@ The plan prints a major as `waiting until` a time when a release it needs is you
 
 **Wait** costs only the time shown. Recommend it for anyone else's library.
 
-**Exempt those releases,** in a commit of their own, then run the plan's `Sooner, once ...` command as printed. That relaxes the guard, so for the team's own release it's reasonable if they trust their registry, and it's still their call. Offer the narrowest entry first, a release on pnpm and yarn or a package on npm and bun, before one for the whole scope, which lets every future release of the scope through. Keep the entry committed until the release is old enough: pnpm 12 checks the lockfile against the age, and without the entry an install into an empty `node_modules`, as on CI, fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Say in the report what was exempted.
+**Exempt those releases,** in a commit of their own, then run the plan's `Sooner, once ...` command as printed. That relaxes the guard, so for the team's own release it's reasonable if they trust their registry, and it's still their call. Offer the narrowest entry first, a release on pnpm and yarn or a package on npm and bun, before one for the whole scope, which lets every future release of the scope through. Keep the entry committed until the release is old enough: pnpm 12 checks the lockfile against the age, and without the entry every install, frozen or not, fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Say in the report what was exempted.
 
 - **pnpm:** `pnpm-workspace.yaml` at the workspace root, `minimumReleaseAgeExclude:` with `- '@acme/ui-core@22.0.0'`, or `- '@acme/*'` for the scope.
 - **yarn:** `.yarnrc.yml`, `npmPreapprovedPackages:` with `- "@acme/ui-core@22.0.0"`.
