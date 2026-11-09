@@ -284,6 +284,11 @@ test('npm, bun and ng update count a release with no publish time old enough, an
     const lib = (r.plan.waiting ?? r.plan.hops.at(-1))?.libs.find((l) => l.name === 'ui-lib');
     assert.deepEqual([r.code, lib?.to], [code, '22.0.0'], `${version}: ${r.stderr}`);
   }
+  // So the release with no time is taken too, where it's the one the hop needs.
+  for (const version of ['11.28.11', '12.16.1']) {
+    const r = await plan(world(undated()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': version } });
+    assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], `${version}: ${r.stderr}`);
+  }
   const dated = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.equal(dated.code, 2, 'the control: with 21.0.0 dated too, pnpm 12 holds 22.0.0 back');
 });
