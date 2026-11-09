@@ -2095,6 +2095,31 @@ test('pnpm 10 applies the nearest pnpm-workspace.yaml whatever its packages, the
   assert.equal(await ageOf(day, pnpm10), `${join(day.dir, '.npmrc')} sets minimum-release-age to "1d", which is no whole number of minutes, and the plan can't tell what pnpm 10.34.9 holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
 });
 
+test('an age too long to give a date for is unknown, naming where it is set, and the plan neither crashes nor gives a time', async () => {
+  // pnpm 12.16.1 printed 999999999999 for minimumReleaseAge, yarn 4.18.1 100000000000000000000 for npmMinimalAgeGate
+  // 99999999999999999999, and npm 11.19.0 listed a min-release-age of 99999999999 days, and working out when a release
+  // is that old stopped the plan: RangeError: Invalid time value.
+  const long = (shown) => `${shown}, too long for the plan to give the date a release would be old enough, so a release younger than that can still stop a command; ask the person whether that age is meant`;
+  const pnpm = pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1', files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 999999999999\n' } });
+  const yarn = yarn21({ pin: 'yarn@4.18.1', files: { '.yarnrc.yml': 'npmMinimalAgeGate: 99999999999999999999\n' } });
+  const bun = app({ deps: { ...base, '@angular/core': '^21.0.0' }, files: { 'bun.lock': '{}', 'bunfig.toml': '[install]\nminimumReleaseAge = 99999999999999999999\n' } });
+  const cases = [
+    [pnpm, long(`${join(pnpm.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge to "999999999999"`)],
+    [yarn, long(`${join(yarn.dir, '.yarnrc.yml')} sets npmMinimalAgeGate to "99999999999999999999"`)],
+    [bun, long(`${join(bun.dir, 'bunfig.toml')} sets minimumReleaseAge to "99999999999999999999"`)],
+    ...npmKnowsAge ? [[npmApp('min-release-age=99999999999\n'), long('npm config sets min-release-age to "99999999999"')]] : [],
+  ];
+  for (const [proj, reason] of cases) {
+    const r = await plan(world(youngLib()), proj, { to: 22, text: true });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.stdout.includes(`\n  release age: ${reason}.`), r.stdout);
+    assert.doesNotMatch(r.stdout, /until|waiting/);
+  }
+  // The control: an age that ends in the year 3928 still has a date, and the plan waits for it.
+  const far = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1', files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1000000000\n' } }), { to: 22 });
+  assert.deepEqual([far.code, far.plan.waiting?.until.slice(0, 2)], [2, '39'], far.stderr);
+});
+
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
   const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });

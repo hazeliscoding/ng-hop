@@ -510,6 +510,11 @@ const pnpmConfigDir = () => (process.env.XDG_CONFIG_HOME ? join(process.env.XDG_
   : process.platform === 'win32' && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'pnpm', 'config')
   : join(homedir(), '.config', 'pnpm'));
 
+// An age that ends past the year 9999, counted from now, has no time minute can print, and past the year 275760 none a
+// Date can hold: working one out stopped the plan with "RangeError: Invalid time value". pnpm 12.16.1 printed
+// 999999999999 and yarn 4.18.1 100000000000000000000 for ng update to read, so the plan says it can't give that date.
+const tooLong = (minutes, shown) => (Date.now() + minutes * 60e3 >= Date.UTC(10000, 0) ? `${shown}, too long for the plan to give the date a release would be old enough, so a release younger than that can still stop a command; ask the person whether that age is meant` : null);
+
 // pnpm's minimum-release-age for the app, the first source that sets it winning, as found offline. pnpm 12.16.1 and
 // 11.28.11: pnpm_config_minimum_release_age, the nearest pnpm-workspace.yaml if it applies to the app, then pnpm's
 // config.yaml. pnpm 10.34.9: the nearest pnpm-workspace.yaml whatever its packages, then npm_config_ and .npmrc.
@@ -525,7 +530,7 @@ function pnpmAge(project, version, config) {
     if (values.length > 1) return { refused: `${from} sets ${key} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` };
     const [value] = values;
     if (value === undefined || /^(?:|null|~)$/.test(value)) return null;
-    if ((v12 ? /^\+?(?:0|[1-9]\d*)$|^0x[\da-f]+$/i : /^\+?\d+$|^0x[\da-f]+$/i).test(value) && Number(value) < 2 ** 64) return { value, from };
+    if ((v12 ? /^\+?(?:0|[1-9]\d*)$|^0x[\da-f]+$/i : /^\+?\d+$|^0x[\da-f]+$/i).test(value) && Number(value) < 2 ** 64) return { value, from, key };
     const shown = `${from} sets ${key} to "${plainLine(value, 60)}"`;
     return v12 ? { refused: `${shown}, which pnpm ${version} refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it` }
       : { unclear: `${shown}, which is no whole number of minutes, and the plan can't tell what pnpm ${version} holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
@@ -539,7 +544,7 @@ function pnpmAge(project, version, config) {
 
   // 12.16.1 read the name in any case and the value trimmed, and passed over one that is no whole number.
   const name = v11 && envNamed(/^pnpm_config_minimum_release_age$/i);
-  let found = /^(?:0|[1-9]\d*)$/.test(name ? process.env[name].trim() : '') ? { value: process.env[name].trim(), from: name } : null;
+  let found = /^(?:0|[1-9]\d*)$/.test(name ? process.env[name].trim() : '') ? { value: process.env[name].trim(), from: name, key: 'minimum-release-age' } : null;
   if (!found && files[0]) {
     // pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and look no
     // further up; pnpm 10.34.9 applied the nearest whatever its packages.
@@ -561,6 +566,8 @@ function pnpmAge(project, version, config) {
   found ??= v11 ? files[1] : npmrc();
   if (found?.unclear) return { manager: 'pnpm', unknown: found.unclear };
   const minutes = found ? Number(found.value) : semver.gte(version, semver.coerce(AGE_DEFAULT_FROM.pnpm)) ? 1440 : 0;
+  const long = found && tooLong(minutes, `${found.from} sets ${found.key} to "${plainLine(found.value, 60)}"`);
+  if (long) return { manager: 'pnpm', unknown: long };
   return minutes > 0 ? { manager: 'pnpm', version, setting: 'minimum-release-age', minutes, ...(found ? {} : { default: true }), ngUpdateReads: true, from: found?.from ?? 'default' } : null;
 }
 
@@ -606,7 +613,10 @@ function yarnAge(project, version) {
   if (semver.lt(version, '4.10.0')) return null;
   const found = yarnSetting(project.dir, 'npmMinimalAgeGate');
   const minutes = found ? yarnMinutes(found.value, version) : semver.gte(version, semver.coerce(AGE_DEFAULT_FROM.yarn)) ? 1440 : 0;
-  if (minutes === undefined) return { manager: 'yarn', unknown: `${found.from} sets npmMinimalAgeGate to "${plainLine(found.value, 60)}", which yarn ${version} refuses: every yarn command fails on it until it is a number with an optional unit (ms, s, m, h, d or w), so ask the person to fix it` };
+  const shown = found && `${found.from} sets npmMinimalAgeGate to "${plainLine(found.value, 60)}"`;
+  if (minutes === undefined) return { manager: 'yarn', unknown: `${shown}, which yarn ${version} refuses: every yarn command fails on it until it is a number with an optional unit (ms, s, m, h, d or w), so ask the person to fix it` };
+  const long = found && tooLong(minutes, shown);
+  if (long) return { manager: 'yarn', unknown: long };
   return minutes > 0 ? { manager: 'yarn', version, setting: 'npmMinimalAgeGate', minutes, ...(found ? {} : { default: true }), ngUpdateReads: /^\d+$/.test(String(minutes)), from: found?.from ?? 'default' } : null;
 }
 
@@ -722,6 +732,8 @@ async function releaseAge(project, config) {
     const back = (Date.now() - Date.parse(config.before)) / 864e5;
     const derived = semver.satisfies(semver.coerce(config['npm-version']) || '0.0.0', '>=11.10.0 <11.15.0') && Math.abs(back - Math.round(back)) * 1440 < 1;
     const days = typeof config['min-release-age'] === 'number' ? config['min-release-age'] : derived ? Math.round(back) : 0;
+    const long = tooLong(days * 1440, `npm config sets min-release-age to "${days}"`);
+    if (long) return { manager: pm, unknown: long };
     if (days > 0) return { manager: pm, setting: 'min-release-age', minutes: days * 1440, ngUpdateReads: Boolean(config.before) };
     return config.before ? { manager: pm, setting: 'before', before: new Date(config.before).toISOString(), ngUpdateReads: true } : null;
   }
@@ -730,7 +742,10 @@ async function releaseAge(project, config) {
     // shortcut: the app's bunfig.toml only; read ~/.bunfig.toml too if a team sets it there.
     let toml = '';
     try { toml = readFileSync(join(project.dir, 'bunfig.toml'), 'utf8'); } catch { /* no bunfig.toml, no age */ }
-    const seconds = Number(/^\s*minimumReleaseAge\s*=\s*(\d+)/m.exec(toml)?.[1]) || 0;
+    const set = /^\s*minimumReleaseAge\s*=\s*(\d+)/m.exec(toml)?.[1];
+    const seconds = Number(set) || 0;
+    const long = tooLong(seconds / 60, `${join(project.dir, 'bunfig.toml')} sets minimumReleaseAge to "${plainLine(set ?? '', 60)}"`);
+    if (long) return { manager: pm, unknown: long };
     return seconds > 0 ? { manager: pm, setting: 'minimumReleaseAge', minutes: seconds / 60, ngUpdateReads: false } : null;
   }
   if (pm !== 'pnpm' && pm !== 'yarn') return null;
