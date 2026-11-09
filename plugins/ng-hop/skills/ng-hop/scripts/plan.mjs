@@ -575,12 +575,14 @@ function pnpmAge(project, version, config) {
     return v12 ? { refused: `${shown}, which pnpm ${version} refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it` }
       : { unclear: `${shown}, which is no whole number of minutes, and the plan can't tell what pnpm ${version} holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
   };
-  // All three failed over any key a pnpm-workspace.yaml sets twice, and 12.16.1 and 11.28.11 over one in config.yaml.
+  // All three failed over any key a pnpm-workspace.yaml sets twice, and 12.16.1 and 11.28.11 over one in config.yaml. The
+  // keys seen go in a Set, since comparing each key with every other took 35 s over a file of 100,000 keys.
   // shortcut: a key set twice inside another, which all three failed over too, goes unnoticed; follow nested keys if a
   // team ever trips on one.
   const inYaml = (file) => {
     const text = readText(file);
-    const twice = yamlTop(text).keys.map((k) => k.key).find((key, i, all) => all.indexOf(key) !== i);
+    const seen = new Set();
+    const twice = yamlTop(text).keys.find(({ key }) => seen.has(key) || !seen.add(key))?.key;
     return twice ? { refused: `${file} sets ${twice} more than once, which pnpm ${version} refuses: every pnpm command fails on it until it is set once, so ask the person to fix it` }
       : read(file, 'minimumReleaseAge', yamlValues(text, 'minimumReleaseAge'));
   };
