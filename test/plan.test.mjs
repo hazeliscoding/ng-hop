@@ -1803,6 +1803,17 @@ test('a major out for less than the minimum release age waits as a whole, and An
   assert.match(r.plan.waiting.noSooner, /^Angular 22 itself is too young/);
 });
 
+test('with Angular and a library both too young, the no-sooner line gives Angular\'s own time, which can come first', async () => {
+  // The From time is the last release's. Once Angular itself is old enough, a sooner way for the library can open.
+  const [core, compiler] = angular({ 20: '2025-05-28', 21: '2025-11-19' });
+  for (const doc of [core, compiler]) youngPatch(doc, '22.0.0', '21.0.0', 120);
+  const r = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), youngLib()], pnpm21({ 'ui-lib': '^21.0.0' }), { manager: pnpm12, text: true });
+  const [, angularUntil] = /^ {2}Angular 22: @angular\/core: .* until (\d{4}-\d\d-\d\d \d\d:\d\d UTC), /m.exec(r.stdout) || [];
+  const [, from] = /^ {2}From (\d{4}-\d\d-\d\d \d\d:\d\d UTC): /m.exec(r.stdout) || [];
+  assert.ok(angularUntil && from && angularUntil !== from, r.stdout);
+  assert.match(r.stdout, new RegExp(`^ {2}No sooner way: Angular 22 itself is too young until ${angularUntil}\\.$`, 'm'));
+});
+
 test('a young library that ships migrations can only wait, since installing it first would skip them', async () => {
   // The control is the M7 test above: the same releases without migrations get a Sooner command.
   const r = await plan(world(), pnpm21(acmeDeps), { to: 22, own: { scope: '@acme', packages: acme(10, { migrations: true }) }, manager: pnpm12 });

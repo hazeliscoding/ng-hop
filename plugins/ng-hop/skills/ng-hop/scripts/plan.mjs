@@ -1049,7 +1049,8 @@ async function buildPlan({ projectDir, to, next = false }) {
       // Sooner takes the person's approved exemption. Where ng update skips young releases itself, the libraries go in
       // first through update.mjs, on pnpm and yarn, never Angular or a library whose migrations that would skip.
       const migrating = held.find((h) => h.migrations);
-      const noSooner = angularHeld.length ? `Angular ${major} itself ${age.before ? 'is newer than npm\'s before' : 'is too young until then'}`
+      // Angular's own time, since a later library's can set the From time, and once Angular is old enough a way can open.
+      const noSooner = angularHeld.length ? `Angular ${major} itself ${age.before ? 'is newer than npm\'s before' : `is too young until ${minute(angularHeld.map((h) => h.until).sort().at(-1), true)}`}`
         : !ngUpdateSkips ? null
         : migrating ? `${migrating.name} ships migrations, which installing it first would skip`
         : !['pnpm', 'yarn'].includes(project.packageManager) ? 'ng update applies npm\'s before to every package and reads no exemption list'
