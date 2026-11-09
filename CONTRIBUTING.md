@@ -17,7 +17,7 @@ npm test    # no install step, and offline: the tests run against a fake npm reg
 ```
 
 - Read [AGENTS.md](AGENTS.md) first. Its hard rules are why people can trust the plan.
-- New plan behaviour starts with a test in `test/plan.test.mjs`. If a real library is why the rule exists, name it in the test.
+- New plan behaviour starts with a test in the `test/plan-*.test.mjs` file for its topic. A new file also goes in the `test` script in `package.json`, which names every file. If a real library is why the rule exists, name it in the test.
 - A check that looks for an absence needs a positive control that proves it can fail.
 - The scripts have no dependencies beyond the vendored `semver`, because skills run with no install step.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
