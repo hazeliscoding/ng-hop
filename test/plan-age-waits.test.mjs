@@ -530,4 +530,11 @@ test('a waiting major prints after the one that is ready, and the result says ho
   assert.equal(r.code, 2, r.stderr);
   assert.match(r.stdout, /^Result: BLOCKED at Angular 22 until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Angular 21 is the highest version everything supports today, and Angular 22 needs releases too young for pnpm and ng update until then\.$/m);
   assert.match(r.stdout, /^Angular 21 \(21\.2\.0\)\n[^]*?^ {2}Run: [^\n]*\n\nAngular 22 \(22\.2\.0\), waiting until /m);
+  // Waiting at Angular 22 on a release with no publish time, or on one newer than npm's before, it still gets to 21.
+  const undatedLib = pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0' } });
+  const yarn = (await plan(world(undatedLib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'yarn.lock': '' } }), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.match(yarn, /^Result: BLOCKED at Angular 22, which needs releases with no publish time on the registry, which yarn holds back however old they are\. Angular 21 is the highest version everything supports today\.$/m, yarn);
+  const before = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  const npm = (await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.1.0' }, files: { '.npmrc': before } }), { to: 22, text: true })).stdout;
+  assert.match(npm, /^Result: BLOCKED at Angular 22, which needs releases newer than npm's before, \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Angular 21 is the highest version everything supports today\.$/m, npm);
 });
