@@ -185,6 +185,26 @@ test('pnpm updater: executable shims are resolved without running a command shel
   assert.equal(f.read().dispatch, 'true');
 });
 
+// pnpm 12.16.1, in a project that pins pnpm and whose lockfile doesn't record that pin yet, wrote
+// packageManagerDependencies into pnpm-lock.yaml from list, install and add unless pnpm_config_pm_on_fail was ignore, and
+// it read pm-on-fail under no npm_config_ name. ng update asks pnpm for its version before its own clean check when
+// package.json has no packageManager field, so with a devEngines pin it stopped every hop there.
+const recordingDriver = `const fs = require('node:fs'), { execFileSync } = require('node:child_process');
+if (process.env.pnpm_config_pm_on_fail !== 'ignore') fs.appendFileSync('pnpm-lock.yaml', 'packageManagerDependencies: {}\\n');
+if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()) { console.error('Error: Repository is not clean. Please commit or stash any changes before updating.'); process.exit(1); }
+`;
+
+test('pnpm updater: pnpm can\'t record itself in the lockfile, which stopped ng update at its own clean check', async () => {
+  const control = fixture(); writeFileSync(control.driver, recordingDriver);
+  const wrote = spawnSync(process.execPath, [control.driver], { cwd: control.project, env: { ...process.env, pnpm_config_pm_on_fail: 'error' }, encoding: 'utf8' });
+  assert.match(wrote.stderr, /Repository is not clean/, 'positive control: the stand-in records itself under any other value');
+  const f = fixture(); writeFileSync(f.driver, recordingDriver);
+  // The person's own setting is overridden, as the first test overrides ng_disable_version_check.
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, pnpm_config_pm_on_fail: 'warn' } });
+  assert.equal(r.code, 0, r.stdout);
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: f.project, encoding: 'utf8' }).stdout, '');
+});
+
 // ---- installing a library first ------------------------------------------------------------------------------------
 
 // Stands in for pnpm, yarn and npm, and logs each call. `add` saves each spec in package.json, in the section it's

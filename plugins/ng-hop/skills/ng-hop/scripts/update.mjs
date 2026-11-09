@@ -169,7 +169,9 @@ function main() {
   if (clean.status !== 0) throw new Error('Could not verify the Git working tree. No update was run.');
   if (clean.stdout.trim()) throw new Error('Repository is not clean. Preserve and inspect the changes before another update.');
   const env = { ...process.env };
-  const controls = { NG_DISABLE_VERSION_CHECK: 'true', NG_CLI_ANALYTICS: 'false', COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', npm_config_manage_package_manager_versions: 'false', npm_config_pm_on_fail: 'error' };
+  // pnpm 12 reads pm-on-fail only as pnpm_config_, and under any value but ignore, ng update's own pnpm list and the
+  // installs record the pinned pnpm in pnpm-lock.yaml, which no hop should carry.
+  const controls = { NG_DISABLE_VERSION_CHECK: 'true', NG_CLI_ANALYTICS: 'false', COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', npm_config_manage_package_manager_versions: 'false', npm_config_pm_on_fail: 'error', pnpm_config_pm_on_fail: 'ignore' };
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
   const options = { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 };
