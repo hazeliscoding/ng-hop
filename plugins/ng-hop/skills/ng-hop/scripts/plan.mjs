@@ -572,7 +572,7 @@ function pinnedVersion(project, pm) {
     if (path && !/^(?:true|1)$/.test(yarnSetting(project.dir, 'ignorePath')?.value ?? '')) {
       // yarn set version names the file after the release, and the plan never runs the repo's copy to ask.
       const version = semver.valid(/^yarn-(.+)\.c?js$/.exec(path.value.split(/[\\/]/).pop())?.[1] ?? '');
-      return version ? { version } : { unknown: `${path.from} sets yarnPath to ${plainLine(path.value, 120)}, whose name holds no version, and the plan doesn't run the repo's yarn to ask, so a release younger than yarn's minimum release age can still stop a command; ask the person to check it with yarn config get npmMinimalAgeGate` };
+      return version ? { version } : { unknown: `${path.from} sets yarnPath to "${plainLine(path.value, 60)}", whose name holds no version, and the plan doesn't run the repo's yarn to ask, so a release younger than yarn's minimum release age can still stop a command; ask the person to check it with yarn config get npmMinimalAgeGate` };
     }
   }
   for (const dir of upFrom(project.dir)) {
