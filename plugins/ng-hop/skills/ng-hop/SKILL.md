@@ -53,14 +53,25 @@ Before changing anything, if you're on the default branch, create `upgrade/angul
 Install dependencies if they're missing (`npm ci`, `pnpm install --frozen-lockfile` or `yarn install --immutable`). If pnpm stops with `ERR_PNPM_IGNORED_BUILDS`, the project hasn't decided which packages may run install scripts: read that section of `references/troubleshooting.md`, because it needs its own commit before anything else can run. If the plan listed `release age` under `Could not check` because pnpm or yarn couldn't be asked, plan again now: the install can fetch the one whose version the plan couldn't learn, and a major the plan called reachable can be waiting on a young release. When the reason names a file, a value, the home folder or a manager inside the repo instead, no install changes it: give the person the reason and ask them. Then record, before changing anything:
 
 ```sh
-npx --no-install ng build
-npx --no-install ng test --watch=false        # with Karma, add --browsers=ChromeHeadless
+<ng> build
+<ng> test --watch=false        # with Karma, add --browsers=ChromeHeadless
 node $SCRIPTS/smoke.mjs          # runs the dev server, and renders the page in Chrome if it's installed
 ```
 
+`<ng>` runs the project's own Angular CLI through the package manager the plan's first line names:
+
+| Manager | `<ng>` |
+|---|---|
+| npm | `npx --no-install ng` |
+| pnpm | `pnpm exec ng` |
+| yarn | `yarn ng` |
+| bun | `bunx --no-install ng` |
+
+npm refuses `npx` and `npm run` in a project whose `devEngines` names pnpm or yarn, as `pnpm init` writes it (`EBADDEVENGINES`).
+
 Keep the exact results. Anything failing now isn't caused by the upgrade, so it stays out of the upgrade: don't fix it, and don't count it against a major. Report it at the end. If the build itself fails here, stop and ask, because nothing after this point could be told apart from what was already broken.
 
-With no `test` target in `angular.json`, `ng test` stops with `Unknown argument: watch`. Run the test command the project's `package.json` scripts or CI use instead, at the git root too in a monorepo, through `npm test`, `npm run <script>` or `npx --no-install`, never a deploy or publish step, and say which. If no test can run at all, because there are none or the suite stops before any spec runs (Karma's `Found 1 load error`), the upgrade would go untested, so treat it like a failing build: say so and ask. When one broken spec stops the suite, they can have it fixed first in its own commit, the one exception to leaving what fails here alone. Otherwise they can have you go on with the build and app check only.
+With no `test` target in `angular.json`, `ng test` stops with `Unknown argument: watch`. Run the test command the project's `package.json` scripts or CI use instead, at the git root too in a monorepo, through the project's manager as the table runs `ng` (`npm run <script>`, `pnpm run <script>`, `yarn run <script>` or `bun run <script>`), never a deploy or publish step, and say which. If no test can run at all, because there are none or the suite stops before any spec runs (Karma's `Found 1 load error`), the upgrade would go untested, so treat it like a failing build: say so and ask. When one broken spec stops the suite, they can have it fixed first in its own commit, the one exception to leaving what fails here alone. Otherwise they can have you go on with the build and app check only.
 
 ## 4. Upgrade one major at a time
 

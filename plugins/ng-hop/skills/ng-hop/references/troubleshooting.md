@@ -12,9 +12,9 @@ An unhandled exception occurred: Cannot find module '@angular-devkit/core'
 The packages are already installed. Packages whose migrations ran before the crash are done, and those after it never ran. The exit code and the app can still look fine, so a skipped migration may only surface later.
 
 1. Find which packages printed `Executing migrations of package` before the crash.
-2. For each package in the command that didn't, run its migrations on their own. `--allow-dirty` is correct here, because the tree holds this major's unfinished work:
+2. For each package in the command that didn't, run its migrations on their own, with `<ng>` as `SKILL.md` step 3 runs the project's CLI. `--allow-dirty` is correct here, because the tree holds this major's unfinished work:
    ```sh
-   npx --no-install ng update <package> --migrate-only --from=<old version> --to=<new version> --allow-dirty
+   <ng> update <package> --migrate-only --from=<old version> --to=<new version> --allow-dirty
    ```
 3. If a package's migrations crash when loaded, as NgRx's can, check whether it has any for this move. The file named by `ng-update.migrations` in `node_modules/<package>/package.json` lists each migration's `version`. If none falls after the old version and at or before the new one, nothing was missed, so say that in your report. If some do, report them as not run, and apply them by hand from that package's docs.
 4. Check that `--migrate-only` really ran something. `ng update` can hand off to a temporary copy of the newest CLI, and in one upgrade to Angular 21 that printed success while the CLI's migrations never ran. If there's no `Executing migrations of package` line, set `NG_DISABLE_VERSION_CHECK=1` so it uses the project's own CLI, and run it again.
@@ -118,6 +118,16 @@ pnpm 11 and newer won't run a dependency's install script until the project has 
 
 In your report, list what you declined and say that `pnpm approve-builds <package>` reverses it.
 
+## `EBADDEVENGINES` from npm
+
+```text
+npm error code EBADDEVENGINES
+npm error EBADDEVENGINES Invalid devEngines.packageManager
+npm error EBADDEVENGINES Invalid name "pnpm" does not match "npm" for "packageManager"
+```
+
+npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists.
+
 ## `Package @angular/core was not found on the registry. Skipping.`
 
 Through Angular 21's CLI, `ng update` prints this for a package declared as `catalog:` in a pnpm project, and still exits 0. The libraries in the command move, Angular stays behind, and no migrations run, so it looks like success. Angular 22's CLI stops with an error instead and lists manual steps.
@@ -191,7 +201,7 @@ Libraries drop files between majors. `marked` 16 stopped shipping `marked.min.js
 
 Migrations and package managers write their own line endings on any OS, and can drop a file's final newline, so a repo that commits CRLF gets whole files back in LF. Compare `git diff --stat` with `git diff --ignore-cr-at-eol --stat`. If the second is much smaller, run `eol.mjs`: it puts back each changed file's endings and final newline as git checks the file out, following `.gitattributes`, and changes nothing else.
 
-A migration can also reformat whole files. Angular 21's control-flow migration re-indents every template it converts, because its `format` option is on by default. Don't rebuild the files from the previous version by hand, since a reviewer has nothing to check that against. Straight after `ng update`, before any hand fix, restore from the last commit only the files whose whole change is the conversion: `git diff -w` shows nothing else in them, apart from the `NgIf`, `NgFor` or `CommonModule` imports it drops. Then run `npx --no-install ng generate @angular/core:control-flow --path=src --format=false`, which converts them without re-indenting. Keep the migration's output in any file with other changes, such as a component whose inline template another migration also edited. Then carry on from step 4e, so the checks and `eol.mjs` cover what the rerun wrote. For a migration with no such option, keep its output. Either way, tell reviewers to read the diff with `git diff -w`.
+A migration can also reformat whole files. Angular 21's control-flow migration re-indents every template it converts, because its `format` option is on by default. Don't rebuild the files from the previous version by hand, since a reviewer has nothing to check that against. Straight after `ng update`, before any hand fix, restore from the last commit only the files whose whole change is the conversion: `git diff -w` shows nothing else in them, apart from the `NgIf`, `NgFor` or `CommonModule` imports it drops. Then run `<ng> generate @angular/core:control-flow --path=src --format=false`, with `<ng>` as `SKILL.md` step 3 runs the project's CLI, which converts them without re-indenting. Keep the migration's output in any file with other changes, such as a component whose inline template another migration also edited. Then carry on from step 4e, so the checks and `eol.mjs` cover what the rerun wrote. For a migration with no such option, keep its output. Either way, tell reviewers to read the diff with `git diff -w`.
 
 ## Tests that won't run
 

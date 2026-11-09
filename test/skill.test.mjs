@@ -62,9 +62,41 @@ test('the skill only ever mentions forcing as something the person must approve'
 
 test('nothing tells an agent to run plain npx ng, which can download an unrelated package', () => {
   const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
-  assert.ok(docs.some((d) => /npx --no-install ng /.test(d)), 'positive control: the safe form is in use');
+  assert.ok(docs.some((d) => /npx --no-install ng\b/.test(d)), 'positive control: the safe form is in use');
   for (const doc of docs) assert.doesNotMatch(doc, /npx ng\b/);
   assert.doesNotMatch(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /['"`]npx['"`]\s*[,}]/);
+});
+
+// One numbered step of SKILL.md, from its heading to the next.
+function skillStep(n) {
+  const start = skill.indexOf(`\n## ${n}. `);
+  assert.ok(start >= 0, `SKILL.md has a step ${n}`);
+  const end = skill.indexOf('\n## ', start + 1);
+  return skill.slice(start, end < 0 ? undefined : end);
+}
+
+test('step 3 runs ng through the project\'s own package manager, since npm refuses npx where devEngines names another', () => {
+  // npm 11.19.0, and 10.9.9 on Linux, stopped `npx --no-install ng build` with EBADDEVENGINES in a project whose
+  // devEngines.packageManager names pnpm, as pnpm 12's `pnpm init` writes it, so step 3 failed before the upgrade began.
+  const three = skillStep(3);
+  assert.match(three, /Install dependencies/, 'positive control: this is the step that records the starting point');
+  for (const runner of ['npx --no-install ng', 'pnpm exec ng', 'yarn ng', 'bunx --no-install ng']) assert.ok(three.includes(`\`${runner}\``), `step 3 has to name ${runner}`);
+  assert.doesNotMatch(three, /^npx --no-install ng /m, 'no command line in step 3 runs npm whatever the manager');
+  assert.match(three, /EBADDEVENGINES/);
+});
+
+test('the references run ng the way step 3 does, never through npm alone', () => {
+  // troubleshooting.md and libraries.md said `npx --no-install ng update`, `ng generate` and `ng build`, which npm
+  // refuses in a pnpm or yarn project whose devEngines names its manager.
+  const refs = readdirSync(join(SKILL_DIR, 'references')).map((f) => [f, readFileSync(join(SKILL_DIR, 'references', f), 'utf8')]);
+  assert.ok(refs.some(([, text]) => text.includes('--migrate-only')), 'positive control: the references still run ng');
+  for (const [file, text] of refs) assert.doesNotMatch(text, /npx --no-install ng [a-z]/, file);
+});
+
+test('running ng through the wrong manager has its error in troubleshooting.md', () => {
+  // What npm 11.19.0 printed, which is what the next agent searches for.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  for (const text of ['EBADDEVENGINES']) assert.ok(trouble.includes(text), text);
 });
 
 test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {

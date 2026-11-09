@@ -6,7 +6,7 @@ A workspace of Angular libraries goes up a major the way an app does, through `n
 
 - **The plan and `ng update` work as for an app.** They read the workspace's `package.json`, which holds Angular and the build tools. Each library's `projects/<name>/package.json` is what apps install, and nothing moves it for you.
 - **There may be no app to run.** `smoke.mjs` needs a `serve` target. In a workspace of libraries only, the build and the tests are the checks, and the apps that use the libraries are where they really run, so say that the app check didn't apply.
-- **Build and test with the workspace's own scripts.** With several libraries, a plain `ng build` stops with `Cannot determine project for command.`, and a library that imports another from the same workspace builds against it from `dist`, so the one it needs has to be built first, for its tests too. For the starting point and every check, use the workspace's build and test scripts, or `npx --no-install ng build <library>` for each in dependency order before `npx --no-install ng test`, the same way before and after, and say which in the report.
+- **Build and test with the workspace's own scripts.** With several libraries, a plain `ng build` stops with `Cannot determine project for command.`, and a library that imports another from the same workspace builds against it from `dist`, so the one it needs has to be built first, for its tests too. For the starting point and every check, use the workspace's build and test scripts, or `ng build <library>` for each in dependency order before `ng test`, run through the workspace's package manager as `SKILL.md` step 3 runs `<ng>`, the same way before and after, and say which in the report.
 
 ## Move each library to the new major
 
