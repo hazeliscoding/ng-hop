@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Read-only upgrade plan: how far can this Angular app go today, and what is in the way?
-// It reads package.json, the lockfile and npm, and never changes the project.
+// It reads package.json, the lockfile and npm, asks the project's pnpm or yarn for its minimum release age, and never
+// changes the project.
 // Exit codes: 0 the target is reachable (or nothing to do), 2 blocked before the target, 1 could not plan.
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -39,6 +40,8 @@ const day = (iso) => (iso || '').slice(0, 10) || null;
 // From this CLI on, ng update skips a release younger than the package manager's minimum release age
 // (update-resolver.js, isReleaseAgeSatisfied), so on a hop to it only installing first gets a young library past it.
 const NG_UPDATE_AGE = '22.1.0';
+// ng update reads an unset age as a day from these majors of pnpm and yarn on.
+const AGE_DEFAULT_FROM = { pnpm: 11, yarn: 4 };
 // A time as people read it: a release's rounded down, the moment it's old enough rounded up, so it's never early.
 const minute = (iso, up = false) => `${new Date(Math[up ? 'ceil' : 'floor'](Date.parse(iso) / 60e3) * 60e3).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 const quotePath = (value) => process.platform === 'win32' ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, "'\\''")}'`;
@@ -396,7 +399,8 @@ function readProject(dir) {
 
 // From Angular CLI 22.1, ng update asks the package manager for its minimum release age and skips any younger release,
 // reading no exemption list, and the manager's own install holds it back too. So the plan asks the same question the
-// same way. Compare @angular/cli's package-manager-descriptor.js and parsers.js when either changes. null: no age set.
+// same way. These rules were read in @angular/cli 22.2.6's package-manager-descriptor.js and parsers.js, so compare a
+// newer CLI's. null: no age set.
 async function releaseAge(project, config) {
   const pm = project.packageManager;
   if (pm === 'npm') {
@@ -421,7 +425,8 @@ async function releaseAge(project, config) {
   if (pm !== 'pnpm' && pm !== 'yarn') return null;
   // pnpm 12.16.1's --version, in a project that pins pnpm, wrote packageManagerDependencies into pnpm-lock.yaml unless
   // pm-on-fail was ignore. Corepack stays offline, as update.mjs keeps it, so an uncached pinned manager goes unasked.
-  // A name has no case on Windows, where Node passes on only the first spelling in sort order, so the person's go.
+  // A name has no case on Windows, where Node passes on only the first spelling in sort order, so the person's own
+  // spellings of these go.
   const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', pnpm_config_pm_on_fail: 'ignore' };
   const owned = new Set(Object.keys(controls).map((key) => key.toLowerCase()));
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !owned.has(key.toLowerCase()))), ...controls };
@@ -440,8 +445,8 @@ async function releaseAge(project, config) {
   if (pm === 'yarn' && semver.major(version) < 2) return null; // yarn 1 has no such setting, and ng update asks it nothing
   const unset = !value || value === 'undefined' || value === 'null';
   const [, amount, unit] = /^(\d+)(ms|s|m|h|d|w)?$/.exec(value) || [];
-  // Unset is a day from pnpm 11 and from yarn 4, as ng update reads it. A bare number is minutes.
-  const minutes = unset ? (semver.major(version) >= (pm === 'pnpm' ? 11 : 4) ? 1440 : 0)
+  // A bare number is minutes.
+  const minutes = unset ? (semver.major(version) >= AGE_DEFAULT_FROM[pm] ? 1440 : 0)
     : Number(amount || 0) * ({ ms: 1 / 60e3, s: 1 / 60, h: 60, d: 1440, w: 10080 }[unit] ?? 1);
   return minutes > 0 ? { manager: pm, version, setting, minutes, ...(unset ? { default: true } : {}), ngUpdateReads: true } : null;
 }
@@ -719,7 +724,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     if (age.before) return `${h.version} came out at ${minute(h.published)}, after npm's before (${minute(age.before)}), which ${skips ? 'npm and ng update both apply' : 'npm applies'}, so nothing takes it until that setting moves`;
     const setting = { pnpm: 'pnpm\'s minimumReleaseAge', yarn: 'yarn\'s npmMinimalAgeGate', npm: 'npm\'s min-release-age', bun: 'bun\'s minimumReleaseAge' }[age.manager];
     const span = age.minutes % 1440 === 0 ? `${age.minutes / 1440} day${age.minutes === 1440 ? '' : 's'}` : `${Math.round(age.minutes)} minutes`;
-    return `${h.version} came out at ${minute(h.published)}, and ${setting} (${span}${age.default ? `, the default from ${age.manager} ${age.manager === 'pnpm' ? 11 : 4}` : ''}) holds it back until ${minute(h.until, true)}, a guard against a compromised release${skips ? '; from Angular CLI 22.1, ng update skips it until then too and reads no exemption list' : ''}`;
+    return `${h.version} came out at ${minute(h.published)}, and ${setting} (${span}${age.default ? `, the default from ${age.manager} ${AGE_DEFAULT_FROM[age.manager]}` : ''}) holds it back until ${minute(h.until, true)}, a guard against a compromised release${skips ? '; from Angular CLI 22.1, ng update skips it until then too and reads no exemption list' : ''}`;
   };
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
