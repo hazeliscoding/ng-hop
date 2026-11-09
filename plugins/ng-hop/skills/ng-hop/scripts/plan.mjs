@@ -1128,7 +1128,9 @@ async function buildPlan({ projectDir, to, next = false }) {
   const tooYoung = (h, skips) => {
     if (age.before) return `${h.version} came out at ${minute(h.published)}, after npm's before (${minute(age.before)}), which ${skips ? 'npm and ng update both apply' : 'npm applies'}, so nothing takes it until that setting moves`;
     const setting = { pnpm: 'pnpm\'s minimumReleaseAge', yarn: 'yarn\'s npmMinimalAgeGate', npm: 'npm\'s min-release-age', bun: 'bun\'s minimumReleaseAge' }[age.manager];
-    if (h.noPublishTime) return `${h.version} has no publish time on the registry, so ${setting} can't tell its age and holds it back however old it is, until the registry gives it one or the person exempts it`;
+    // An exemption for Angular itself would have to cover its whole package group, whose times the plan doesn't read, so
+    // the plan offers none, as the major's No sooner way line says.
+    if (h.noPublishTime) return `${h.version} has no publish time on the registry, so ${setting} can't tell its age and holds it back however old it is, until the registry gives it one${isFramework(h.name) ? '' : ' or the person exempts it'}`;
     const span = age.minutes % 1440 === 0 ? `${age.minutes / 1440} day${age.minutes === 1440 ? '' : 's'}` : `${Math.round(age.minutes)} minutes`;
     return `${h.version} came out at ${minute(h.published)}, and ${setting} (${span}${age.default ? `, the default from ${age.manager} ${AGE_DEFAULT_FROM[age.manager]}` : ''}) holds it back until ${minute(h.until, true)}, a guard against a compromised release${skips ? '; from Angular CLI 22.1, ng update skips it until then too and reads no exemption list' : ''}`;
   };
