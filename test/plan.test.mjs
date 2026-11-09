@@ -1658,6 +1658,8 @@ test('a library whose newest release is too young moves to the newest that is ol
   assert.equal(libIn(r, 22, 'ui-lib').to, '22.0.0');
   assert.deepEqual(libIn(r, 22, 'ui-lib').held, { version: '22.1.0', until: ripeAt(lib, '22.1.0', 1440) });
   assert.ok(r.plan.hops[0].command.endsWith(' ui-lib@22.0.0'));
+  const text = (await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, text: true, manager: pnpm12 })).stdout;
+  assert.match(text, /ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); 22\.1\.0 is newer, but too young for pnpm and ng update until \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
   // The control: pnpm 10 has no minimum release age, and ng update reads none from it.
   const pnpm10 = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': '10.33.0', 'config get minimum-release-age': 'undefined' } });
   assert.equal(libIn(pnpm10, 22, 'ui-lib').to, '22.1.0');
@@ -1683,6 +1685,8 @@ test('from Angular CLI 22.1, ng update skips a young Angular patch itself, so th
   assert.equal(r.plan.hops[0].angular, '22.2.0');
   assert.equal(r.plan.hops[0].angularNewer.version, '22.2.1');
   assert.ok(r.plan.hops[0].command.endsWith(' @angular/core@22 @angular/cli@22'), r.plan.hops[0].command);
+  const text = (await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], pnpm21({}), { to: 22, text: true, manager: pnpm12 })).stdout;
+  assert.match(text, /^Angular 22 \(22\.2\.0; 22\.2\.1 is newer, but too young for pnpm and ng update until \d{4}-\d\d-\d\d \d\d:\d\d UTC\)$/m);
 });
 
 test('below Angular CLI 22.1, ng update takes Angular\'s newest patch however young, so the command names the newest old enough', async () => {
@@ -1729,6 +1733,12 @@ test('a release younger than pnpm\'s minimum release age makes its major wait, w
   assert.equal(r.plan.waiting.until, [ripeAt(packages[0], '22.0.0', 1440), ripeAt(packages[1], '22.0.0', 1440)].sort().at(-1));
   assert.equal(r.plan.ownBlockers, undefined, 'they are upgraded already, so upgrading them first is no answer');
   assert.ok(r.plan.waiting.sooner.endsWith(' --install-first @acme/ui-core --install-first @acme/ui-forms @angular/core@22 @angular/cli@22 @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0'), r.plan.waiting.sooner);
+  const text = (await plan(world(), pnpm21(acmeDeps), { to: 22, text: true, own: { scope: '@acme', packages }, manager: pnpm12 })).stdout;
+  assert.match(text, /^Result: BLOCKED until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Angular 22 needs releases too young for pnpm and ng update until then/m);
+  assert.match(text, /^Angular 22 \(22\.2\.0\), waiting until \d{4}-\d\d-\d\d \d\d:\d\d UTC$/m);
+  assert.match(text, /^ {2}From \d{4}-\d\d-\d\d \d\d:\d\d UTC: /m);
+  assert.match(text, /^ {2}Sooner, once the person approves exempting @acme\/ui-core 22\.0\.0 and @acme\/ui-forms 22\.0\.0 and that is committed by itself: /m);
+  assert.doesNotMatch(text, /^ {2}Run: /m, 'no Run: line for a waiting major');
   // The control: a day and ten minutes on, the same releases make the hop ready.
   const later = await plan(world(), pnpm21(acmeDeps), { to: 22, own: { scope: '@acme', packages: acme(1450) }, manager: pnpm12 });
   assert.equal(later.code, 0, later.stderr);
@@ -1767,10 +1777,17 @@ test('npm\'s min-release-age holds a release back at install, where ng update re
 });
 
 test('npm\'s before is a date, so a release after it waits with no time to wait for, and nothing gets it past ng update sooner', async () => {
-  const r = await plan(world(youngLib()), npmApp(`before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`), { to: 22 });
+  const rc = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  const r = await plan(world(youngLib()), npmApp(rc), { to: 22 });
   assert.equal(r.code, 2, r.stderr);
   assert.deepEqual(r.plan.blockers.map((b) => [b.kind, b.until]), [['too-young', null]]);
   assert.equal(r.plan.waiting.sooner, null);
+  const text = (await plan(world(youngLib()), npmApp(rc), { to: 22, text: true })).stdout;
+  assert.match(text, /^Result: BLOCKED\. Angular 22 needs releases newer than npm's before, \d{4}-\d\d-\d\d \d\d:\d\d UTC, so this project stays on 21 until that setting moves\.$/m);
+  assert.match(text, /^Angular 22 \(22\.2\.0\), waiting on npm's before$/m);
+  assert.match(text, /^ {2}ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); newer than npm's before$/m);
+  assert.match(text, /^ {2}No sooner way: ng update applies npm's before to every package and reads no exemption list\.$/m);
+  assert.doesNotMatch(text, /^ {2}(From \d|Run: )/m, 'no time to wait for, and nothing to run');
   const after = await plan(world(youngLib()), npmApp(`before=${new Date(Date.now() + 60e3).toISOString()}\n`), { to: 22 });
   assert.equal(after.code, 0, after.stderr);
 });
@@ -1823,10 +1840,25 @@ test('on the target major, a patch too young is named, and the newest old enough
   const r = await plan(packages(), proj(), { to: 22, manager: pnpm12 });
   assert.ok(r.plan.patches.command.endsWith(' @angular/core@22.2.0 @angular/cli@22.2.0'), r.plan.patches.command);
   assert.equal(r.plan.patches.packages[0].held.version, '22.3.0');
+  // ng update skips young releases from the installed CLI 22.1 on, and this app is on 22.0.0.
+  const text = (await plan(packages(), proj(), { to: 22, text: true, manager: pnpm12 })).stdout;
+  assert.match(text, /^ {2}@angular\/core: 22\.0\.0 -> 22\.2\.0; 22\.3\.0 is newer, but too young for pnpm until \d{4}-\d\d-\d\d \d\d:\d\d UTC$/m);
   const free = await plan(packages(), proj(), { to: 22 });
   assert.ok(free.plan.patches.command.endsWith(' @angular/core@22.3.0 @angular/cli@22.3.0'), 'the control: with no age, the newest');
   // On the newest old enough already, only the young one is left, and it's named with when.
   const none = await plan(packages(), proj('22.2.0'), { to: 22, manager: pnpm12 });
   assert.equal(none.plan.patches, undefined);
   assert.deepEqual(none.plan.patchesHeld, [{ name: '@angular/core', version: '22.3.0', until: ripeAt(core, '22.3.0', 1440) }, { name: '@angular/cli', version: '22.3.0', until: ripeAt(cli, '22.3.0', 1440) }]);
+  const noneText = (await plan(packages(), proj('22.2.0'), { to: 22, text: true, manager: pnpm12 })).stdout;
+  assert.match(noneText, /^Already on Angular 22\. Nothing to upgrade until \d{4}-\d\d-\d\d \d\d:\d\d UTC:$/m);
+  assert.match(noneText, /^ {2}@angular\/cli: 22\.3\.0 is too young for pnpm and ng update until \d{4}-\d\d-\d\d \d\d:\d\d UTC$/m);
+  assert.doesNotMatch(noneText, /Run: /);
+});
+
+test('a waiting major prints after the one that is ready, and the result says how far the project gets today', async () => {
+  const lib = pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+  const r = await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.')) } }), { to: 22, text: true, manager: pnpm12 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stdout, /^Result: BLOCKED at Angular 22 until \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Angular 21 is the highest version everything supports today, and Angular 22 needs releases too young for pnpm and ng update until then\.$/m);
+  assert.match(r.stdout, /^Angular 21 \(21\.2\.0\)\n[^]*?^ {2}Run: [^\n]*\n\nAngular 22 \(22\.2\.0\), waiting until /m);
 });

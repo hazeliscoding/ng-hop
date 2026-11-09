@@ -1200,31 +1200,57 @@ function repositoryUrl(manifest) {
 function render(plan) {
   const lines = [];
   const p = plan.project;
+  const age = plan.releaseAge;
+  // Whose age holds a release back: the package manager's, and ng update's too where it reads it.
+  const who = (skips) => `${age.manager}${skips ? ' and ng update' : ''}`;
+  const youngFor = (h, skips) => (h.until ? `too young for ${who(skips)} until ${minute(h.until, true)}` : 'newer than npm\'s before');
+  const newer = (h, skips) => `${h.version} is newer, but ${h.until ? `too young for ${who(skips)} until ${minute(h.until, true)}` : 'npm\'s before leaves it out'}`;
   lines.push(`Angular ${p.angular} (from ${p.angularSource}), ${p.packageManager}, Node ${p.node}. Latest Angular: ${plan.latestAngular}.`);
   if (plan.status === 'already-there') {
-    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? (plan.next ? `${plan.next} is a prerelease of it.` : 'Only patch releases are available.') : 'Nothing to upgrade.'}`);
-    if (plan.patches) {
-      for (const b of plan.patches.packages) lines.push(`  ${b.name}: ${b.from} -> ${b.to}`);
-      lines.push(`  Run: ${plan.patches.command}`);
-    }
+    // On a patch, ng update skips young releases from the installed CLI 22.1 on.
+    const skips = Boolean(age?.ngUpdateReads) && semver.gte(p.angular, NG_UPDATE_AGE);
+    const held = plan.patchesHeld || [];
+    const until = held.length && (held.some((h) => !h.until) ? 'npm\'s before moves' : minute(held.map((h) => h.until).sort().at(-1), true));
+    lines.push(`Already on Angular ${plan.target}. ${plan.patches ? (plan.next ? `${plan.next} is a prerelease of it.` : 'Only patch releases are available.') : held.length ? `Nothing to upgrade until ${until}:` : 'Nothing to upgrade.'}`);
+    for (const b of plan.patches?.packages || []) lines.push(`  ${b.name}: ${b.from} -> ${b.to}${b.held ? `; ${newer(b.held, skips)}` : ''}`);
+    for (const h of held) lines.push(`  ${h.name}: ${h.version} is ${youngFor(h, skips)}`);
+    if (plan.patches) lines.push(`  Run: ${plan.patches.command}`);
     if (plan.nodePins) lines.push(`  Node pins below what Angular ${plan.target} needs (${plan.nodePins.range}), in the repo: ${plan.nodePins.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
   }
   else if (plan.status === 'ok') lines.push(`Result: Angular ${plan.next && semver.major(plan.next) === plan.target ? `${plan.next}, a prerelease,` : plan.target} is reachable.`);
+  else if (plan.waiting) {
+    const w = plan.waiting, stays = plan.reachable === semver.major(p.angular);
+    const until = w.until && minute(w.until, true), before = age.before && minute(age.before);
+    lines.push(until
+      ? (stays ? `Result: BLOCKED until ${until}. Angular ${w.major} needs releases too young for ${who(w.ngUpdateSkips)} until then, so this project stays on ${plan.reachable} for now.`
+        : `Result: BLOCKED at Angular ${w.major} until ${until}. Angular ${plan.reachable} is the highest version everything supports today, and Angular ${w.major} needs releases too young for ${who(w.ngUpdateSkips)} until then.`)
+      : (stays ? `Result: BLOCKED. Angular ${w.major} needs releases newer than npm's before, ${before}, so this project stays on ${plan.reachable} until that setting moves.`
+        : `Result: BLOCKED at Angular ${w.major}, which needs releases newer than npm's before, ${before}. Angular ${plan.reachable} is the highest version everything supports today.`));
+  }
   else lines.push(plan.reachable === semver.major(p.angular)
     ? `Result: BLOCKED. Angular ${plan.blockedAt} isn't possible today, so this project stays on ${plan.reachable} until a blocker below is resolved.`
     : `Result: BLOCKED at Angular ${plan.blockedAt}. Angular ${plan.reachable} is the highest version everything supports today.`);
   for (const note of plan.notes) lines.push(`Note: ${note}`);
-  for (const hop of plan.hops) {
-    lines.push('', `Angular ${hop.major} (${hop.angular})`);
+  // A waiting major prints after the ones that can run today.
+  for (const hop of [...plan.hops, ...(plan.waiting ? [plan.waiting] : [])]) {
+    const waits = hop === plan.waiting;
+    lines.push('', `Angular ${hop.major} (${hop.angular}${hop.angularNewer ? `; ${newer(hop.angularNewer, hop.ngUpdateSkips)}` : ''})${waits ? (hop.until ? `, waiting until ${minute(hop.until, true)}` : ', waiting on npm\'s before') : ''}`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
-      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
+      const held = hop.held?.find((h) => h.name === lib.name);
+      const wait = held ? `; ${youngFor(held, hop.ngUpdateSkips)}` : lib.held ? `; ${newer(lib.held, hop.ngUpdateSkips)}` : '';
+      lines.push(`  ${lib.name}: ${move}; ${SUPPORT[lib.support]}${lib.peer ? ` (${lib.peer})` : ''}${wait}${lib.migrations ? '; ships migrations' : ''}${lib.newPeers ? `; newly needs ${lib.newPeers.slice(0, 8).join(', ')}${lib.newPeers.length > 8 ? ` and ${lib.newPeers.length - 8} more` : ''}, not in package.json` : ''}${lib.from === lib.to && lib.newer ? `; ${lib.newer} is newer, with an open-ended range too, if the app needs it` : ''}${lib.deprecated ? `; DEPRECATED on npm: "${String(lib.deprecated).slice(0, 120)}"` : ''}${lib.repository ? `; repository: ${lib.repository}` : ''}`);
     }
     for (const s of hop.shared) lines.push(`  ${s.name}: ${s.from ?? 'not installed'} -> ${s.to}${s.ranges?.length ? `, fits ${s.ranges.join(' and ')}` : ''}; needed by ${s.neededBy.join(', ')}${s.repository ? `; repository: ${s.repository}` : ''}`);
     for (const d of hop.dropped) lines.push(`  angular.json: loads ${d.file}, which ${d.name} ${d.version} no longer ships. Search the code for what used it, then remove or replace the entry`);
-    lines.push(`  Run: ${hop.command}`);
+    if (!waits) lines.push(`  Run: ${hop.command}`);
+    else {
+      // Never a Run: line: the person decides between waiting and an exemption.
+      if (hop.until) lines.push(`  From ${minute(hop.until, true)}: ${hop.command}`);
+      lines.push(hop.sooner ? `  Sooner, once the person approves exempting ${hop.held.map((h) => `${h.name} ${h.version}`).join(' and ')} and that is committed by itself: ${hop.sooner}` : `  No sooner way: ${hop.noSooner}.`);
+    }
   }
   if (plan.blockers.length) {
     lines.push('', 'Blockers');
