@@ -85,6 +85,20 @@ test('step 3 runs ng through the project\'s own package manager, since npm refus
   assert.match(three, /EBADDEVENGINES/);
 });
 
+test('pnpm runs step 3 with the settings that keep it from fetching or recording itself, in the environment', () => {
+  // pnpm 12.16.1 fetched the pnpm a project pins and wrote packageManagerDependencies into pnpm-lock.yaml, even for its
+  // own version, so update.mjs would refuse the tree. --config.pm-on-fail=ignore kept the outer pnpm quiet, but not the
+  // `pnpm --version` that Angular CLI 22.2.5 runs at startup, which only sees the environment.
+  const update = readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8');
+  for (const setting of ['pnpm_config_pm_on_fail', 'npm_config_manage_package_manager_versions']) assert.match(update, new RegExp(setting), `positive control: update.mjs gives the hop ${setting}`);
+  const three = skillStep(3);
+  assert.match(three, /`pnpm_config_pm_on_fail=ignore`/);
+  assert.match(three, /`npm_config_manage_package_manager_versions=false`/);
+  assert.match(three, /in the environment/);
+  const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
+  for (const doc of docs) assert.doesNotMatch(doc, /--(?:config\.)?pm-on-fail/, 'a flag never reaches the pnpm that ng starts itself');
+});
+
 test('the references run ng the way step 3 does, never through npm alone', () => {
   // troubleshooting.md and libraries.md said `npx --no-install ng update`, `ng generate` and `ng build`, which npm
   // refuses in a pnpm or yarn project whose devEngines names its manager.
@@ -93,10 +107,10 @@ test('the references run ng the way step 3 does, never through npm alone', () =>
   for (const [file, text] of refs) assert.doesNotMatch(text, /npx --no-install ng [a-z]/, file);
 });
 
-test('running ng through the wrong manager has its error in troubleshooting.md', () => {
-  // What npm 11.19.0 printed, which is what the next agent searches for.
+test('running ng through the wrong manager or a pinned pnpm has its errors in troubleshooting.md', () => {
+  // What npm 11.19.0 and pnpm 12.16.1 printed, which is what the next agent searches for.
   const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
-  for (const text of ['EBADDEVENGINES']) assert.ok(trouble.includes(text), text);
+  for (const text of ['EBADDEVENGINES', 'ERR_PNPM_BAD_CONFIG_DEP', 'ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE']) assert.ok(trouble.includes(text), text);
 });
 
 test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {

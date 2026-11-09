@@ -12,7 +12,7 @@ An unhandled exception occurred: Cannot find module '@angular-devkit/core'
 The packages are already installed. Packages whose migrations ran before the crash are done, and those after it never ran. The exit code and the app can still look fine, so a skipped migration may only surface later.
 
 1. Find which packages printed `Executing migrations of package` before the crash.
-2. For each package in the command that didn't, run its migrations on their own, with `<ng>` as `SKILL.md` step 3 runs the project's CLI. `--allow-dirty` is correct here, because the tree holds this major's unfinished work:
+2. For each package in the command that didn't, run its migrations on their own, with `<ng>` as `SKILL.md` step 3 runs the project's CLI, on pnpm in the same environment. `--allow-dirty` is correct here, because the tree holds this major's unfinished work:
    ```sh
    <ng> update <package> --migrate-only --from=<old version> --to=<new version> --allow-dirty
    ```
@@ -118,7 +118,7 @@ pnpm 11 and newer won't run a dependency's install script until the project has 
 
 In your report, list what you declined and say that `pnpm approve-builds <package>` reverses it.
 
-## `EBADDEVENGINES` from npm
+## `EBADDEVENGINES`, or pnpm stops on the version the project pins
 
 ```text
 npm error code EBADDEVENGINES
@@ -127,6 +127,23 @@ npm error EBADDEVENGINES Invalid name "pnpm" does not match "npm" for "packageMa
 ```
 
 npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists.
+
+```text
+Error: ERR_PNPM_BAD_CONFIG_DEP
+  × resolve package manager dependencies
+  ╰─▶ Failed to resolve config dependency pnpm@12.16.1: GET ...
+```
+
+```text
+Error: ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE
+  × resolve package manager dependencies
+  ╰─▶ Cannot update packageManagerDependencies with "frozen-lockfile" because
+      the lockfile is not up to date
+```
+
+pnpm looks up the pnpm a project pins before it runs anything. pnpm 10.34.9 does it when `packageManager` names another version. pnpm 11.28.11 does it then too, and for a `devEngines` pin whose `onFail` isn't `warn`, even one naming its own version. pnpm 12.16.1 also does it for its own `packageManager` version, whenever the lockfile has no record of the pin: it fetches the pin's metadata and writes `packageManagerDependencies` into `pnpm-lock.yaml`, which leaves a tree `update.mjs` refuses. A frozen install stops with the second error instead, and offline every command stops with the first. For another version, pnpm 12 downloads that pnpm. `pnpm_config_pm_on_fail=ignore` stops pnpm 11 and newer, and `npm_config_manage_package_manager_versions=false` stops pnpm 10. Set both in the environment, as `update.mjs` does for the hop, not as flags: from Angular CLI 22, `ng` runs `pnpm --version` itself when `package.json`'s `packageManager` gives no version, and that pnpm sees only the environment. If the lockfile has changed already, put it back with `git restore :/` before the upgrade starts.
+
+Through Corepack, a pin to a pnpm or yarn that Corepack hasn't stored yet is downloaded by Corepack itself, before the manager starts, for the install too. No setting of the manager's changes that.
 
 ## `Package @angular/core was not found on the registry. Skipping.`
 
