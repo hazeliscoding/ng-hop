@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 
 // Node cannot exec a Windows .cmd file without a shell. Read only the standard shim's literal script path instead.
-// pnpm runs a whole hop this way, and yarn only installs a library first.
+// pnpm runs a whole hop this way, and yarn only installs a library first. The plan asks either for its release age.
 export function managerCommand(cwd, name) {
   const execpath = process.env.npm_execpath && resolve(cwd, process.env.npm_execpath);
   if (execpath && existsSync(execpath)) {

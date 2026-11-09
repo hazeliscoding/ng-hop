@@ -9,6 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { managerCommand } from './manager.mjs';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const exec = promisify(execFile);
@@ -388,6 +389,53 @@ function readProject(dir) {
   return { dir, pkg, deps, packageManager, installed, pnpmRoot, nx: existsSync(join(dir, 'nx.json')) };
 }
 
+// From Angular CLI 22.1, ng update asks the package manager for its minimum release age and skips any younger release,
+// reading no exemption list, and the manager's own install holds it back too. So the plan asks the same question the
+// same way. Compare @angular/cli's package-manager-descriptor.js and parsers.js when either changes. null: no age set.
+async function releaseAge(project, config) {
+  const pm = project.packageManager;
+  if (pm === 'npm') {
+    // ng update reads only `before`. npm's install also applies min-release-age, in days, from npm 11.10, and an older
+    // npm lists that key as a string and applies nothing.
+    if (config.before) return { manager: pm, setting: 'before', before: new Date(config.before).toISOString(), ngUpdateReads: true };
+    const days = config['min-release-age'];
+    return typeof days === 'number' && days > 0 ? { manager: pm, setting: 'min-release-age', minutes: days * 1440, ngUpdateReads: false } : null;
+  }
+  if (pm === 'bun') {
+    // ng update asks bun nothing, and bun's install reads minimumReleaseAge, in seconds.
+    // shortcut: the app's bunfig.toml only; read ~/.bunfig.toml too if a team sets it there.
+    let toml = '';
+    try { toml = readFileSync(join(project.dir, 'bunfig.toml'), 'utf8'); } catch { /* no bunfig.toml, no age */ }
+    const seconds = Number(/^\s*minimumReleaseAge\s*=\s*(\d+)/m.exec(toml)?.[1]) || 0;
+    return seconds > 0 ? { manager: pm, setting: 'minimumReleaseAge', minutes: seconds / 60, ngUpdateReads: false } : null;
+  }
+  if (pm !== 'pnpm' && pm !== 'yarn') return null;
+  // pnpm 12.16.1's --version, in a project that pins pnpm, wrote packageManagerDependencies into pnpm-lock.yaml unless
+  // pm-on-fail was ignore. Corepack stays offline, as update.mjs keeps it, so an uncached pinned manager goes unasked.
+  // A name has no case on Windows, where Node passes on only the first spelling in sort order, so the person's go.
+  const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', pnpm_config_pm_on_fail: 'ignore' };
+  const owned = new Set(Object.keys(controls).map((key) => key.toLowerCase()));
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !owned.has(key.toLowerCase()))), ...controls };
+  const setting = pm === 'pnpm' ? 'minimum-release-age' : 'npmMinimalAgeGate';
+  let version, value;
+  try {
+    const { file, prefix } = managerCommand(project.dir, pm);
+    const ask = (args) => exec(file, [...prefix, ...args], { cwd: project.dir, env, windowsHide: true, timeout: 60e3 }).then(({ stdout }) => stdout.trim());
+    // A question that fails counts as no age, as ng update counts it: yarn before 4.10 doesn't know the setting.
+    [version, value] = await Promise.all([ask(['--version']), ask(['config', 'get', setting]).catch(() => '0')]);
+  } catch (err) {
+    return { manager: pm, unknown: plainLine(String(err.stderr || err.message).trim().split('\n').at(-1)) };
+  }
+  if (!semver.valid(version)) return { manager: pm, unknown: `it printed "${plainLine(version)}" for its version` };
+  if (pm === 'yarn' && semver.major(version) < 2) return null; // yarn 1 has no such setting, and ng update asks it nothing
+  const unset = !value || value === 'undefined' || value === 'null';
+  const [, amount, unit] = /^(\d+)(ms|s|m|h|d|w)?$/.exec(value) || [];
+  // Unset is a day from pnpm 11 and from yarn 4, as ng update reads it. A bare number is minutes.
+  const minutes = unset ? (semver.major(version) >= (pm === 'pnpm' ? 11 : 4) ? 1440 : 0)
+    : Number(amount || 0) * ({ ms: 1 / 60e3, s: 1 / 60, h: 60, d: 1440, w: 10080 }[unit] ?? 1);
+  return minutes > 0 ? { manager: pm, version, setting, minutes, ...(unset ? { default: true } : {}), ngUpdateReads: true } : null;
+}
+
 // ---- Judging one release against one Angular major ------------------------------------------------------------
 
 function angularPeers(manifest) {
@@ -646,6 +694,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
   }
   const registry = registryClient(config, [...new Set([configDir, projectDir])]);
+  const asked = await releaseAge(project, config);
+  const age = asked?.unknown ? null : asked;
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
   // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.
@@ -676,8 +726,9 @@ async function buildPlan({ projectDir, to, next = false }) {
       dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
-    latestAngular, target, next: next ? prerelease : null, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
+    latestAngular, target, next: next ? prerelease : null, releaseAge: age, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
+  if (asked?.unknown) plan.unchecked.push({ name: 'release age', reason: `${asked.manager} couldn't be asked for its minimum release age (${asked.unknown}), so a release younger than that can still stop a command` });
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
   if (catalogued.length) {
     const sharedWith = project.pnpmRoot ? catalogUsers(project.pnpmRoot, projectDir, catalogued) : [];

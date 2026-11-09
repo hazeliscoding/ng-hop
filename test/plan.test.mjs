@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { angular, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
+import { angular, fakeManager, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
 const made = [];
 const app = (opts) => { const p = project(opts); made.push(p); return p; };
@@ -1107,11 +1107,14 @@ test('pnpm: only the keys the app\'s own .npmrc sets go over the root\'s, so a m
     'apps/web/.npmrc': 'save-exact=true\n',
     'user.npmrc': 'registry=http://127.0.0.1:9/\n',
   } });
+  // The plan asks pnpm for its minimum release age, and this one has none, so no real pnpm runs.
+  const pnpm = fakeManager('pnpm', { '--version': '10.33.0' });
   try {
-    const r = await runScript(PLAN, ['--project', w.dir, '--to', '21', '--json'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc') } });
+    const r = await runScript(PLAN, ['--project', w.dir, '--to', '21', '--json'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file } });
     blockedOnUiCore({ ...r, plan: r.stdout ? JSON.parse(r.stdout) : null });
   } finally {
     await Promise.all([mirror.close(), company.close()]);
+    pnpm.remove();
   }
 });
 
@@ -1594,4 +1597,39 @@ test('a lockfile that cannot be read falls back instead of making up a version',
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.plan.project.angularSource, 'package.json range');
   }
+});
+
+// ---- Release age: what the package manager and ng update hold back --------------------------------------------------
+
+// pnpm 12.16.1 with nothing set printed undefined, which ng update reads as pnpm 11's default of a day.
+const pnpm12 = { '--version': '12.16.1', 'config get minimum-release-age': 'undefined' };
+const pnpm21 = (deps) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0', lib: '21.0.0' })) } });
+const youngLib = () => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+
+test('bun holds a release back by the minimumReleaseAge in the app\'s bunfig.toml, in seconds, and ng update asks it nothing', async () => {
+  const proj = (files) => app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'bun.lock': '{}', ...files } });
+  const r = await plan(world(youngLib()), proj({ 'bunfig.toml': '[install]\nminimumReleaseAge = 86400\n' }), { to: 22 });
+  assert.deepEqual(r.plan.releaseAge, { manager: 'bun', setting: 'minimumReleaseAge', minutes: 1440, ngUpdateReads: false });
+  assert.equal((await plan(world(youngLib()), proj({}), { to: 22 })).plan.releaseAge, null, 'the control: bun holds nothing back by default');
+});
+
+test('a package manager that can\'t be asked leaves release age unchecked, and says so, rather than guessing', async () => {
+  const r = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': null } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(r.plan.unchecked.some((u) => u.name === 'release age'), JSON.stringify(r.plan.unchecked));
+  const asked = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.ok(!asked.plan.unchecked.some((u) => u.name === 'release age'), 'positive control');
+});
+
+test('the plan only asks the package manager, and keeps pnpm from recording itself in the lockfile', async () => {
+  // pnpm 12.16.1's --version, in a project whose package.json pins pnpm, wrote packageManagerDependencies into
+  // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore. update.mjs's npm_config_pm_on_fail=error didn't stop it.
+  // On Windows a name has no case, and Node passes on the first spelling in sort order, so the person's own uppercase
+  // setting would win over the plan's.
+  process.env.PNPM_CONFIG_PM_ON_FAIL = 'download';
+  let r;
+  try { r = await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 }); } finally { delete process.env.PNPM_CONFIG_PM_ON_FAIL; }
+  assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true });
+  assert.deepEqual(r.asked.map((a) => a.args).sort(), ['--version', 'config get minimum-release-age']);
+  for (const a of r.asked) assert.equal(a.pmOnFail, 'ignore');
 });

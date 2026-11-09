@@ -1,6 +1,6 @@
 // Runs plan.mjs as a real process against a fake npm registry, so tests cover what users run, offline.
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,6 +14,7 @@ export const SMOKE = join(SCRIPTS, 'smoke.mjs');
 export const UPDATE = join(SCRIPTS, 'update.mjs');
 
 // releases: { '21.0.0': { peer: '^21.0.0', at: '2026-01-01', deprecated, peers: {...}, migrations: true, license, files: { 'LICENSE.md': 'text' } } }
+// `ago` dates a release that many minutes before now, in place of `at`.
 export function pkg(name, releases, tags = {}) {
   const versions = {};
   const time = {};
@@ -28,7 +29,8 @@ export function pkg(name, releases, tags = {}) {
     if (r.deps) versions[version].dependencies = r.deps;
     if (r.files) versions[version].files = r.files;
     if (r.repository) versions[version].repository = r.repository;
-    if (r.at) time[version] = `${r.at}T00:00:00.000Z`;
+    if (r.ago !== undefined) time[version] = new Date(Date.now() - r.ago * 60e3).toISOString();
+    else if (r.at) time[version] = `${r.at}T00:00:00.000Z`;
   }
   const stable = Object.keys(releases).filter((v) => !v.includes('-'));
   return { name, versions, time, 'dist-tags': { latest: tags.latest || stable[stable.length - 1], ...tags } };
@@ -148,23 +150,44 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
   });
 }
 
+// A stand-in for pnpm or yarn, which the plan asks for its minimum release age through npm_execpath, the first place
+// managerCommand looks. answers maps the arguments to what it prints; anything else, or null, exits 1. Each question is
+// logged with the pnpm_config_pm_on_fail it ran under.
+export function fakeManager(name, answers) {
+  const dir = mkdtempSync(join(tmpdir(), 'ng-hop-pm-'));
+  const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
+  writeFileSync(file, `const fs = require('fs');
+const args = process.argv.slice(2).join(' ');
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, pmOnFail: process.env.pnpm_config_pm_on_fail ?? null }) + '\\n');
+const answer = ${JSON.stringify(answers)}[args];
+if (answer == null) process.exit(1);
+console.log(answer);
+`);
+  const asked = () => { try { return readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  return { file, asked, remove: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 // own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
 // .npmrc the way a team sets it up. rcDir puts that .npmrc in another folder, such as a pnpm workspace's root, and auth
-// makes the registry want the token the .npmrc then holds.
-export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node } = {}) {
+// makes the registry want the token the .npmrc then holds. manager: what the project's pnpm or yarn answers, by default
+// a version with no minimum release age.
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
   const token = company && own.auth ? `${company.url.replace(/^http:/, '')}:_authToken=test-only\n` : '';
   if (company) writeFileSync(join(own.rcDir || proj.dir, '.npmrc'), `${own.scope}:registry=${company.url}\n${token}`);
+  const yarn = existsSync(join(proj.dir, 'yarn.lock'));
+  const fake = fakeManager(yarn ? 'yarn' : 'pnpm', manager ?? { '--version': yarn ? '4.9.4' : '10.33.0' });
   try {
     const args = ['--project', proj.dir];
     if (to !== undefined) args.push('--to', String(to));
     if (next) args.push('--next');
     if (!text) args.push('--json');
-    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url }, node });
-    return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null };
+    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file }, node });
+    return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null, asked: fake.asked() };
   } finally {
     await registry.close();
     if (company) await company.close();
+    fake.remove();
   }
 }
