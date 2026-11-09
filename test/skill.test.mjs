@@ -33,13 +33,16 @@ test('every file the skill names exists', () => {
 
 test('every reference and script is reachable from the skill, so nothing ships unused', () => {
   for (const file of readdirSync(join(SKILL_DIR, 'references'))) assert.ok(skill.includes(file) || readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8').includes(file), file);
-  for (const file of readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'))) assert.ok(skill.includes(file), file);
+  // A module another script imports counts.
+  const scripts = readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'));
+  const imported = (file) => scripts.some((s) => readFileSync(join(SKILL_DIR, 'scripts', s), 'utf8').includes(`from './${file}'`));
+  for (const file of scripts) assert.ok(skill.includes(file) || imported(file), file);
 });
 
-test('the scripts import nothing but Node and the vendored parser', () => {
+test('the scripts import nothing but Node, the vendored parser and the module they share', () => {
   for (const file of readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'))) {
     const source = readFileSync(join(SKILL_DIR, 'scripts', file), 'utf8');
-    for (const [, spec] of source.matchAll(/from '([^']+)'/g)) assert.match(spec, /^node:/, `${file} imports ${spec}`);
+    for (const [, spec] of source.matchAll(/from '([^']+)'/g)) assert.match(spec, /^(node:|\.\/manager\.mjs$)/, `${file} imports ${spec}`);
     for (const [, spec] of source.matchAll(/require\)?\(import\.meta\.url\)\('([^']+)'\)/g)) assert.equal(spec, './vendor/semver.cjs');
   }
 });
