@@ -674,10 +674,12 @@ async function askVersion(project, pm) {
   if (homeIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the home folder, ${home}, is inside the app's ${homeIn}, where ${pm} would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, outside the repo, or with ${pm}'s version in package.json's packageManager` };
   const failed = (why, todo) => ({ unknown: `${pm} couldn't be asked for its version (${why}), which its minimum release age depends on, so a release younger than that can still stop a command; ${todo}` });
   // Corepack stays offline, as update.mjs keeps it, so a manager it hasn't fetched goes unasked, and yarn passes over
-  // any yarnPath. Corepack 0.35.0 and pnpm 10 and 11 left Node's compile cache in the temporary folder, so it stays off.
-  // A name has no case on Windows, where Node passes on only the first spelling in sort order, so the person's own
-  // spellings of these go.
-  const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', pnpm_config_pm_on_fail: 'ignore', YARN_IGNORE_PATH: '1', NODE_DISABLE_COMPILE_CACHE: '1' };
+  // any yarnPath. Corepack reads no package.json pin either: it walks up from the folder it runs in, and a stray
+  // ~/package.json pinning yarn@4.9.4 made Corepack 0.35.0 run 4.9.4 there, where pinnedVersion found no pin above the
+  // app, which gets Corepack's own default. Corepack 0.35.0 and pnpm 10 and 11 left Node's compile cache in the
+  // temporary folder, so it stays off. A name has no case on Windows, where Node passes on only the first spelling in
+  // sort order, so the person's own spellings of these go.
+  const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', COREPACK_ENABLE_PROJECT_SPEC: '0', pnpm_config_pm_on_fail: 'ignore', YARN_IGNORE_PATH: '1', NODE_DISABLE_COMPILE_CACHE: '1' };
   const owned = new Set(Object.keys(controls).map((key) => key.toLowerCase()));
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !owned.has(key.toLowerCase()))), ...controls };
   let dir;

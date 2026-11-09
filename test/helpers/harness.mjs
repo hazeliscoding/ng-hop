@@ -162,7 +162,7 @@ export function fakeManager(name, answers) {
   const file = join(dir, `${name}.cjs`), log = join(dir, 'asked.jsonl');
   writeFileSync(file, `const fs = require('fs'), path = require('path');
 const args = process.argv.slice(2).join(' ');
-const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE];
+const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE, process.env.COREPACK_ENABLE_PROJECT_SPEC];
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack, ignorePath: process.env.YARN_IGNORE_PATH ?? null, compileCache: process.env.NODE_DISABLE_COMPILE_CACHE ?? null }) + '\\n');
 if (${JSON.stringify(name)} === 'yarn') {
   let yarnPath = null;

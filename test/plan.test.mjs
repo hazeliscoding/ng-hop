@@ -1678,8 +1678,9 @@ test('the plan asks an unpinned pnpm only its version, from an empty folder outs
   // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore, and yarn 4.18.1 ran a yarnPath script for --version. So the
   // age comes from files, and only a version nothing pins is asked, of the person's own manager, from a folder of its
   // own. On Windows a name has no case, and Node passes on the first spelling in sort order, so the person's own
-  // uppercase setting would win over the plan's. Corepack stays offline too, so the plan never downloads a manager.
-  const set = { PNPM_CONFIG_PM_ON_FAIL: 'download', COREPACK_ENABLE_NETWORK: '1' };
+  // uppercase setting would win over the plan's. Corepack stays offline too, so the plan never downloads a manager, and
+  // reads no package.json pin, since from a folder in the home folder a stray one above it would choose the version.
+  const set = { PNPM_CONFIG_PM_ON_FAIL: 'download', COREPACK_ENABLE_NETWORK: '1', COREPACK_ENABLE_PROJECT_SPEC: '1' };
   const saved = Object.fromEntries(Object.keys(set).map((key) => [key, process.env[key]]));
   Object.assign(process.env, set);
   const proj = pnpm21({});
@@ -1692,7 +1693,7 @@ test('the plan asks an unpinned pnpm only its version, from an empty folder outs
   }
   assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true, from: 'default' });
   // Corepack 0.35.0 and pnpm 10 and 11 turn on Node's compile cache, which they leave in the temporary folder.
-  assert.deepEqual(r.asked.map((a) => [a.args, a.pmOnFail, a.corepack, a.ignorePath, a.compileCache]), [['--version', 'ignore', ['0', '0', '0'], '1', '1']]);
+  assert.deepEqual(r.asked.map((a) => [a.args, a.pmOnFail, a.corepack, a.ignorePath, a.compileCache]), [['--version', 'ignore', ['0', '0', '0', '0'], '1', '1']]);
   assert.ok(!inside(r.asked[0].cwd, proj.dir), `asked from ${r.asked[0].cwd}`);
   assert.ok(!existsSync(r.asked[0].cwd), 'and that folder is gone');
   assert.deepEqual([pinned.asked, pinned.plan.releaseAge.version], [[], '12.16.1']);
