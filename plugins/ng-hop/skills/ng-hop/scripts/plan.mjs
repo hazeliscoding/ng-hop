@@ -1154,12 +1154,15 @@ async function buildPlan({ projectDir, to, next = false }) {
     const behind = [];
     for (const name of ['@angular/core', '@angular/cli']) {
       const have = project.installed(name)?.version;
-      const doc = have ? await registry.get(name) : null;
+      const doc = have ? await registry.get(name, Boolean(age)) : null; // publish times are only in the full document
       const tagged = doc?.['dist-tags']?.next;
-      const newest = !doc ? null
-        : next ? (semver.valid(tagged) && semver.major(tagged) === currentMajor ? tagged : null)
-        : semver.maxSatisfying(eligibleReleases(doc, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`);
-      if (newest && semver.gt(newest, have)) behind.push({ name, from: have, to: newest });
+      const pickFrom = (d) => (!d ? null : next ? (semver.valid(tagged) && semver.major(tagged) === currentMajor && d.versions[tagged] ? tagged : null)
+        : semver.maxSatisfying(eligibleReleases(d, have), `>=${currentMajor}.0.0 <${currentMajor + 1}.0.0`));
+      // The newest old enough is offered, and a younger one is named with when it's old enough.
+      const newest = pickFrom(doc), ready = pickFrom(aged(doc, have));
+      const held = newest && newest !== ready && semver.gt(newest, have) ? { version: newest, until: ripens(doc, newest) } : null;
+      if (ready && semver.gt(ready, have)) behind.push({ name, from: have, to: ready, ...(held ? { held } : {}) });
+      else if (held) (plan.patchesHeld ||= []).push({ name, ...held });
     }
     // A pin the last upgrade left behind still fails the team, so it's named here too, against this major's range.
     const installed = project.installed('@angular/core')?.version;

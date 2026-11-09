@@ -1813,3 +1813,20 @@ test('on a --next hop, a CLI prerelease younger than the age makes the major wai
   assert.match(r.plan.waiting.noSooner, /^Angular 23 itself is too young/);
   assert.equal((await plan(packages, proj(), { next: true })).code, 0, 'the control: with no age, the prerelease is the hop');
 });
+
+test('on the target major, a patch too young is named, and the newest old enough is offered', async () => {
+  const [core, compiler] = angular();
+  youngPatch(core, '22.3.0', '22.2.0');
+  const cli = pkg('@angular/cli', { '22.0.0': { at: '2026-05-27' }, '22.2.0': { at: '2026-05-28' }, '22.3.0': { ago: 30 } });
+  const packages = () => [core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), cli];
+  const proj = (v = '22.0.0') => app({ deps: { ...base, '@angular/core': '^22.0.0', '@angular/cli': '^22.0.0' }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: v, cli: v })) } });
+  const r = await plan(packages(), proj(), { to: 22, manager: pnpm12 });
+  assert.ok(r.plan.patches.command.endsWith(' @angular/core@22.2.0 @angular/cli@22.2.0'), r.plan.patches.command);
+  assert.equal(r.plan.patches.packages[0].held.version, '22.3.0');
+  const free = await plan(packages(), proj(), { to: 22 });
+  assert.ok(free.plan.patches.command.endsWith(' @angular/core@22.3.0 @angular/cli@22.3.0'), 'the control: with no age, the newest');
+  // On the newest old enough already, only the young one is left, and it's named with when.
+  const none = await plan(packages(), proj('22.2.0'), { to: 22, manager: pnpm12 });
+  assert.equal(none.plan.patches, undefined);
+  assert.deepEqual(none.plan.patchesHeld, [{ name: '@angular/core', version: '22.3.0', until: ripeAt(core, '22.3.0', 1440) }, { name: '@angular/cli', version: '22.3.0', until: ripeAt(cli, '22.3.0', 1440) }]);
+});
