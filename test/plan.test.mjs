@@ -1678,6 +1678,31 @@ test('tooling that follows Angular\'s major, with only a release too young for t
   assert.equal(libIn(free, 22, '@angular-eslint/schematics').to, '22.0.0', 'the control: with no age, it moves');
 });
 
+test('tooling that follows Angular\'s major, a follower and a library a sibling moves take the newest release old enough, and name the younger one', async () => {
+  const eslint = pkg('@angular-eslint/schematics', { '21.0.0': { at: '2025-12-01' }, '22.0.0': { at: '2026-06-10' }, '22.1.0': { ago: 10 } });
+  const aligned = libIn(await plan(world(eslint), pnpm21({ '@angular-eslint/schematics': '^21.0.0' }), { to: 22, manager: pnpm12 }), 22, '@angular-eslint/schematics');
+  assert.deepEqual([aligned.to, aligned.held], ['22.0.0', { version: '22.1.0', until: ripeAt(eslint, '22.1.0', 1440) }]);
+  const before = { '.npmrc': `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n` };
+  const icons = { ...evaIcons('16.0.0', '16.0.0'), ...evaIcons('17.0.0', '17.0.0'), '17.0.1': { peers: { '@nebular/theme': '17.0.0', 'eva-icons': '^1.1.3' }, ago: 10 } };
+  const follower = libIn(await plan(world(...nebularWith(icons)), app({ deps: nebularDeps, lock: nebularLock, files: before }), { to: 21 }), 21, '@nebular/eva-icons');
+  assert.deepEqual([follower.to, follower.held], ['17.0.0', { version: '17.0.1', until: null }]);
+  // @angular/cdk 20 accepts Angular 21, and Nebular 17 needs cdk ^21.
+  const cdk21 = pkg('@angular/cdk', { '20.2.14': { peer: '^20.0.0 || ^21.0.0', at: '2025-11-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '21.1.0': { peer: '^21.0.0', ago: 10 } });
+  const moved = libIn(await plan(world(cdk21, nebular()), app({ deps: { ...base, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' }, lock: { ...lockBase, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' }, files: before }), { to: 21 }), 21, '@angular/cdk');
+  assert.deepEqual([moved.to, moved.held], ['21.0.0', { version: '21.1.0', until: null }]);
+});
+
+test('a library a sibling moves to a release too young makes its major wait, and keeps nothing named against its first pick', async () => {
+  // cdk's first pick is 21.0.0, with 21.1.0 named as newer, and Nebular 17 then needs ^21.1.0, out ten minutes.
+  const before = { '.npmrc': `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n` };
+  const cdk21 = pkg('@angular/cdk', { '20.2.14': { peer: '^20.0.0', at: '2025-11-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '21.1.0': { peer: '^21.0.0', ago: 10 } });
+  const theme = pkg('@nebular/theme', { '16.0.0': { peer: '^20.0.0', at: '2025-06-01', peers: { '@angular/cdk': '^20.0.0' } }, '17.0.0': { peer: '^21.0.0', at: '2026-01-15', peers: { '@angular/cdk': '^21.1.0' } } });
+  const r = await plan(world(cdk21, theme), app({ deps: { ...base, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' }, lock: { ...lockBase, '@angular/cdk': '20.2.14', '@nebular/theme': '16.0.0' }, files: before }), { to: 21 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.blockers.map((b) => [b.name, b.kind, b.version]), [['@angular/cdk', 'too-young', '21.1.0']]);
+  assert.equal(r.plan.waiting.libs.find((l) => l.name === '@angular/cdk').held, undefined, 'the release it now takes is no newer one');
+});
+
 test('from Angular CLI 22.1, ng update skips a young Angular patch itself, so the command keeps the major and the hop shows what it installs', async () => {
   const [core, compiler] = angular();
   youngPatch(core, '22.2.1', '22.2.0');

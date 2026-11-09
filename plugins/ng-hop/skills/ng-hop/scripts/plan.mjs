@@ -813,6 +813,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
     return null;
   };
+  // ng update would take a newer release once it's old enough, so a pick names which and when.
+  const passedOver = (doc, newest, picked) => (newest && newest !== picked && young(doc, newest) ? { held: { version: newest, until: ripens(doc, newest) } } : {});
 
   const current = {};
   for (const name of [...coupledNames, ...followerNames]) current[name] = project.installed(name)?.version || null;
@@ -866,7 +868,7 @@ async function buildPlan({ projectDir, to, next = false }) {
       if (ALIGNED.test(name) && !hasAngularPeersForHop(doc, floor, majorRange)) {
         const version = semver.maxSatisfying(eligibleReleases(ripe.get(name), floor), majorRange);
         if (version) {
-          libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });
+          libs.push({ name, from: floor, to: version, support: 'aligned', peer: `major ${major}`, ...passedOver(doc, semver.maxSatisfying(eligibleReleases(doc, floor), majorRange), version), migrations: Boolean(doc.versions[version]['ng-update']?.migrations) });
           current[name] = version;
           addPeers(name, doc.versions[version]);
         } else {
@@ -882,12 +884,10 @@ async function buildPlan({ projectDir, to, next = false }) {
       const ripeChoice = pick(ripe.get(name));
       const choice = ripeChoice || (age && later(name, pick));
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
-      // ng update would take a newer one once it's old enough, so the line says which and when.
-      const newest = ripeChoice && age && pick(doc)?.version;
       const manifest = doc.versions[choice.version];
       libs.push({
         name, from: floor, to: choice.version, support: choice.support, ...(choice.newer ? { newer: choice.newer } : {}),
-        ...(newest && newest !== choice.version && young(doc, newest) ? { held: { version: newest, until: ripens(doc, newest) } } : {}),
+        ...passedOver(doc, ripeChoice && age && pick(doc)?.version, choice.version),
         peer: angularPeers(manifest).map(([, r]) => r)[0] || null,
         migrations: Boolean(manifest['ng-update']?.migrations),
         deprecated: manifest.deprecated || doc.versions[doc['dist-tags']?.latest]?.deprecated || null,
@@ -910,12 +910,14 @@ async function buildPlan({ projectDir, to, next = false }) {
           if (!wants.every((w) => semver.satisfies(v, w.range, { includePrerelease: true }))) return false;
           return ['declared', 'open'].includes(judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased));
         };
-        const better = eligibleReleases(ripe.get(lib.name), lib.to).find(fits) || (age && later(lib.name, (d) => eligibleReleases(d, lib.to).find(fits)));
+        const ripeBetter = eligibleReleases(ripe.get(lib.name), lib.to).find(fits);
+        const better = ripeBetter || (age && later(lib.name, (d) => eligibleReleases(d, lib.to).find(fits)));
         if (!better) continue;
         const manifest = doc.versions[better];
-        lib.to = better;
-        // A younger release named against the first pick may be this one, or older than it.
+        // A younger release named against the first pick may be this one, or older than it, so it's named again.
         delete lib.held;
+        Object.assign(lib, passedOver(doc, ripeBetter && eligibleReleases(doc, lib.to).find(fits), better));
+        lib.to = better;
         lib.support = judge(manifest, doc.time?.[better], major, frameworkVersion, angularReleased);
         lib.peer = angularPeers(manifest).map(([, r]) => r)[0] || null;
         lib.migrations = Boolean(manifest['ng-update']?.migrations);
@@ -939,7 +941,8 @@ async function buildPlan({ projectDir, to, next = false }) {
         const rejected = (v) => peersOnCoupled(doc.versions[v]).filter(([peer, range]) => current[peer] && !semver.satisfies(current[peer], range, { includePrerelease: true }));
         if (rejected(have).length === 0) continue;
         const fits = (v) => rejected(v).length === 0;
-        const to = eligibleReleases(ripe.get(name), have).find(fits) || (age && later(name, (d) => eligibleReleases(d, have).find(fits)));
+        const ripeTo = eligibleReleases(ripe.get(name), have).find(fits);
+        const to = ripeTo || (age && later(name, (d) => eligibleReleases(d, have).find(fits)));
         if (!to) {
           if (blockers.some((b) => b.name === name)) continue;
           const wants = rejected(have).map(([peer, range]) => ({ by: name, peer, range }));
@@ -951,7 +954,7 @@ async function buildPlan({ projectDir, to, next = false }) {
         }
         const manifest = doc.versions[to];
         libs.push({
-          name, from: have, to, support: 'follows',
+          name, from: have, to, support: 'follows', ...passedOver(doc, ripeTo && eligibleReleases(doc, have).find(fits), to),
           peer: peersOnCoupled(manifest).map(([peer]) => `${peer} ${current[peer]}`).join(', '),
           migrations: Boolean(manifest['ng-update']?.migrations),
           deprecated: null,
