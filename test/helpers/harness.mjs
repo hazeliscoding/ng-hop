@@ -173,8 +173,8 @@ console.log(answer);
 // own: a company's packages on a registry of their own, { scope: '@acme', packages: [...] }, named in the project's
 // .npmrc the way a team sets it up. rcDir puts that .npmrc in another folder, such as a pnpm workspace's root, and auth
 // makes the registry want the token the .npmrc then holds. manager: what the project's pnpm or yarn answers, by default
-// a version with no minimum release age.
-export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager } = {}) {
+// a version with no minimum release age. env: more of the plan's environment, over what the tests run with.
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager, env = {} } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
   const token = company && own.auth ? `${company.url.replace(/^http:/, '')}:_authToken=test-only\n` : '';
@@ -186,7 +186,7 @@ export async function plan(packages, proj, { to, next = false, text = false, reg
     if (to !== undefined) args.push('--to', String(to));
     if (next) args.push('--next');
     if (!text) args.push('--json');
-    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file }, node });
+    const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file, ...env }, node });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null, asked: fake.asked() };
   } finally {
     await registry.close();
