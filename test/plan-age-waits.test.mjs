@@ -262,6 +262,17 @@ test('with no publish time, tooling that follows Angular\'s major, a patch and A
   assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
 });
 
+test('with one release that has no publish time and one too young, only the young one goes in first, so the other's migrations still run', async () => {
+  // ui-a's 22.0.0 has no time and ships migrations, and ui-b's came out ten minutes ago. ng update takes ui-a's, so the
+  // exemption alone gets it past yarn, and installing it first would only skip its migrations, while ng update skips
+  // ui-b's until it's old enough.
+  const a = pkg('ui-a', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', migrations: true } });
+  const b = pkg('ui-b', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+  const r = await plan(world(a, b), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0' }), { to: 22, manager: yarn18 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(r.plan.waiting.sooner, `node ${quotePath(UPDATE)} --install-first ui-b @angular/core@22 @angular/cli@22 ui-a@22.0.0 ui-b@22.0.0`);
+});
+
 test('npm, bun and ng update count a release with no publish time old enough, and pnpm from 11.23 then checks none of its package', async () => {
   // npm 11.19.0 installed it under before and under min-release-age, as npm-pick-manifest's isBefore passes a release with
   // no time, bun 1.4.2 under minimumReleaseAge, and ng update 22.2.6's isReleaseAgeSatisfied counts it old enough. pnpm
