@@ -1638,6 +1638,13 @@ test('a package manager that can\'t be asked leaves release age unchecked, and s
   assert.equal(asked.code, 2);
 });
 
+test('why release age went unchecked keeps the manager\'s whole last line, and says to plan again once dependencies are installed', async () => {
+  // Corepack, kept offline, with the pnpm the project pins not in its cache. Step 3's install fetches that pnpm.
+  const offline = 'Network access disabled by the environment; can\'t reach https://registry.npmjs.org/pnpm/-/pnpm-12.15.0.tgz';
+  const r = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': { stderr: offline } } });
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm couldn't be asked for its minimum release age (${offline}), so a release younger than that can still stop a command; plan again once the dependencies are installed`);
+});
+
 test('the plan only asks the package manager, and keeps pnpm from recording itself in the lockfile', async () => {
   // pnpm 12.16.1's --version, in a project whose package.json pins pnpm, wrote packageManagerDependencies into
   // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore. update.mjs's npm_config_pm_on_fail=error didn't stop it.

@@ -433,7 +433,8 @@ async function releaseAge(project, config) {
     // A question that fails counts as no age, as ng update counts it: yarn before 4.10 doesn't know the setting.
     [version, value] = await Promise.all([ask(['--version']), ask(['config', 'get', setting]).catch(() => '0')]);
   } catch (err) {
-    return { manager: pm, unknown: plainLine(String(err.stderr || err.message).trim().split('\n').at(-1)) };
+    // A manager's own error ends with why. managerCommand's first sentence says why, and the rest is update.mjs's advice.
+    return { manager: pm, unknown: plainLine(err.stderr?.trim() ? err.stderr.trim().split('\n').at(-1) : err.message.split('. ')[0], 200) };
   }
   if (!semver.valid(version)) return { manager: pm, unknown: `it printed "${plainLine(version)}" for its version` };
   if (pm === 'yarn' && semver.major(version) < 2) return null; // yarn 1 has no such setting, and ng update asks it nothing
@@ -601,7 +602,7 @@ async function resolveShared({ project, registry, requirements, current, coupled
 const MAX_UNPACKED = 256 * 1024 * 1024;
 const licenseField = (manifest) => String(manifest?.license?.type ?? manifest?.license ?? '').trim();
 // What a package wrote goes to an agent as a plan line, so it stays one short line of plain text.
-const plainLine = (text) => text.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+const plainLine = (text, max = 80) => text.replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const licenseTitle = (text) => text.split(/\r?\n/).map((line) => plainLine(line.replace(/^[#=*\s-]+/, ''))).find(Boolean);
 
 // A release's files, read from its tarball in memory, so nothing in it reaches the disk or runs. A path too long for
@@ -752,7 +753,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     },
     latestAngular, target, next: next ? prerelease : null, releaseAge: age, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
-  if (asked?.unknown) plan.unchecked.push({ name: 'release age', reason: `${asked.manager} couldn't be asked for its minimum release age (${asked.unknown}), so a release younger than that can still stop a command` });
+  // The install in SKILL.md's step 3 fetches the pnpm or yarn a project pins, which an offline Corepack can't.
+  if (asked?.unknown) plan.unchecked.push({ name: 'release age', reason: `${asked.manager} couldn't be asked for its minimum release age (${asked.unknown}), so a release younger than that can still stop a command; plan again once the dependencies are installed` });
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
   if (catalogued.length) {
     const sharedWith = project.pnpmRoot ? catalogUsers(project.pnpmRoot, projectDir, catalogued) : [];
