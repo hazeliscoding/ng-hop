@@ -33,13 +33,16 @@ test('every file the skill names exists', () => {
 
 test('every reference and script is reachable from the skill, so nothing ships unused', () => {
   for (const file of readdirSync(join(SKILL_DIR, 'references'))) assert.ok(skill.includes(file) || readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8').includes(file), file);
-  for (const file of readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'))) assert.ok(skill.includes(file), file);
+  // A module another script imports counts.
+  const scripts = readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'));
+  const imported = (file) => scripts.some((s) => readFileSync(join(SKILL_DIR, 'scripts', s), 'utf8').includes(`from './${file}'`));
+  for (const file of scripts) assert.ok(skill.includes(file) || imported(file), file);
 });
 
-test('the scripts import nothing but Node and the vendored parser', () => {
+test('the scripts import nothing but Node, the vendored parser and the module they share', () => {
   for (const file of readdirSync(join(SKILL_DIR, 'scripts')).filter((f) => f.endsWith('.mjs'))) {
     const source = readFileSync(join(SKILL_DIR, 'scripts', file), 'utf8');
-    for (const [, spec] of source.matchAll(/from '([^']+)'/g)) assert.match(spec, /^node:/, `${file} imports ${spec}`);
+    for (const [, spec] of source.matchAll(/from '([^']+)'/g)) assert.match(spec, /^(node:|\.\/manager\.mjs$)/, `${file} imports ${spec}`);
     for (const [, spec] of source.matchAll(/require\)?\(import\.meta\.url\)\('([^']+)'\)/g)) assert.equal(spec, './vendor/semver.cjs');
   }
 });
@@ -156,6 +159,19 @@ test('a release-age exemption waits for the person, like an override', () => {
   const rule = skill.split('\n').find((line) => line.includes('npmPreapprovedPackages') && line.includes("without the person's approval"));
   assert.ok(rule, 'the scope list has to name release-age exemptions');
   assert.match(rule, /minimumReleaseAgeExclude/);
+});
+
+test('a major waiting on young releases is a question for the person, never a command to run early', () => {
+  // In M7 the plan called Angular 22 reachable with the team's 22.0.0 minutes old, and ng update skipped it without a word.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /, waiting until /, 'positive control: the plan prints it');
+  const line = skill.split('\n').find((l) => l.includes('waiting until'));
+  assert.ok(line, 'SKILL.md has to answer the line plan.mjs prints');
+  for (const word of [/\bwait\b/, /exempt/, /approv/, /Sooner/, /No sooner way/]) assert.match(line, word);
+});
+
+test('the release-age section gives each manager\'s own error, since that is what the next agent searches for', () => {
+  const section = troubleSection(youngRelease);
+  for (const text of [/ERR_PNPM_NO_MATURE_MATCHING_VERSION/, /ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION/, /npm error code ETARGET/, /blocked by minimum-release-age/]) assert.match(section, text);
 });
 
 test('putting the tree back reaches a pnpm workspace root above the app', () => {

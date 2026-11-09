@@ -24,6 +24,29 @@ For each blocker, from the plan and a quick search:
 
 **Use a prerelease.** Only an option when the plan reports one, and it behaves like a smaller version of forcing: the library's authors have started, but they haven't said it's ready.
 
+## When a major is waiting on young releases
+
+The plan prints a major as `waiting until` a time when a release it needs is younger than the package manager's minimum release age. Nothing is known to be wrong with that release: the age is a window for a compromised release to be caught and pulled before it reaches the team.
+
+- **Which releases, and until when:** the major's lines and its `Blockers` give each one's publish time and when it's old enough.
+- **Whose they are:** the team's own, just published (confirm with `npm view <package> repository.url author`), or anyone else's.
+- **Whether there's a sooner way:** `No sooner way:` says why there's none: Angular itself is too young, a library ships migrations that installing it first would skip, `ng update` applies npm's setting itself and reads no exemption list, or the project's npm has no `min-release-age-exclude`, which npm 11.17 added. Then only waiting gets past it, or under npm's `before` only moving that setting.
+
+**Wait** costs only the time shown. Recommend it for anyone else's library.
+
+**Exempt those releases,** in a commit of their own, then run the plan's `Sooner, once ...` command as printed. That relaxes the guard, so for the team's own release it's reasonable if they trust their registry, and it's still their call. Offer the narrowest entry first, a release on pnpm and yarn or a package on npm and bun, before one for the whole scope, which lets every future release of the scope through. Keep the entry committed until the release is old enough: pnpm 12 checks the lockfile against the age, and without the entry every install, frozen or not, fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Say in the report what was exempted.
+
+- **pnpm:** `pnpm-workspace.yaml` at the workspace root, `minimumReleaseAgeExclude:` with `- '@acme/ui-core@22.0.0'`, or `- '@acme/*'` for the scope.
+- **yarn:** `.yarnrc.yml`, `npmPreapprovedPackages:` with `- "@acme/ui-core@22.0.0"`.
+- **npm 11.17 or newer:** `.npmrc`, `min-release-age-exclude[]=@acme/ui-core`.
+- **bun:** `bunfig.toml`, under `[install]`, `minimumReleaseAgeExcludes = ["@acme/ui-core"]`.
+
+**Under npm's `before`,** the plan prints the major as `waiting on npm's before`, with no time, since that date moves only when someone moves it. npm's install lets an excluded package past `before` too, but `ng update` from Angular CLI 22.1 applies `before` itself and reads no exemption list, so for a hop to Angular 22.1 or newer the plan prints `No sooner way:`. Moving `before` is the person's call, so ask.
+
+For example:
+
+> You're on Angular 21 now, committed and passing. Angular 22 needs `@acme/ui-core` and `@acme/ui-forms` 22.0.0, which you published 11 minutes ago, and pnpm holds a release back for a day, until 08:31 UTC tomorrow, as a guard against a compromised release. `ng update` skips them until then too. I'd wait, since it costs a day and nothing else, but if you trust your registry I can exempt exactly those two releases in a commit of their own and upgrade now. Wait, or exempt them?
+
 ## End with one question
 
 Name the blocker, give your recommendation and the reason, and ask. For example:

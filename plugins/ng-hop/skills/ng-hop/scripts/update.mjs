@@ -3,40 +3,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { delimiter, dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { managerCommand } from './manager.mjs';
 
 const semver = createRequire(import.meta.url)('./vendor/semver.cjs');
 const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
 const USAGE = 'Usage: update.mjs [--project <dir>] [--json] [--install-first <library> ...] @angular/core@<version> @angular/cli@<version> [library@version ...]\nRuns the planned pnpm or yarn hop or patch once. With catalog: entries in package.json, it moves the catalog around the update. With --install-first, it installs those libraries first, in the form package.json gives them, and then updates the rest. No force flags, retries, resets, commits or manager provisioning.';
-
-// Node cannot exec a Windows .cmd file without a shell. Read only the standard shim's literal script path instead.
-// pnpm runs a whole hop this way, and yarn only installs a library first.
-function managerCommand(cwd, name) {
-  const execpath = process.env.npm_execpath && resolve(cwd, process.env.npm_execpath);
-  if (execpath && existsSync(execpath)) {
-    if (new RegExp(String.raw`[\\/]${name}[^\\/]*\.[cm]?js$`, 'i').test(execpath)) return { file: process.execPath, prefix: [execpath] };
-    // pnpm 12 ships a native binary, and `pnpm exec` names it here.
-    if (new RegExp(String.raw`[\\/]${name}(?:-[a-z]+)?(?:\.exe)?$`, 'i').test(execpath)) return { file: execpath, prefix: [] };
-  }
-  const corepack = process.env.COREPACK_ROOT && join(process.env.COREPACK_ROOT, 'dist', `${name}.js`);
-  if (corepack && existsSync(corepack)) return { file: process.execPath, prefix: [corepack] };
-  const path = Object.entries(process.env).find(([key]) => key.toLowerCase() === 'path')?.[1] || '';
-  const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat'] : [''];
-  for (const dir of path.split(delimiter).filter(Boolean)) for (const extension of extensions) {
-    const file = resolve(cwd, dir, name + extension);
-    if (!existsSync(file)) continue;
-    if (!/\.(?:cmd|bat)$/i.test(file)) return { file, prefix: [] };
-    // Corepack's shim names the same script twice, once for each way it finds Node.
-    const targets = new Set([...readFileSync(file, 'utf8').matchAll(new RegExp(String.raw`"%(?:dp0%|~dp0)[\\/]?([^"\r\n%]*${name}\.[cm]?js)"`, 'gi'))].map((m) => m[1]));
-    if (targets.size === 1) {
-      const target = resolve(dirname(file), [...targets][0].replace(/[\\/]/g, '/'));
-      if (existsSync(target)) return { file: process.execPath, prefix: [target] };
-    }
-    throw new Error(`Cannot resolve this ${name} shim without a shell. Use the existing Corepack or Node-script installation; no fallback was run.`);
-  }
-  throw new Error(`Could not find ${name}. Run the printed command with the already installed project package manager.`);
-}
 
 // For yarn, npm runs the target CLI from its own cache, as pnpm's dlx does for pnpm. Asked to update, an older CLI
 // installs a temporary newer one with the project's manager, and on yarn 4 that stopped with no error. npm comes with
@@ -196,7 +169,9 @@ function main() {
   if (clean.status !== 0) throw new Error('Could not verify the Git working tree. No update was run.');
   if (clean.stdout.trim()) throw new Error('Repository is not clean. Preserve and inspect the changes before another update.');
   const env = { ...process.env };
-  const controls = { NG_DISABLE_VERSION_CHECK: 'true', NG_CLI_ANALYTICS: 'false', COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', npm_config_manage_package_manager_versions: 'false', npm_config_pm_on_fail: 'error' };
+  // pnpm 12 reads pm-on-fail only as pnpm_config_, and under any value but ignore, ng update's own pnpm list and the
+  // installs record the pinned pnpm in pnpm-lock.yaml, which no hop should carry.
+  const controls = { NG_DISABLE_VERSION_CHECK: 'true', NG_CLI_ANALYTICS: 'false', COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', npm_config_manage_package_manager_versions: 'false', npm_config_pm_on_fail: 'error', pnpm_config_pm_on_fail: 'ignore' };
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
   const options = { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 };
