@@ -126,7 +126,7 @@ npm error EBADDEVENGINES Invalid devEngines.packageManager
 npm error EBADDEVENGINES Invalid name "pnpm" does not match "npm" for "packageManager"
 ```
 
-npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists. A yarn hop's `update.mjs` still runs the target CLI through npm, for an empty folder of its own with a copy of the project's `.npmrc`, so the pin doesn't stop it.
+npm 11.19.0 refuses `npx`, `npm run` and `npm ci` alike in a project whose `devEngines.packageManager` names another manager, as pnpm 12's `pnpm init` writes it, or another npm version, unless its `onFail` is `warn`, which only warns, or `ignore`, which says nothing. npm 10.9.9 refused `npx` the same way. On an npm project the install stops too, so the pin is the person's to meet. In a pnpm or yarn project, run `ng` through that manager, as `SKILL.md` step 3 lists. A yarn hop's `update.mjs` still runs the target CLI through npm, for an empty folder of its own with a copy of the project's `.npmrc`, so the pin doesn't stop it.
 
 ```text
 Error: ERR_PNPM_BAD_CONFIG_DEP
@@ -141,7 +141,11 @@ Error: ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE
       the lockfile is not up to date
 ```
 
-pnpm looks up the pnpm a project pins before it runs anything. pnpm 10.34.9 does it when `packageManager` names another version. pnpm 11.28.11 does it then too, and for a `devEngines` pin whose `onFail` isn't `warn`, even one naming its own version. pnpm 12.16.1 also does it for its own `packageManager` version, whenever the lockfile has no record of the pin: it fetches the pin's metadata and writes `packageManagerDependencies` into `pnpm-lock.yaml`, which leaves a tree `update.mjs` refuses. A frozen install stops with the second error instead, and offline every command stops with the first. For another version, pnpm 12 downloads that pnpm. `pnpm_config_pm_on_fail=ignore` stops pnpm 11 and newer, and `npm_config_manage_package_manager_versions=false` stops pnpm 10. Set both in the environment, as `update.mjs` does for the hop, not as flags: from Angular CLI 22, `ng` runs `pnpm --version` itself when `package.json`'s `packageManager` gives no version, and that pnpm sees only the environment. If the lockfile has changed already, put it back with `git restore :/` before the upgrade starts.
+```text
+[ERROR] This project is configured to use 11.0.0 of pnpm. Your current pnpm is v11.28.11
+```
+
+pnpm looks up the pnpm a project pins before it runs anything. pnpm 10.34.9 does it when `packageManager` names another version, and reads no `devEngines` pin. pnpm 11.28.11 and 12.16.1 do it for a `devEngines` pin naming their own version under any `onFail` but `ignore`, such as the one pnpm 11's own `pnpm init` writes, and pnpm 12.16.1 for its own `packageManager` version too: whenever the lockfile has no record of the pin, they fetch its metadata and write `packageManagerDependencies` into `pnpm-lock.yaml`, which leaves a tree `update.mjs` refuses. A frozen install stops with the second error instead. Offline, pnpm 12.16.1's `exec`, `install` and `list` stop with the first, while its `--version` only warns. For a `devEngines` pin to another version, pnpm 11 and 12 download that pnpm when `onFail` is unset or `download`, only warn under `warn`, and stop under `error` with the third error, which pnpm 12.16.1 prints as `ERR_PNPM_BAD_PM_VERSION`. `pnpm_config_pm_on_fail=ignore` stops pnpm 11 and newer, and `npm_config_manage_package_manager_versions=false` stops pnpm 10. Set both in the environment, as `update.mjs` does for the hop, not as flags: from Angular CLI 22, `ng` runs `pnpm --version` itself when `package.json`'s `packageManager` gives no version, and that pnpm sees only the environment. If the lockfile has changed already, put it back with `git restore :/` before the upgrade starts.
 
 Through Corepack, a pin to a pnpm or yarn that Corepack hasn't stored yet is downloaded by Corepack itself, before the manager starts, for the install too. No setting of the manager's changes that.
 
