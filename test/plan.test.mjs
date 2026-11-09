@@ -1753,7 +1753,7 @@ test('the age is the package manager\'s own answer, and the wait is for the firs
   assert.equal(week.plan.waiting.until, ripeAt(lib, '22.0.0', 10080));
 });
 
-test('yarn 4.15 and newer hold a release back by npmMinimalAgeGate, while yarn before 4.10 and yarn 1 hold nothing back', async () => {
+test('yarn 4.18.1 holds a release back by npmMinimalAgeGate, while yarn 4.9.4, which doesn\'t know it, and yarn 1 hold nothing back', async () => {
   // yarn 4.18.1 printed 1440 with nothing set. yarn 4.9.4 failed: Couldn't find a configuration settings named "npmMinimalAgeGate".
   const proj = () => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'yarn.lock': '' } });
   const r = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': '4.18.1', 'config get npmMinimalAgeGate': '1440' } });
