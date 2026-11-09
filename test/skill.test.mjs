@@ -161,6 +161,14 @@ test('a release-age exemption waits for the person, like an override', () => {
   assert.match(rule, /minimumReleaseAgeExclude/);
 });
 
+test('a major waiting on young releases is a question for the person, never a command to run early', () => {
+  // In M7 the plan called Angular 22 reachable with the team's 22.0.0 minutes old, and ng update skipped it without a word.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /, waiting until /, 'positive control: the plan prints it');
+  const line = skill.split('\n').find((l) => l.includes('waiting until'));
+  assert.ok(line, 'SKILL.md has to answer the line plan.mjs prints');
+  for (const word of [/\bwait\b/, /exempt/, /approv/, /Sooner/, /No sooner way/]) assert.match(line, word);
+});
+
 test('putting the tree back reaches a pnpm workspace root above the app', () => {
   // pnpm writes an app's lockfile and exemptions at the workspace root, and git 2.55's `git restore .` run in the app's
   // folder left them changed, so the next update.mjs refused a tree that wasn't clean.
