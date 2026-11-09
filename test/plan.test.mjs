@@ -1984,10 +1984,11 @@ test('a value on the line below its key, or in a file indented as a whole, is re
   assert.equal(await ageOf(path, { manager: { '--version': '4.18.1' } }), unread(join(path.dir, '.yarnrc.yml'), 1, 'yarnPath: &p .yarn/releases/yarn-4.10.1.cjs', 'yarn config get npmMinimalAgeGate'));
 });
 
-test('no settings file a repo writes can stall the plan, with a long run of spaces, many keys or a packages pattern full of wildcards', async () => {
+test('no settings file a repo writes can stall the plan, with a long run of spaces or blank lines, many keys or a packages pattern full of wildcards', async () => {
   // Cutting a comment backtracked over a run of spaces, and the packages patterns over wildcards: 150,000 spaces took
   // 21 s, 16 ** parts against an app 16 folders down 47 s, and 8 *s against a folder name 60 letters long 56 s. Looking
-  // for a key set twice compared each key with every other: 100,000 keys took 33 s.
+  // for a key set twice compared each key with every other: 100,000 keys took 33 s. And the \s* starting each line of
+  // bun's bunfig.toml and of the .npmrc pnpm 10 reads ran on over every blank line below it.
   const below = (pattern, rel) => {
     const p = app({ files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60\npackages:\n  - '${pattern}'\n`, [`${rel}/package.json`]: JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), [`${rel}/pnpm-lock.yaml`]: pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })) } });
     return { dir: join(p.dir, rel) };
@@ -1995,12 +1996,14 @@ test('no settings file a repo writes can stall the plan, with a long run of spac
   const cases = [
     [pnpm21({}, { files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60${' '.repeat(150000)}x\n` } }), /sets minimumReleaseAge to "60 x", which pnpm 12\.16\.1 refuses/],
     [pnpm21({}, { files: { 'pnpm-workspace.yaml': `${Array.from({ length: 100000 }, (_, i) => `k${i}: 1\n`).join('')}minimumReleaseAge: 60\n` } }), 60],
+    [app({ deps: { ...base, '@angular/core': '^21.0.0' }, files: { 'bun.lock': '{}', 'bunfig.toml': `${'\n'.repeat(150000)}[install]\nminimumReleaseAge = 3600\n` } }), 60],
+    [pnpm21({}, { files: { '.npmrc': `${'\n'.repeat(150000)}; an hour\nminimum-release-age=60\n` } }), 60, { '--version': '10.34.9' }],
     [below(`apps/${'*a'.repeat(8)}b`, `apps/${'a'.repeat(60)}`), 1440],
     [below(`${'**/'.repeat(16)}x`, Array.from({ length: 16 }, (_, i) => `d${i}`).join('/')), 1440],
   ];
-  for (const [proj, expected] of cases) {
+  for (const [proj, expected, manager = pnpm12] of cases) {
     const started = Date.now();
-    const age = await ageOf(proj, { manager: pnpm12 });
+    const age = await ageOf(proj, { manager });
     assert.ok(Date.now() - started < 15e3, `planning took ${Date.now() - started} ms`);
     if (expected instanceof RegExp) assert.match(age, expected); else assert.equal(age?.minutes, expected);
   }

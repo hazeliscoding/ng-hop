@@ -609,10 +609,11 @@ function pnpmAge(project, version, config) {
   // pnpm 10.34.9 read minimum-release-age from npm_config_ and .npmrc as npm does, so the plan's npm listing holds it.
   // shortcut: pnpm 10's own global rc goes unread, and npm's global npmrc counts though pnpm skips it; read pnpm's rc
   // if a team on pnpm 10 sets the age there.
+  // Each line starts with [ \t]*, since a \s* there ran on over every blank line below it: 150,000 of them took 26 s.
   const npmrc = () => {
     if (config['minimum-release-age'] == null) return null;
     const from = envNamed(/^npm_config_minimum_release_age$/i) ?? [join(project.dir, '.npmrc'), project.pnpmRoot && join(project.pnpmRoot, '.npmrc'), config.userconfig]
-      .find((file) => file && /^\s*minimum-release-age\s*=/m.test(readText(file) ?? '')) ?? 'npm config';
+      .find((file) => file && /^[ \t]*minimum-release-age[ \t]*=/m.test(readText(file) ?? '')) ?? 'npm config';
     return read(from, 'minimum-release-age', [String(config['minimum-release-age']).trim()]);
   };
   found ??= v11 ? files[1] : npmrc();
@@ -796,7 +797,8 @@ async function releaseAge(project, config) {
     // shortcut: the app's bunfig.toml only; read ~/.bunfig.toml too if a team sets it there.
     let toml = '';
     try { toml = readFileSync(join(project.dir, 'bunfig.toml'), 'utf8'); } catch { /* no bunfig.toml, no age */ }
-    const set = /^\s*minimumReleaseAge\s*=\s*(\d+)/m.exec(toml)?.[1];
+    // The line starts with [ \t]*, since a \s* there ran on over every blank line below it: 150,000 of them took 24 s.
+    const set =/^[ \t]*minimumReleaseAge[ \t]*=[ \t]*(\d+)/m.exec(toml)?.[1];
     const seconds = Number(set) || 0;
     const long = tooLong(seconds / 60, `${join(project.dir, 'bunfig.toml')} sets minimumReleaseAge to "${plainLine(set ?? '', 60)}"`);
     if (long) return { manager: pm, unknown: long };
