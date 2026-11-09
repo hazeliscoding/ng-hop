@@ -427,12 +427,12 @@ function readProject(dir) {
 
 // One YAML scalar: quotes taken off, or a trailing comment, which in a plain one starts at " #". The comment goes from one
 // space before the #, and the spaces before that after it, since \s+# backtracked: 150,000 spaces with no # took 21 s.
-// undefined for a form the plan doesn't follow: a tag, anchor or alias, a block or flow value, a quote left open, a list
-// item, or a key and value of its own.
+// undefined for a form the plan doesn't follow: a tag, anchor or alias, a block or flow value, a quote left open, an
+// escape in double quotes, which pnpm and yarn read, "6\x30" as 60, a list item, or a key and value of its own.
 const scalar = (text) => {
   const value = text.trim();
   const quoted = /^(["'])(.*)\1(?:\s+#.*)?$/.exec(value);
-  if (quoted) return quoted[2];
+  if (quoted) return quoted[1] === '"' && quoted[2].includes('\\') ? undefined : quoted[2];
   const plain = value.replace(/(?:^|\s)#.*$/, '').trimEnd();
   return /^(?:[!&*|>{[@`%"']|[-?:](?:\s|$))|:(?:\s|$)/.test(plain) ? undefined : plain;
 };
@@ -566,16 +566,19 @@ const tooLong = (minutes, shown) => (Date.now() + minutes * 60e3 >= Date.UTC(100
 // team sets the age that way.
 function pnpmAge(project, version, config) {
   const v11 = semver.gte(version, '11.0.0'), v12 = semver.gte(version, '12.0.0');
-  // A file's value, or why it can't be read. 12.16.1 read 60, "60", +60 and 0x3C as 60, passed over an empty value or
-  // null, and failed on every command over 060, -5, 60.5, 1e3, 1d or a number past 2^64; 11.28.11 and 10.34.9 printed
-  // -5, 60.5 and 1d as they were, and 060, 1e3 and 99999999999999999999 as 60, 1000 and 100000000000000000000, for ng
-  // update to parse with parseInt.
+  // A file's value, or why it can't be read. 12.16.1 read 60, "60", +60 and 0x3C as 60, passed over an empty value,
+  // null, Null or NULL, and failed on every command over 060, -5, 60.5, 1e3, 1d or a number of 2^64 or more; 11.28.11
+  // and 10.34.9 printed -5, 60.5 and 1d as they were, and 060, 1e3 and 99999999999999999999 as 60, 1000 and
+  // 100000000000000000000, for ng update to parse with parseInt.
   const read = (from, key, values) => {
     const [value] = values;
     if (typeof value === 'object') return { unread: ageUnread('pnpm', unreadLine(from, value)).unknown };
-    if (value === undefined || /^(?:|null|~)$/.test(value)) return null;
-    if ((v12 ? /^\+?(?:0|[1-9]\d*)$|^0x[\da-f]+$/i : /^\+?\d+$|^0x[\da-f]+$/i).test(value) && Number(value) < 2 ** 64) return { value, from, key };
+    if (value === undefined || /^(?:|null|Null|NULL|~)$/.test(value)) return null;
     const shown = `${from} sets ${key} to "${plainLine(value, 60)}"`;
+    // In a YAML file all three read 1_440 as 1440, where pnpm 10 printed it from .npmrc as it was.
+    if (key === 'minimumReleaseAge' && value.includes('_') && /^\+?[\d_]+$|^0x[\da-f_]+$/i.test(value)) return { unread: ageUnread('pnpm', `${shown}, which is in a form the plan can't read`).unknown };
+    // A BigInt, since Number rounds 2^64 - 1, which 12.16.1 read, up to 2^64, which it refused.
+    if ((v12 ? /^\+?(?:0|[1-9]\d*)$|^0x[\da-f]+$/i : /^\+?\d+$|^0x[\da-f]+$/i).test(value) && BigInt(value) < 2n ** 64n) return { value, from, key };
     return v12 ? { refused: `${shown}, which pnpm ${version} refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it` }
       : { unclear: `${shown}, which is no whole number of minutes, and the plan can't tell what pnpm ${version} holds back for it, so a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age` };
   };

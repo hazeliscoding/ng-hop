@@ -1939,11 +1939,16 @@ test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pn
   const ageWith = (files, env) => ageOf(pnpm21({}, { files }), { manager: pnpm12, env });
   for (const value of ['60', '"60"', "'60'", '60 # an hour', '+60', '0x3C']) assert.equal((await ageWith({ 'pnpm-workspace.yaml': `minimumReleaseAge: ${value}\n` }))?.minutes, 60, value);
   assert.equal(await ageWith({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 0\n' }), null);
-  assert.equal((await ageWith({ 'pnpm-workspace.yaml': 'minimumReleaseAge:\n' }, xdgWith('minimumReleaseAge: 31\n')))?.minutes, 31);
-  for (const value of ['1d', '-5', '60.5', '1e3', '060', '99999999999999999999']) {
+  for (const value of ['', ' Null', ' NULL']) assert.equal((await ageWith({ 'pnpm-workspace.yaml': `minimumReleaseAge:${value}\n` }, xdgWith('minimumReleaseAge: 31\n')))?.minutes, 31, value);
+  for (const value of ['1d', '-5', '60.5', '1e3', '060', '99999999999999999999', '18446744073709551616']) {
     const p = pnpm21({}, { files: { 'pnpm-workspace.yaml': `minimumReleaseAge: ${value}\n` } });
     assert.equal(await ageOf(p, { manager: pnpm12 }), `${join(p.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge to "${value}", which pnpm 12.16.1 refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it`);
   }
+  // pnpm 12.16.1, 11.28.11 and 10.34.9 read 1_440 as 1440, which the plan doesn't follow, and 12.16.1 read 2^64 - 1, as
+  // 18446744073709551615 or 0xFFFFFFFFFFFFFFFF, a number that rounds up to 2^64.
+  const underscore = pnpm21({}, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1_440\n' } });
+  assert.equal(await ageOf(underscore, { manager: pnpm12 }), `${join(underscore.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge to "1_440", which is in a form the plan can't read, so the plan can't tell pnpm's minimum release age, and a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
+  for (const value of ['18446744073709551615', '0xFFFFFFFFFFFFFFFF']) assert.match(await ageWith({ 'pnpm-workspace.yaml': `minimumReleaseAge: ${value}\n` }), new RegExp(`sets minimumReleaseAge to "${value}", too long for the plan to give the date`), value);
   // pnpm 12.16.1, 11.28.11 and 10.34.9 all failed on a key set twice: "duplicate mapping key".
   const twice = pnpm21({}, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 10\nminimumReleaseAge: 20\n' } });
   assert.equal(await ageOf(twice, { manager: pnpm12 }), `${join(twice.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge more than once, which pnpm 12.16.1 refuses: every pnpm command fails on it until it is set once, so ask the person to fix it`);
@@ -1981,15 +1986,16 @@ test('a value on the line below its key, or in a file indented as a whole, is re
   // pnpm 12.16.1 read the tag !!int "60" and the flow document as 60, and refused 60 with 70 on the line below it and a
   // colon with no space after it; yarn 4.18.1 refused !!int "45" and read the anchor &a 45 as 45. All three pnpm and yarn
   // failed every command over a second document, a string document starting --- |, and "" with a value on the line
-  // below it, where the plan read the age. The plan follows none of them, so it names the line it can't read instead of
+  // below it, where the plan read the age. All three pnpm read the escape in "6\x30" as 60, and yarn "4\x35" as 45,
+  // where the plan said they refuse it. The plan follows none of them, so it names the line it can't read instead of
   // guessing what the manager makes of it.
   const unread = (file, line, shown, check) => `line ${line} of ${file}, "${shown}", is in a form the plan can't read, so the plan can't tell ${check.split(' ')[0]}'s minimum release age, and a release younger than that can still stop a command; ask the person to check it with ${check}`;
   for (const [text, shown, line = 1] of [['minimumReleaseAge: !!int "60"\n', 'minimumReleaseAge: !!int "60"'], ['minimumReleaseAge: 60\n  70\n', 'minimumReleaseAge: 60'], ['minimumReleaseAge:60\n', 'minimumReleaseAge:60'], ['{minimumReleaseAge: 60}\n', '{minimumReleaseAge: 60}'],
-    ['---\nminimumReleaseAge: 60\n---\n', '---', 3], ['--- |\n  minimumReleaseAge: 60\n', '--- |'], ['minimumReleaseAge: ""\n  60\n', 'minimumReleaseAge: ""']]) {
+    ['---\nminimumReleaseAge: 60\n---\n', '---', 3], ['--- |\n  minimumReleaseAge: 60\n', '--- |'], ['minimumReleaseAge: ""\n  60\n', 'minimumReleaseAge: ""'], ['minimumReleaseAge: "6\\x30"\n', 'minimumReleaseAge: "6\\x30"']]) {
     const p = pnpm21({}, { files: { 'pnpm-workspace.yaml': text } });
     assert.equal(await ageOf(p, { manager: pnpm12 }), unread(join(p.dir, 'pnpm-workspace.yaml'), line, shown, 'pnpm config get minimum-release-age'), text);
   }
-  for (const [text, shown, line = 1] of [['npmMinimalAgeGate: !!int "45"\n', 'npmMinimalAgeGate: !!int "45"'], ['npmMinimalAgeGate: &a 45\n', 'npmMinimalAgeGate: &a 45'], ['---\nnpmMinimalAgeGate: 45\n---\n', '---', 3]]) {
+  for (const [text, shown, line = 1] of [['npmMinimalAgeGate: !!int "45"\n', 'npmMinimalAgeGate: !!int "45"'], ['npmMinimalAgeGate: &a 45\n', 'npmMinimalAgeGate: &a 45'], ['---\nnpmMinimalAgeGate: 45\n---\n', '---', 3], ['npmMinimalAgeGate: "4\\x35"\n', 'npmMinimalAgeGate: "4\\x35"']]) {
     const p = yarn21({ files: { '.yarnrc.yml': text } });
     assert.equal(await ageOf(p, { manager: { '--version': '4.18.1' } }), unread(join(p.dir, '.yarnrc.yml'), line, shown, 'yarn config get npmMinimalAgeGate'), text);
   }
