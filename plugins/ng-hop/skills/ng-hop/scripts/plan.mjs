@@ -1112,8 +1112,9 @@ async function buildPlan({ projectDir, to, next = false }) {
   const checksNone = (doc) => dropsTimes && Boolean(doc) && (checked.get(doc) ?? checked.set(doc, Object.keys(doc.versions).some((v) => !doc.time?.[v])).get(doc));
   // Younger than the age by its publish time, as ng update reads it too.
   const tooRecent = (doc, v) => { const at = Date.parse(doc?.time?.[v] ?? ''); return Boolean(age) && !Number.isNaN(at) && !checksNone(doc) && (age.before ? at > Date.parse(age.before) : now - at < age.minutes * 60e3); };
-  // A release the age holds back isn't out yet.
-  const young = (doc, v) => tooRecent(doc, v) || (holdsUndated && undated(doc, v));
+  // A release the age holds back isn't out yet. A release dated too late for any wait leaves the age unknown, and then
+  // nothing is held back.
+  const young = (doc, v) => tooRecent(doc, v) || (Boolean(age) && holdsUndated && undated(doc, v));
   // When a held release is old enough: null under npm's before, which only moving it changes, and for one with no
   // publish time, which heldUntil marks as such.
   const ripens = (doc, v) => (age.before || undated(doc, v) ? null : new Date(Date.parse(doc.time[v]) + age.minutes * 60e3).toISOString());

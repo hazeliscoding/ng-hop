@@ -86,6 +86,15 @@ test('a release the registry dates so late that the age ends past the year 9999 
   // The control: a release dated in the year 9000 is too young for a day after that, and the plan waits for it.
   const r = await plan(dated('9000-01-01T00:00:00.000Z'), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22 });
   assert.deepEqual([r.code, r.plan.waiting?.until], [2, '9000-01-02T00:00:00.000Z'], r.stderr);
+  // With the age unknown, nothing is held back, a release with no time under yarn 4.18.1 included, whose wait the plan
+  // worked out from an age it no longer had: TypeError: Cannot read properties of null (reading 'before').
+  const lib = youngLib();
+  lib.time['22.0.0'] = '+275760-09-12T12:00:00.000Z';
+  lib.versions['22.1.0'] = { ...lib.versions['22.0.0'], version: '22.1.0' };
+  lib['dist-tags'].latest = '22.1.0';
+  const yarn = await plan(world(lib), yarnApp(), { to: 22, manager: yarn18 });
+  assert.equal(yarn.code, 0, yarn.stderr);
+  assert.equal(libIn(yarn, 22, 'ui-lib').to, '22.1.0');
 });
 
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
