@@ -709,6 +709,13 @@ async function buildPlan({ projectDir, to, next = false }) {
   // A document without its young releases. The installed one stays: the lockfile has it, and the manager checks that
   // against its own exemptions.
   const aged = (doc, keep) => (doc && age ? { ...doc, versions: Object.fromEntries(Object.entries(doc.versions).filter(([v]) => v === keep || !young(doc, v))) } : doc);
+  // Why a release waits, in the manager's own name for its setting.
+  const tooYoung = (h, skips) => {
+    if (age.before) return `${h.version} came out at ${minute(h.published)}, after npm's before (${minute(age.before)}), which ${skips ? 'npm and ng update both apply' : 'npm applies'}, so nothing takes it until that setting moves`;
+    const setting = { pnpm: 'pnpm\'s minimumReleaseAge', yarn: 'yarn\'s npmMinimalAgeGate', npm: 'npm\'s min-release-age', bun: 'bun\'s minimumReleaseAge' }[age.manager];
+    const span = age.minutes % 1440 === 0 ? `${age.minutes / 1440} day${age.minutes === 1440 ? '' : 's'}` : `${Math.round(age.minutes)} minutes`;
+    return `${h.version} came out at ${minute(h.published)}, and ${setting} (${span}${age.default ? `, the default from ${age.manager} ${age.manager === 'pnpm' ? 11 : 4}` : ''}) holds it back until ${minute(h.until, true)}, a guard against a compromised release${skips ? '; from Angular CLI 22.1, ng update skips it until then too and reads no exemption list' : ''}`;
+  };
 
   // Through Angular 21's CLI, `ng update` prints "Package x was not found on the registry. Skipping." for these and
   // still exits 0, and Angular 22's stops with an error, so the pnpm runner moves the catalog itself.
@@ -750,7 +757,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     if (sharedWith.length) plan.notes.push(`The catalog is also used by ${sharedWith.join(', ')}, so moving it moves them too, without their migrations. Ask before going ahead.`);
   }
   if (next) plan.notes.push(`${prerelease} is a prerelease. Libraries may not support it yet, and it isn't meant for production.`);
-  const cliDoc = next ? await registry.get('@angular/cli') : null;
+  const cliDoc = next ? await registry.get('@angular/cli', Boolean(age)) : null; // publish times are only in the full document
   const cliNext = semver.valid(cliDoc?.['dist-tags']?.next) && semver.major(cliDoc['dist-tags'].next) === nextMajor ? cliDoc['dist-tags'].next : 'next';
 
   // Which dependencies are tied to Angular? Read every one, because the name alone can't say.
@@ -794,6 +801,17 @@ async function buildPlan({ projectDir, to, next = false }) {
   const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
   // The picks read only releases old enough. Every lookup of one release's manifest still reads the whole document.
   const ripe = new Map([...docs].map(([name, doc]) => [name, aged(doc, project.installed(name)?.version)]));
+  // Nothing old enough fits: the release that would, soonest. Young releases are tried oldest first, each with everything
+  // published by then, so a week's age waits two days for 22.0.0 rather than a week for 22.1.0.
+  const later = (name, pick) => {
+    const doc = docs.get(name), have = ripe.get(name);
+    const byTime = Object.keys(doc.versions).filter((v) => !have.versions[v]).sort((a, b) => Date.parse(doc.time[a]) - Date.parse(doc.time[b]));
+    for (const v of byTime) {
+      const found = pick({ ...doc, versions: Object.fromEntries(Object.entries(doc.versions).filter(([x]) => have.versions[x] || Date.parse(doc.time[x]) <= Date.parse(doc.time[v]))) });
+      if (found) return found;
+    }
+    return null;
+  };
 
   const current = {};
   for (const name of [...coupledNames, ...followerNames]) current[name] = project.installed(name)?.version || null;
@@ -814,6 +832,9 @@ async function buildPlan({ projectDir, to, next = false }) {
     // shortcut: Angular's own version stands in for the CLI that runs the hop, which ships each minor with it; core 22.1.0
     // came out on 2026-07-29 three hours before CLI 22.1.0.
     const ngUpdateSkips = Boolean(age?.ngUpdateReads) && semver.gte(frameworkVersion, NG_UPDATE_AGE);
+    // Angular itself can be too young: core, or on a --next hop the CLI, which can come out hours after it.
+    const angularHeld = [['@angular/core', coreDoc, frameworkVersion], ...(toPrerelease ? [['@angular/cli', cliDoc, cliNext]] : [])]
+      .filter(([, doc, v]) => young(doc, v)).map(([name, doc, v]) => ({ name, version: v, installed: project.installed(name)?.version ?? null, published: doc.time[v], until: ripens(doc, v) }));
     const compilerManifest = compilerDoc.versions[compilerVersion];
 
     const libs = [];
@@ -850,10 +871,11 @@ async function buildPlan({ projectDir, to, next = false }) {
         continue;
       }
       const pick = (d) => chooseRelease(d, floor, major, frameworkVersion, angularReleased, toPrerelease);
-      const choice = pick(ripe.get(name));
+      const ripeChoice = pick(ripe.get(name));
+      const choice = ripeChoice || (age && later(name, pick));
       if (!choice) { blockers.push(describeBlocker(doc, name, floor, major, frameworkVersion, angularReleased)); continue; }
       // ng update would take a newer one once it's old enough, so the line says which and when.
-      const newest = age && pick(doc)?.version;
+      const newest = ripeChoice && age && pick(doc)?.version;
       const manifest = doc.versions[choice.version];
       libs.push({
         name, from: floor, to: choice.version, support: choice.support, ...(choice.newer ? { newer: choice.newer } : {}),
@@ -880,7 +902,7 @@ async function buildPlan({ projectDir, to, next = false }) {
           if (!wants.every((w) => semver.satisfies(v, w.range, { includePrerelease: true }))) return false;
           return ['declared', 'open'].includes(judge(doc.versions[v], doc.time?.[v], major, frameworkVersion, angularReleased));
         };
-        const better = eligibleReleases(ripe.get(lib.name), lib.to).find(fits);
+        const better = eligibleReleases(ripe.get(lib.name), lib.to).find(fits) || (age && later(lib.name, (d) => eligibleReleases(d, lib.to).find(fits)));
         if (!better) continue;
         const manifest = doc.versions[better];
         lib.to = better;
@@ -909,7 +931,7 @@ async function buildPlan({ projectDir, to, next = false }) {
         const rejected = (v) => peersOnCoupled(doc.versions[v]).filter(([peer, range]) => current[peer] && !semver.satisfies(current[peer], range, { includePrerelease: true }));
         if (rejected(have).length === 0) continue;
         const fits = (v) => rejected(v).length === 0;
-        const to = eligibleReleases(ripe.get(name), have).find(fits);
+        const to = eligibleReleases(ripe.get(name), have).find(fits) || (age && later(name, (d) => eligibleReleases(d, have).find(fits)));
         if (!to) {
           if (blockers.some((b) => b.name === name)) continue;
           const wants = rejected(have).map(([peer, range]) => ({ by: name, peer, range }));
@@ -953,6 +975,10 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
+    // What the command takes that the age still holds back: a library picked young because nothing older fits, or Angular
+    // itself in a major too new. Each is a blocker of its own kind, so the major waits instead of failing.
+    const held = [...angularHeld, ...moved.filter((l) => young(docs.get(l.name), l.to)).map((l) => ({ name: l.name, version: l.to, installed: l.from, published: docs.get(l.name).time[l.to], until: ripens(docs.get(l.name), l.to), migrations: l.migrations }))];
+    for (const { migrations, ...h } of held) blockers.push({ ...h, major, kind: 'too-young', reason: tooYoung(h, ngUpdateSkips) });
     // npm, pnpm and bun install a required peer on their own, so nothing else says the app gained one, and yarn doesn't,
     // so the build can't resolve it. Each new peer is named, and listed to install with a version that fits every library
     // that needs it, picked once they're all known, so the order the libraries come in can't change the pick.
@@ -1005,14 +1031,33 @@ async function buildPlan({ projectDir, to, next = false }) {
       ...(angularNewer && angularNewer !== frameworkVersion ? { angularNewer: { version: angularNewer, until: ripens(coreDoc, angularNewer) } } : {}),
     };
 
+    // A major held back only by age waits: every check a runnable major gets, and no Run: line.
+    const waiting = blockedAt === null && blockers.length > 0 && blockers.every((b) => b.kind === 'too-young');
     if (blockers.length) {
       plan.blockers.push(...blockers);
       if (blockedAt === null) blockedAt = major;
       for (const blocker of blockers) if (coupled.has(blocker.name) && blocker.kind === 'no-release') current[blocker.name] = current[blocker.name] || null;
     }
-    if (blockedAt === null) {
-      plan.hops.push(hop);
-      plan.reachable = major;
+    if (waiting) {
+      // Sooner takes the person's approved exemption. Where ng update skips young releases itself, the libraries go in
+      // first through update.mjs, on pnpm and yarn, never Angular or a library whose migrations that would skip.
+      const migrating = held.find((h) => h.migrations);
+      const noSooner = angularHeld.length ? `Angular ${major} itself ${age.before ? 'is newer than npm\'s before' : 'is too young until then'}`
+        : !ngUpdateSkips ? null
+        : migrating ? `${migrating.name} ships migrations, which installing it first would skip`
+        : !['pnpm', 'yarn'].includes(project.packageManager) ? 'ng update applies npm\'s before to every package and reads no exemption list'
+        : null;
+      const first = [updateCommand(project), ...held.map((h) => `--install-first ${h.name}`), framework, ...moved.map((l) => `${l.name}@${l.to}`)].join(' ');
+      Object.assign(hop, {
+        until: held.some((h) => !h.until) ? null : held.map((h) => h.until).sort().at(-1),
+        held: held.map(({ migrations, installed, ...h }) => h),
+        sooner: noSooner ? null : ngUpdateSkips ? first : command,
+        ...(noSooner ? { noSooner } : {}),
+      });
+      plan.waiting = hop;
+    }
+    if (blockedAt === null || waiting) {
+      if (!waiting) { plan.hops.push(hop); plan.reachable = major; }
       const releases = async (name, from, to) => Promise.all([registry.release(name, from), registry.release(name, to)]).catch(() => [null, null]);
       const compared = await Promise.all([
         ...moved.filter((lib) => lib.from).map(async (lib) => {
@@ -1063,7 +1108,8 @@ async function buildPlan({ projectDir, to, next = false }) {
   // A blocker from a scope the npm config gives a registry of its own may be the team's library, which can be upgraded
   // first rather than waited for. A licensed vendor's registry is set up the same way, so the plan says only what the
   // config shows. When several are the team's, one can need another, and the one it needs has to be published first.
-  const own = plan.blockers.filter((b) => b.major === blockedAt && registry.own(b.name));
+  // A library the team just published, held back only by age, is upgraded already.
+  const own = plan.blockers.filter((b) => b.major === blockedAt && b.kind !== 'too-young' && registry.own(b.name));
   if (own.length) {
     for (const b of own) { b.ownRegistry = registry.own(b.name); b.reason += `; your npm config sets a registry for ${b.name.split('/')[0]}, ${b.ownRegistry}`; }
     const names = new Set(own.map((b) => b.name));

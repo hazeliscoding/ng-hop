@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { angular, fakeManager, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
@@ -1607,11 +1609,23 @@ const pnpm21 = (deps) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@an
 const youngLib = () => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
 const ripeAt = (doc, v, minutes) => new Date(Date.parse(doc.time[v]) + minutes * 60e3).toISOString();
 const youngPatch = (doc, v, from, ago = 30) => { doc.versions[v] = { ...doc.versions[from], version: v }; doc.time[v] = new Date(Date.now() - ago * 60e3).toISOString(); doc['dist-tags'].latest = v; };
+// M7's libraries: 21.4.0 accepts Angular 21 only, and 22.0.0 came out `ago` minutes ago.
+const acme = (ago, extra = {}) => [
+  pkg('@acme/ui-core', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@angular/common': '^21.2.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@angular/common': '^22.0.0' }, ago, ...extra } }),
+  pkg('@acme/ui-forms', { '21.4.0': { peers: { '@angular/core': '^21.2.0', '@acme/ui-core': '^21.4.0' }, at: '2026-01-10' }, '22.0.0': { peers: { '@angular/core': '^22.0.0', '@acme/ui-core': '^22.0.0' }, ago } }),
+];
+const acmeDeps = { '@acme/ui-core': '^21.4.0', '@acme/ui-forms': '^21.4.0' };
+const npmApp = (rc) => app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0', 'ui-lib': '21.0.0' }, files: { '.npmrc': rc } });
+// npm 11.10 added min-release-age. npm 10.9.10 lists it as a string, a key it doesn't know, and 11.19.0 as a number.
+const npmCli = [join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'), join(dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')].find(existsSync);
+const npmKnowsAge = Boolean(npmCli) && typeof JSON.parse(spawnSync(process.execPath, [npmCli, 'config', 'list', '--json', '--min-release-age=1'], { encoding: 'utf8' }).stdout || '{}')['min-release-age'] === 'number';
 
 test('bun holds a release back by the minimumReleaseAge in the app\'s bunfig.toml, in seconds, and ng update asks it nothing', async () => {
   const proj = (files) => app({ deps: { ...base, '@angular/core': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'bun.lock': '{}', ...files } });
   const r = await plan(world(youngLib()), proj({ 'bunfig.toml': '[install]\nminimumReleaseAge = 86400\n' }), { to: 22 });
   assert.deepEqual(r.plan.releaseAge, { manager: 'bun', setting: 'minimumReleaseAge', minutes: 1440, ngUpdateReads: false });
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(r.plan.waiting.sooner, r.plan.waiting.command, 'only the install holds it back, so an approved exemption is enough');
   assert.equal((await plan(world(youngLib()), proj({}), { to: 22 })).plan.releaseAge, null, 'the control: bun holds nothing back by default');
 });
 
@@ -1621,6 +1635,7 @@ test('a package manager that can\'t be asked leaves release age unchecked, and s
   assert.ok(r.plan.unchecked.some((u) => u.name === 'release age'), JSON.stringify(r.plan.unchecked));
   const asked = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.ok(!asked.plan.unchecked.some((u) => u.name === 'release age'), 'positive control');
+  assert.equal(asked.code, 2);
 });
 
 test('the plan only asks the package manager, and keeps pnpm from recording itself in the lockfile', async () => {
@@ -1700,4 +1715,88 @@ test('a release with no publish time counts as old enough, as ng update and pnpm
   assert.equal(libIn(r, 22, 'ui-lib').to, '22.0.0');
   const dated = await plan(world(lib({ ago: 10 })), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.equal(dated.code, 2, 'the control: the same release dated ten minutes ago waits');
+});
+
+test('a release younger than pnpm\'s minimum release age makes its major wait, with when, instead of printing a command ng update refuses', async () => {
+  // M7: the team's 22.0.0 was minutes old, the plan called Angular 22 reachable, and Angular CLI 22.2's ng update skipped
+  // it, saying only: Package "@acme/ui-core" has an incompatible peer dependency to "@angular/common" (requires "^21.2.0", would install "22.2.5").
+  const packages = acme(10);
+  const r = await plan(world(), pnpm21(acmeDeps), { to: 22, own: { scope: '@acme', packages }, manager: pnpm12 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(r.plan.reachable, 21);
+  assert.deepEqual(r.plan.hops, [], 'a command that would fail is never a hop');
+  assert.deepEqual(r.plan.blockers.map((b) => [b.major, b.name, b.kind, b.version]), [[22, '@acme/ui-core', 'too-young', '22.0.0'], [22, '@acme/ui-forms', 'too-young', '22.0.0']]);
+  assert.equal(r.plan.waiting.until, [ripeAt(packages[0], '22.0.0', 1440), ripeAt(packages[1], '22.0.0', 1440)].sort().at(-1));
+  assert.equal(r.plan.ownBlockers, undefined, 'they are upgraded already, so upgrading them first is no answer');
+  assert.ok(r.plan.waiting.sooner.endsWith(' --install-first @acme/ui-core --install-first @acme/ui-forms @angular/core@22 @angular/cli@22 @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0'), r.plan.waiting.sooner);
+  // The control: a day and ten minutes on, the same releases make the hop ready.
+  const later = await plan(world(), pnpm21(acmeDeps), { to: 22, own: { scope: '@acme', packages: acme(1450) }, manager: pnpm12 });
+  assert.equal(later.code, 0, later.stderr);
+  assert.ok(later.plan.hops[0].command.endsWith(' @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0'));
+});
+
+test('the age is the package manager\'s own answer, and the wait is for the first release that fits', async () => {
+  const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
+  const week = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { ...pnpm12, 'config get minimum-release-age': '10080' } });
+  assert.equal(week.code, 2, week.stderr);
+  assert.equal(week.plan.waiting.libs.find((l) => l.name === 'ui-lib').to, '22.0.0', 'in two days 22.0.0 is old enough, and 22.1.0 still is not');
+  assert.equal(week.plan.waiting.until, ripeAt(lib, '22.0.0', 10080));
+});
+
+test('yarn 4.15 and newer hold a release back by npmMinimalAgeGate, while yarn before 4.10 and yarn 1 hold nothing back', async () => {
+  // yarn 4.18.1 printed 1440 with nothing set. yarn 4.9.4 failed: Couldn't find a configuration settings named "npmMinimalAgeGate".
+  const proj = () => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'yarn.lock': '' } });
+  const r = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': '4.18.1', 'config get npmMinimalAgeGate': '1440' } });
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(r.plan.blockers[0].kind, 'too-young');
+  assert.ok(r.plan.waiting.sooner.startsWith(`node ${quotePath(UPDATE)} --install-first ui-lib @angular/core@22`), r.plan.waiting.sooner);
+  for (const version of ['4.9.4', '1.22.22']) {
+    const free = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': version } });
+    assert.equal(free.code, 0, `${version}: ${free.stderr}`);
+  }
+});
+
+test('npm\'s min-release-age holds a release back at install, where ng update reads only before, so an approved exemption is enough', { skip: !npmKnowsAge && 'this npm has no min-release-age' }, async () => {
+  // npm 11.19.0 printed null for `npm config get before` with min-release-age=1 set, then refused the release:
+  // npm error code ETARGET, No matching version found for young@2.0.0 with a date before ...
+  const r = await plan(world(youngLib()), npmApp('min-release-age=1\n'), { to: 22 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.releaseAge, { manager: 'npm', setting: 'min-release-age', minutes: 1440, ngUpdateReads: false });
+  assert.equal(r.plan.waiting.sooner, r.plan.waiting.command);
+  assert.equal((await plan(world(youngLib()), npmApp(''), { to: 22 })).code, 0, 'the control: npm holds nothing back by default');
+});
+
+test('npm\'s before is a date, so a release after it waits with no time to wait for, and nothing gets it past ng update sooner', async () => {
+  const r = await plan(world(youngLib()), npmApp(`before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`), { to: 22 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.blockers.map((b) => [b.kind, b.until]), [['too-young', null]]);
+  assert.equal(r.plan.waiting.sooner, null);
+  const after = await plan(world(youngLib()), npmApp(`before=${new Date(Date.now() + 60e3).toISOString()}\n`), { to: 22 });
+  assert.equal(after.code, 0, after.stderr);
+});
+
+test('a major out for less than the minimum release age waits as a whole, and Angular itself never goes in first', async () => {
+  const [core, compiler] = angular({ 20: '2025-05-28', 21: '2025-11-19' });
+  for (const doc of [core, compiler]) youngPatch(doc, '22.0.0', '21.0.0', 120);
+  const r = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} })], pnpm21({}), { manager: pnpm12 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.blockers.map((b) => [b.name, b.kind]), [['@angular/core', 'too-young']]);
+  assert.equal(r.plan.waiting.sooner, null);
+  assert.match(r.plan.waiting.noSooner, /^Angular 22 itself is too young/);
+});
+
+test('a young library that ships migrations can only wait, since installing it first would skip them', async () => {
+  // The control is the M7 test above: the same releases without migrations get a Sooner command.
+  const r = await plan(world(), pnpm21(acmeDeps), { to: 22, own: { scope: '@acme', packages: acme(10, { migrations: true }) }, manager: pnpm12 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(r.plan.waiting.sooner, null);
+  assert.match(r.plan.waiting.noSooner, /@acme\/ui-core ships migrations/);
+});
+
+test('a follower whose only release that fits is too young waits with its major, instead of reading as a peer conflict', async () => {
+  const icons = { ...evaIcons('16.0.0', '16.0.0'), '17.0.0': { peers: { '@nebular/theme': '17.0.0', 'eva-icons': '^1.1.3' }, ago: 10 } };
+  const rc = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
+  const r = await plan(world(...nebularWith(icons)), app({ deps: nebularDeps, lock: nebularLock, files: { '.npmrc': rc } }), { to: 21 });
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.plan.blockers.map((b) => [b.name, b.kind]), [['@nebular/eva-icons', 'too-young']]);
 });
