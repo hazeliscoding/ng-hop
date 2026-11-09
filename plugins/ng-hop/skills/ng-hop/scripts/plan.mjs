@@ -1080,7 +1080,16 @@ async function buildPlan({ projectDir, to, next = false }) {
   const appRc = join(projectDir, '.npmrc');
   if (configDir !== projectDir && existsSync(appRc)) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
-    for (const [, key] of readFileSync(appRc, 'utf8').matchAll(/^\s*([^#;\s=[][^=]*?)\s*=/gm)) if (Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
+    // Its keys as npm 11.19.0's ini and pnpm 10.34.9's read them: lines split at \r or \n, each up to its first =, or
+    // whole with none, trimmed. One pattern over the file backtracked, its \s* running on over blank lines and its key
+    // over a long line: 40,000 blank lines took 1.5 s, and a line of 150,000 spaces 16.5 s. And a key npm didn't read
+    // would lay npm's default over the root's setting.
+    // shortcut: a key below a [section] line counts as the app's own, though npm reads it under that section, and a
+    // quoted key, or one holding ; or #, goes unread; follow ini's decode() if a team writes either.
+    for (const line of readFileSync(appRc, 'utf8').split(/[\r\n]+/)) {
+      const key = /^([^=]+)(?:=.*)?$/.exec(line)?.[1].trim();
+      if (key && Object.hasOwn(appConfig, key)) config[key] = appConfig[key];
+    }
   }
   const registry = registryClient(config, [...new Set([configDir, projectDir])], npm);
   const asked = await releaseAge(project, config);

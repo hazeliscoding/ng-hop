@@ -86,16 +86,25 @@ test('no settings file a repo writes can stall the plan, with a long run of spac
   // Cutting a comment backtracked over a run of spaces, and the packages patterns over wildcards: 150,000 spaces took
   // 21 s, 16 ** parts against an app 16 folders down 47 s, and 8 *s against a folder name 60 letters long 56 s. Looking
   // for a key set twice compared each key with every other: 100,000 keys took 33 s. And the \s* starting each line of
-  // bun's bunfig.toml and of the .npmrc pnpm 10 reads ran on over every blank line below it.
+  // bun's bunfig.toml and of the .npmrc pnpm 10 reads ran on over every blank line below it, as did the pattern reading
+  // the keys of an app's own .npmrc below a pnpm workspace's root, which also backtracked over one long line: 40,000
+  // blank lines took 1.5 s, and a line of 150,000 spaces 16.5 s, or 17.4 s with [ \t]* and [^=\n] in the pattern.
   const below = (pattern, rel) => {
     const p = app({ files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60\npackages:\n  - '${pattern}'\n`, [`${rel}/package.json`]: JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), [`${rel}/pnpm-lock.yaml`]: pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })) } });
     return { dir: join(p.dir, rel) };
+  };
+  // pnpm 10 lays an app's own .npmrc over its workspace root's, so the plan takes the keys it sets from npm's listing.
+  const appRc = (rc) => {
+    const p = app({ files: { 'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n", 'pnpm-lock.yaml': pnpmLock('  .: {}\n', pnpmImporter('apps/web', { core: '21.2.0', cli: '21.2.0' })), 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), 'apps/web/.npmrc': rc } });
+    return { dir: join(p.dir, 'apps', 'web') };
   };
   const cases = [
     [pnpm21({}, { files: { 'pnpm-workspace.yaml': `minimumReleaseAge: 60${' '.repeat(150000)}x\n` } }), /sets minimumReleaseAge to "60 x", which pnpm 12\.16\.1 refuses/],
     [pnpm21({}, { files: { 'pnpm-workspace.yaml': `${Array.from({ length: 100000 }, (_, i) => `k${i}: 1\n`).join('')}minimumReleaseAge: 60\n` } }), 60],
     [app({ deps: { ...base, '@angular/core': '^21.0.0' }, files: { 'bun.lock': '{}', 'bunfig.toml': `${'\n'.repeat(150000)}[install]\nminimumReleaseAge = 3600\n` } }), 60],
     [pnpm21({}, { files: { '.npmrc': `${'\n'.repeat(150000)}; an hour\nminimum-release-age=60\n` } }), 60, { '--version': '10.34.9' }],
+    [appRc(`${'\n'.repeat(150000)}; an hour\nminimum-release-age=60\n`), 60, { '--version': '10.34.9' }],
+    [appRc(`a${' '.repeat(300000)}x\nminimum-release-age=60\n`), 60, { '--version': '10.34.9' }],
     [below(`apps/${'*a'.repeat(8)}b`, `apps/${'a'.repeat(60)}`), 1440],
     [below(`${'**/'.repeat(16)}x`, Array.from({ length: 16 }, (_, i) => `d${i}`).join('/')), 1440],
   ];
