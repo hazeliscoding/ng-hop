@@ -154,7 +154,7 @@ export function runScript(script, args, { cwd, env = {}, node } = {}) {
 // A stand-in for pnpm or yarn, which the plan asks for an unpinned version through npm_execpath, the first place
 // managerCommand looks. answers maps the arguments to what it prints, or to { stderr } for what it prints as it fails;
 // anything else, or null, exits 1. Each question is logged with the folder it ran in, and the pnpm_config_pm_on_fail,
-// Corepack and YARN_IGNORE_PATH settings it ran under. Like yarn 4.18.1, the yarn one reads the .yarnrc.yml in every
+// Corepack, YARN_IGNORE_PATH and NODE_DISABLE_COMPILE_CACHE settings it ran under. Like yarn 4.18.1, the yarn one reads the .yarnrc.yml in every
 // folder up from where it runs, loading the plugins each names and, without YARN_IGNORE_PATH, the nearest yarnPath, so
 // running it in a repo, or below a folder someone else can write to, runs their code.
 export function fakeManager(name, answers) {
@@ -163,7 +163,7 @@ export function fakeManager(name, answers) {
   writeFileSync(file, `const fs = require('fs'), path = require('path');
 const args = process.argv.slice(2).join(' ');
 const corepack = [process.env.COREPACK_ENABLE_NETWORK, process.env.COREPACK_ENABLE_AUTO_PIN, process.env.COREPACK_ENV_FILE];
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack, ignorePath: process.env.YARN_IGNORE_PATH ?? null }) + '\\n');
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, cwd: process.cwd(), pmOnFail: process.env.pnpm_config_pm_on_fail ?? null, corepack, ignorePath: process.env.YARN_IGNORE_PATH ?? null, compileCache: process.env.NODE_DISABLE_COMPILE_CACHE ?? null }) + '\\n');
 if (${JSON.stringify(name)} === 'yarn') {
   let yarnPath = null;
   for (let dir = process.cwd(); ; dir = path.dirname(dir)) {

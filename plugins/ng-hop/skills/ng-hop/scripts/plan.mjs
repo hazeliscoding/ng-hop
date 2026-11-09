@@ -7,7 +7,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { parseArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -75,7 +75,18 @@ function npmScript(project) {
   return script;
 }
 
-const runNpm = (npm, args, options) => exec(process.execPath, [npm, ...args], options);
+// npm's debug log, cache and update check go to a folder of the plan's own, which it removes, since a repo's .npmrc can
+// name any folder for them: npm 11.19.0 wrote its log, which quotes a key it doesn't know word for word, where logs-dir
+// said, and the update check also asks the registry the .npmrc names. A flag beats .npmrc. npm 11.19.0 also left Node's
+// compile cache in the temporary folder, which nothing removes.
+async function runNpm(npm, args, options) {
+  const own = mkdtempSync(join(tmpdir(), 'ng-hop-npm-'));
+  try {
+    return await exec(process.execPath, [npm, ...args, `--cache=${own}`, `--logs-dir=${own}`, '--no-update-notifier'], { ...options, env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' } });
+  } finally {
+    rmSync(own, { recursive: true, force: true });
+  }
+}
 
 // ---- Registry access ------------------------------------------------------------------------------------------
 
@@ -662,9 +673,10 @@ async function askVersion(project, pm) {
   if (homeIn) return { unknown: `${pm} wasn't asked for its version, which its minimum release age depends on, since the home folder, ${home}, is inside the app's ${homeIn}, where ${pm} would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with HOME, or USERPROFILE on Windows, outside the repo, or with ${pm}'s version in package.json's packageManager` };
   const failed = (why, todo) => ({ unknown: `${pm} couldn't be asked for its version (${why}), which its minimum release age depends on, so a release younger than that can still stop a command; ${todo}` });
   // Corepack stays offline, as update.mjs keeps it, so a manager it hasn't fetched goes unasked, and yarn passes over
-  // any yarnPath. A name has no case on Windows, where Node passes on only the first spelling in sort order, so the
-  // person's own spellings of these go.
-  const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', pnpm_config_pm_on_fail: 'ignore', YARN_IGNORE_PATH: '1' };
+  // any yarnPath. Corepack 0.35.0 and pnpm 10 and 11 left Node's compile cache in the temporary folder, so it stays off.
+  // A name has no case on Windows, where Node passes on only the first spelling in sort order, so the person's own
+  // spellings of these go.
+  const controls = { COREPACK_ENABLE_NETWORK: '0', COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENV_FILE: '0', pnpm_config_pm_on_fail: 'ignore', YARN_IGNORE_PATH: '1', NODE_DISABLE_COMPILE_CACHE: '1' };
   const owned = new Set(Object.keys(controls).map((key) => key.toLowerCase()));
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !owned.has(key.toLowerCase()))), ...controls };
   let dir;

@@ -1691,7 +1691,8 @@ test('the plan asks an unpinned pnpm only its version, from an empty folder outs
     for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
   assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true, from: 'default' });
-  assert.deepEqual(r.asked.map((a) => [a.args, a.pmOnFail, a.corepack, a.ignorePath]), [['--version', 'ignore', ['0', '0', '0'], '1']]);
+  // Corepack 0.35.0 and pnpm 10 and 11 turn on Node's compile cache, which they leave in the temporary folder.
+  assert.deepEqual(r.asked.map((a) => [a.args, a.pmOnFail, a.corepack, a.ignorePath, a.compileCache]), [['--version', 'ignore', ['0', '0', '0'], '1', '1']]);
   assert.ok(!inside(r.asked[0].cwd, proj.dir), `asked from ${r.asked[0].cwd}`);
   assert.ok(!existsSync(r.asked[0].cwd), 'and that folder is gone');
   assert.deepEqual([pinned.asked, pinned.plan.releaseAge.version], [[], '12.16.1']);
@@ -1768,6 +1769,17 @@ test('npm is never one the repo holds, through a relative npm_execpath or one in
     const r = await plan(world(), proj, { to: 21, env: { npm_execpath: execpath } });
     assert.deepEqual([r.code, ran(proj.dir)], [0, []], execpath);
   }
+});
+
+test('npm writes nothing where the repo\'s .npmrc says, and the plan leaves nothing in the temporary folder', async () => {
+  // A repo's .npmrc names npm's logs-dir and cache, and npm 11.19.0 wrote its debug log there, which quotes a key it
+  // doesn't know word for word, so logs-dir=~/.bashrc.d put the repo's text in a file a shell runs, and its update
+  // check's stamp. It also left Node's compile cache in the temporary folder, which nothing removes.
+  const chosen = join(app({}).dir, 'chosen'), tmp = join(app({ files: { 'tmp/.keep': '' } }).dir, 'tmp');
+  const forward = (path) => path.split(sep).join('/');
+  const r = await plan(world(), npmApp(`logs-dir=${forward(chosen)}/logs\ncache=${forward(chosen)}/cache\n`), { to: 22, env: { TMPDIR: tmp, TEMP: tmp, TMP: tmp } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual([existsSync(chosen), readdirSync(tmp)], [false, ['.keep']]);
 });
 
 test('a pnpm or yarn inside the repo isn\'t run, wherever the plan finds it', async () => {
