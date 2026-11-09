@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { after, test } from 'node:test';
+import { managerCommand } from '../plugins/ng-hop/skills/ng-hop/scripts/manager.mjs';
 import { angular, fakeManager, pkg, plan, PLAN, project, runScript, startRegistry, typescript, UPDATE } from './helpers/harness.mjs';
 
 const made = [];
@@ -1603,9 +1604,32 @@ test('a lockfile that cannot be read falls back instead of making up a version',
 
 // ---- Release age: what the package manager and ng update hold back --------------------------------------------------
 
-// pnpm 12.16.1 with nothing set printed undefined, which ng update reads as pnpm 11's default of a day.
-const pnpm12 = { '--version': '12.16.1', 'config get minimum-release-age': 'undefined' };
-const pnpm21 = (deps) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0', lib: '21.0.0' })) } });
+// An unpinned pnpm 12.16.1, with nothing set: it held a release back for a day, its default from pnpm 11, and printed
+// undefined for minimum-release-age, which ng update reads as that day too.
+const pnpm12 = { '--version': '12.16.1' };
+const pnpm21 = (deps, { pin, files = {} } = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', ...deps }, pin, files: { 'pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0', lib: '21.0.0' })), ...files } });
+const yarn21 = ({ pin, files = {} } = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, pin, files: { 'yarn.lock': '', ...files } });
+// An Angular 21 app on pnpm at apps/web, below files of its own. Its own lockfile keeps the age files the only change.
+const webApp = (files = {}) => {
+  const p = app({ files: { 'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }), 'apps/web/pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })), ...files } });
+  return { dir: join(p.dir, 'apps', 'web'), root: p.dir };
+};
+// The release age the plan read, or why it couldn't.
+const ageOf = async (proj, options) => {
+  const r = await plan(world(), proj, { to: 22, ...options });
+  assert.ok(r.plan, r.stderr);
+  return r.plan.releaseAge ?? r.plan.unchecked.find((u) => u.name === 'release age')?.reason ?? null;
+};
+// pnpm's global config.yaml through XDG_CONFIG_HOME, which pnpm 11 and 12 read in place of their own folder on any OS.
+const xdgWith = (text) => ({ XDG_CONFIG_HOME: app({ files: { 'pnpm/config.yaml': text } }).dir });
+// A home folder with this .yarnrc.yml, through both names Node's os.homedir() reads.
+const homeWith = (text) => { const dir = app({ files: { '.yarnrc.yml': text } }).dir; return { HOME: dir, USERPROFILE: dir }; };
+const inside = (path, dir) => { const rel = relative(dir, path); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
+// A script that leaves a .ran file beside itself when anything runs it.
+const MARKER = "require('fs').writeFileSync(__filename + '.ran', '');\n";
+const ran = (dir) => readdirSync(dir, { recursive: true }).filter((f) => String(f).endsWith('.ran'));
+// Every file in a folder with its contents, to see that nothing changed.
+const listing = (dir) => readdirSync(dir, { recursive: true }).sort().map((f) => [f, statSync(join(dir, f)).isFile() ? readFileSync(join(dir, f), 'utf8') : null]);
 const youngLib = () => pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
 const ripeAt = (doc, v, minutes) => new Date(Date.parse(doc.time[v]) + minutes * 60e3).toISOString();
 const youngPatch = (doc, v, from, ago = 30) => { doc.versions[v] = { ...doc.versions[from], version: v }; doc.time[v] = new Date(Date.now() - ago * 60e3).toISOString(); doc['dist-tags'].latest = v; };
@@ -1637,31 +1661,269 @@ test('a package manager that can\'t be asked leaves release age unchecked, and s
   assert.ok(!asked.plan.unchecked.some((u) => u.name === 'release age'), 'positive control');
   assert.equal(asked.code, 2);
   const odd = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { ...pnpm12, '--version': 'oops' } });
-  assert.match(odd.plan?.unchecked.find((u) => u.name === 'release age')?.reason ?? odd.stderr, /\(it printed "oops" for its version\)/);
+  assert.match(odd.plan?.unchecked.find((u) => u.name === 'release age')?.reason ?? odd.stderr, /\(it printed "oops"\)/);
 });
 
 test('why release age went unchecked keeps the manager\'s whole last line, and says to plan again once dependencies are installed', async () => {
-  // Corepack, kept offline, with the pnpm the project pins not in its cache. Step 3's install fetches that pnpm.
+  // Corepack, kept offline, with the pnpm it falls back to not in its cache. Step 3's install fetches that pnpm.
   const offline = 'Network access disabled by the environment; can\'t reach https://registry.npmjs.org/pnpm/-/pnpm-12.15.0.tgz';
   const r = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': { stderr: offline } } });
-  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm couldn't be asked for its minimum release age (${offline}), so a release younger than that can still stop a command; plan again once the dependencies are installed`);
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm couldn't be asked for its version (${offline}), which its minimum release age depends on, so a release younger than that can still stop a command; plan again once the dependencies are installed`);
 });
 
-test('the plan only asks the package manager, and keeps pnpm from recording itself in the lockfile', async () => {
+test('the plan asks an unpinned pnpm only its version, from an empty folder outside the project, and a pinned one nothing', async () => {
   // pnpm 12.16.1's --version, in a project whose package.json pins pnpm, wrote packageManagerDependencies into
-  // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore. update.mjs's npm_config_pm_on_fail=error didn't stop it.
-  // On Windows a name has no case, and Node passes on the first spelling in sort order, so the person's own uppercase
-  // setting would win over the plan's. Corepack stays offline too, so the plan never downloads a package manager.
+  // pnpm-lock.yaml unless pnpm_config_pm_on_fail was ignore, and yarn 4.18.1 ran a yarnPath script for --version. So the
+  // age comes from files, and only a version nothing pins is asked, of the person's own manager, from a folder of its
+  // own. On Windows a name has no case, and Node passes on the first spelling in sort order, so the person's own
+  // uppercase setting would win over the plan's. Corepack stays offline too, so the plan never downloads a manager.
   const set = { PNPM_CONFIG_PM_ON_FAIL: 'download', COREPACK_ENABLE_NETWORK: '1' };
   const saved = Object.fromEntries(Object.keys(set).map((key) => [key, process.env[key]]));
   Object.assign(process.env, set);
-  let r;
-  try { r = await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 }); } finally {
+  const proj = pnpm21({});
+  let r, pinned;
+  try {
+    r = await plan(world(), proj, { to: 22, manager: pnpm12 });
+    pinned = await plan(world(), pnpm21({}, { pin: 'pnpm@12.16.1' }), { to: 22, manager: pnpm12 });
+  } finally {
     for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
-  assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true });
-  assert.deepEqual(r.asked.map((a) => a.args).sort(), ['--version', 'config get minimum-release-age']);
-  for (const a of r.asked) assert.deepEqual([a.pmOnFail, a.corepack], ['ignore', ['0', '0', '0']]);
+  assert.deepEqual(r.plan.releaseAge, { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 1440, default: true, ngUpdateReads: true, from: 'default' });
+  assert.deepEqual(r.asked.map((a) => [a.args, a.pmOnFail, a.corepack, a.ignorePath]), [['--version', 'ignore', ['0', '0', '0'], '1']]);
+  assert.ok(!inside(r.asked[0].cwd, proj.dir), `asked from ${r.asked[0].cwd}`);
+  assert.ok(!existsSync(r.asked[0].cwd), 'and that folder is gone');
+  assert.deepEqual([pinned.asked, pinned.plan.releaseAge.version], [[], '12.16.1']);
+});
+
+test('nothing from a yarn repo runs: its yarnPath and plugins stay unloaded, and the age still comes from .yarnrc.yml', async () => {
+  // yarn 4.18.1 ran a yarnPath script for --version and loads plugins as it starts, so asking yarn anything in the repo
+  // runs code the repo commits. The stand-in loads them the same way, as the control shows.
+  const repo = ({ pin, yarnPath }) => yarn21({ pin, files: {
+    '.yarnrc.yml': `${yarnPath ? 'yarnPath: .yarn/releases/yarn-4.18.1.cjs\n' : ''}plugins:\n  - path: .yarn/plugins/plugin.cjs\nnpmMinimalAgeGate: 60\n`,
+    '.yarn/releases/yarn-4.18.1.cjs': MARKER,
+    '.yarn/plugins/plugin.cjs': MARKER,
+  } });
+  const control = repo({ pin: 'yarn@4.18.1', yarnPath: true });
+  const stand = fakeManager('yarn', { '--version': '4.18.1' });
+  try { spawnSync(process.execPath, [stand.file, '--version'], { cwd: control.dir }); } finally { stand.remove(); }
+  assert.equal(ran(control.dir).length, 2, 'the control: run in the repo, the stand-in runs both');
+
+  const pinned = repo({ pin: 'yarn@4.18.1', yarnPath: true });
+  const r = await plan(world(), pinned, { to: 22, manager: { '--version': '4.18.1' } });
+  assert.deepEqual(r.plan.releaseAge, { manager: 'yarn', version: '4.18.1', setting: 'npmMinimalAgeGate', minutes: 60, ngUpdateReads: true, from: join(pinned.dir, '.yarnrc.yml') });
+  assert.deepEqual([r.asked, ran(pinned.dir)], [[], []]);
+  const unpinned = repo({});
+  const asked = await plan(world(), unpinned, { to: 22, manager: { '--version': '4.18.1' } });
+  assert.equal(asked.plan.releaseAge.minutes, 60);
+  assert.deepEqual(asked.asked.map((a) => a.args), ['--version']);
+  assert.ok(!inside(asked.asked[0].cwd, unpinned.dir), `asked from ${asked.asked[0].cwd}`);
+  assert.deepEqual(ran(unpinned.dir), []);
+});
+
+test('a relative PATH entry into the project never runs the pnpm it holds', async () => {
+  // A relative PATH entry is looked up from the folder a command starts in, so from the project, bin/pnpm here would be
+  // the project's own code, as the control shows. Without npm_execpath or COREPACK_ROOT, PATH is where pnpm is found.
+  const proj = pnpm21({}, { files: { 'bin/pnpm.cjs': MARKER, 'bin/pnpm.cmd': '@"%~dp0\\pnpm.cjs" %*\r\n', 'bin/pnpm': `#!/usr/bin/env node\n${MARKER}` } });
+  chmodSync(join(proj.dir, 'bin', 'pnpm'), 0o755);
+  const env = { PATH: ['bin', dirname(process.execPath)].join(delimiter), npm_execpath: undefined, COREPACK_ROOT: undefined };
+  const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  let found;
+  try {
+    for (const [key, value] of Object.entries(env)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    found = managerCommand(proj.dir, 'pnpm');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+  assert.ok(inside(found.prefix[0] ?? found.file, proj.dir), `the control: from the project, PATH finds ${found.prefix[0] ?? found.file}`);
+  await plan(world(), proj, { to: 22, env });
+  assert.deepEqual(ran(proj.dir), []);
+});
+
+test('with the temporary folder inside the project or its repo, the plan asks nothing, and says why release age went unchecked', async () => {
+  // From a folder in the repo, pnpm or yarn would read the repo's settings and run what they name.
+  const proj = pnpm21({}, { files: { 'tmp/.keep': '' } });
+  const tmp = { TMPDIR: join(proj.dir, 'tmp'), TEMP: join(proj.dir, 'tmp'), TMP: join(proj.dir, 'tmp') };
+  const r = await plan(world(), proj, { to: 22, manager: pnpm12, env: tmp });
+  assert.deepEqual(r.asked, []);
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `pnpm wasn't asked for its version, which its minimum release age depends on, since the temporary folder, ${tmp.TMP}, is inside the app's folder, where pnpm would read the project's settings and could run its code, so a release younger than that age can still stop a command; plan again with TMPDIR, or TEMP on Windows, outside the repo, or with pnpm's version in package.json's packageManager`);
+  const repo = webApp({ '.git/HEAD': 'ref: refs/heads/main\n', 'tmp/.keep': '' });
+  const inRepo = await plan(world(), repo, { to: 22, manager: pnpm12, env: { TMPDIR: join(repo.root, 'tmp'), TEMP: join(repo.root, 'tmp'), TMP: join(repo.root, 'tmp') } });
+  assert.deepEqual(inRepo.asked, []);
+  assert.match(inRepo.plan.unchecked.find((u) => u.name === 'release age')?.reason, /is inside the app's git repository, /);
+  assert.deepEqual((await plan(world(), pnpm21({}), { to: 22, manager: pnpm12 })).asked.length, 1, 'the control: with the usual one, it asks');
+});
+
+test('planning a pinned pnpm 12 project changes no file in it', async () => {
+  const proj = pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1', files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 60\n' } });
+  const before = listing(proj.dir);
+  const r = await plan(world(youngLib()), proj, { to: 22, manager: pnpm12 });
+  assert.deepEqual([r.plan.releaseAge.minutes, r.asked], [60, []]);
+  assert.deepEqual(listing(proj.dir), before);
+});
+
+test('pnpm 11 and 12 take the age from pnpm_config_minimum_release_age, then the nearest pnpm-workspace.yaml, then their config.yaml', async () => {
+  // pnpm 12.16.1 and 11.28.11, offline, asked `pnpm config get minimum-release-age`: the environment's 20 beat a
+  // pnpm-workspace.yaml's 10 and a global config.yaml's 31, and the yaml's 10 beat the global 31. 12.16.1 read the name
+  // in any case, and passed over a value that is no whole number, such as 1d. Neither read .npmrc or npm_config_.
+  const yaml = (minutes) => ({ 'pnpm-workspace.yaml': `minimumReleaseAge: ${minutes}\n` });
+  const global = () => xdgWith('minimumReleaseAge: 31\n');
+  const cases = [
+    [yaml(10), { pnpm_config_minimum_release_age: '20', ...global() }, 20, 'pnpm_config_minimum_release_age'],
+    [yaml(10), { PNPM_CONFIG_MINIMUM_RELEASE_AGE: '20' }, 20, 'PNPM_CONFIG_MINIMUM_RELEASE_AGE'],
+    [yaml(10), { pnpm_config_minimum_release_age: '1d' }, 10, 'pnpm-workspace.yaml'],
+    [yaml(10), global(), 10, 'pnpm-workspace.yaml'],
+    [{}, global(), 31, 'config.yaml'],
+    [{ '.npmrc': 'minimum-release-age=40\n' }, { npm_config_minimum_release_age: '50' }, 1440, 'default'],
+  ];
+  for (const [files, env, minutes, from] of cases) {
+    const age = await ageOf(pnpm21({}, { files }), { manager: pnpm12, env });
+    assert.deepEqual([age?.minutes, basename(age?.from ?? '')], [minutes, from], JSON.stringify({ files, env }));
+  }
+  const p = pnpm21({}, { files: yaml(10) });
+  assert.deepEqual(await ageOf(p, { manager: pnpm12 }), { manager: 'pnpm', version: '12.16.1', setting: 'minimum-release-age', minutes: 10, ngUpdateReads: true, from: join(p.dir, 'pnpm-workspace.yaml') });
+});
+
+test('pnpm 11 and 12 apply a pnpm-workspace.yaml above the app only when its packages take the app in, and never look past the nearest', async () => {
+  // pnpm 12.16.1 and 11.28.11, the app at apps/web: a yaml above it with packages [apps/*], ["**"], [apps/**] or
+  // [./apps/*/] applied, and none with no packages, [other/*], or [apps/*, !apps/web]. The app's own yaml beat its
+  // parent's, 70 over 60, and one of its own that set nothing left the parent's unread.
+  const parent = (packages) => ({ 'pnpm-workspace.yaml': `minimumReleaseAge: 60\n${packages}` });
+  const cases = [
+    ['packages:\n  - apps/*\n', 60], ["packages:\n  - '**'\n", 60], ['packages: [apps/**]\n', 60], ['packages:\n- ./apps/*/\n', 60],
+    ['', 1440], ['packages:\n  - other/*\n', 1440], ["packages:\n  - apps/*\n  - '!apps/web'\n", 1440],
+  ];
+  for (const [packages, minutes] of cases) assert.equal((await ageOf(webApp(parent(packages)), { manager: pnpm12 }))?.minutes, minutes, packages);
+  const own = (text) => webApp({ ...parent('packages:\n  - apps/*\n'), 'apps/web/pnpm-workspace.yaml': text });
+  assert.equal((await ageOf(own('minimumReleaseAge: 70\n'), { manager: pnpm12 })).minutes, 70);
+  assert.deepEqual((await ageOf(own('packages:\n  - .\n'), { manager: pnpm12 })).from, 'default');
+  // A pattern or list the plan can't read leaves the age unknown instead of guessed.
+  const braces = webApp(parent('packages:\n  - apps/{web,admin}\n'));
+  assert.equal(await ageOf(braces, { manager: pnpm12 }), `${join(braces.root, 'pnpm-workspace.yaml')} sets minimumReleaseAge, but whether it covers this app turns on a packages pattern the plan can't read, "apps/{web,admin}", so a release younger than that age can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
+  assert.match(await ageOf(webApp(parent('packages:\n  apps: web\n')), { manager: pnpm12 }), /turns on a packages list the plan can't read, so /);
+});
+
+test('pnpm reads a whole number of minutes, quoted or not, and leaves a value pnpm 12 refuses unknown, naming the file and the value', async () => {
+  // pnpm 12.16.1: 60, "60", 60 # a comment, +60 and 0x3C read as 60, and 0 as no age; 1d, -5, 60.5, 1e3, 060 and a number
+  // past 2^64 made every pnpm command fail with "invalid u64". It passed over an empty value to its config.yaml, and
+  // read no pnpm-workspace.yml, and not the key under another one.
+  const ageWith = (files, env) => ageOf(pnpm21({}, { files }), { manager: pnpm12, env });
+  for (const value of ['60', '"60"', "'60'", '60 # an hour', '+60', '0x3C']) assert.equal((await ageWith({ 'pnpm-workspace.yaml': `minimumReleaseAge: ${value}\n` }))?.minutes, 60, value);
+  assert.equal(await ageWith({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 0\n' }), null);
+  assert.equal((await ageWith({ 'pnpm-workspace.yaml': 'minimumReleaseAge:\n' }, xdgWith('minimumReleaseAge: 31\n')))?.minutes, 31);
+  for (const value of ['1d', '-5', '60.5', '1e3', '060', '99999999999999999999']) {
+    const p = pnpm21({}, { files: { 'pnpm-workspace.yaml': `minimumReleaseAge: ${value}\n` } });
+    assert.equal(await ageOf(p, { manager: pnpm12 }), `${join(p.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge to "${value}", which pnpm 12.16.1 refuses: every pnpm command fails on it until it is a whole number of minutes, so ask the person to fix it`);
+  }
+  // pnpm 12.16.1, 11.28.11 and 10.34.9 all failed on a key set twice: "duplicate mapping key".
+  const twice = pnpm21({}, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 10\nminimumReleaseAge: 20\n' } });
+  assert.equal(await ageOf(twice, { manager: pnpm12 }), `${join(twice.dir, 'pnpm-workspace.yaml')} sets minimumReleaseAge more than once, which pnpm 12.16.1 refuses: every pnpm command fails on it until it is set once, so ask the person to fix it`);
+  // 12.16.1 failed over 1d in its config.yaml or the nearest pnpm-workspace.yaml whatever set the age, the environment
+  // or another file, and in one whose packages left the app out; 11.28.11 read the age that won.
+  const day = { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1d\n' }, env = { pnpm_config_minimum_release_age: '20' };
+  assert.match(await ageWith(day, env), /pnpm-workspace\.yaml sets minimumReleaseAge to "1d", which pnpm 12\.16\.1 refuses/);
+  assert.match(await ageWith({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 10\n' }, xdgWith('minimumReleaseAge: 1d\n')), /config\.yaml sets minimumReleaseAge to "1d", which pnpm 12\.16\.1 refuses/);
+  assert.match(await ageOf(webApp({ 'pnpm-workspace.yaml': 'minimumReleaseAge: 1d\npackages:\n  - other/*\n' }), { manager: pnpm12 }), /which pnpm 12\.16\.1 refuses/);
+  assert.equal((await ageOf(pnpm21({}, { files: day }), { manager: { '--version': '11.28.11' }, env }))?.minutes, 20, 'the control: pnpm 11');
+  for (const files of [{ 'pnpm-workspace.yml': 'minimumReleaseAge: 60\n' }, { 'pnpm-workspace.yaml': 'settings:\n  minimumReleaseAge: 60\n' }]) assert.equal((await ageWith(files))?.from, 'default', JSON.stringify(files));
+});
+
+test('the version comes from the nearest package.json pin, its packageManager or devEngines, and then nothing is asked', async () => {
+  // Corepack reads packageManager first, a +sha suffix included, then devEngines.packageManager, one entry or a list,
+  // whose range counts here by its lowest version. pnpm holds nothing back by default before pnpm 11.
+  const pinned = (pkg) => app({ files: {
+    'package.json': JSON.stringify({ name: 'mono', ...pkg }),
+    'apps/web/package.json': JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }),
+    'apps/web/pnpm-lock.yaml': pnpmLock(pnpmImporter('.', { core: '21.2.0', cli: '21.2.0' })),
+  } });
+  const cases = [
+    [{ packageManager: 'pnpm@11.2.0+sha512.0123abc' }, '11.2.0'],
+    [{ devEngines: { packageManager: { name: 'pnpm', version: '^11.2.0' } } }, '11.2.0'],
+    [{ devEngines: { packageManager: [{ name: 'yarn', version: '4.18.1' }, { name: 'pnpm', version: '11.2.0' }] } }, '11.2.0'],
+  ];
+  for (const [pkg, version] of cases) {
+    const p = pinned(pkg);
+    const r = await plan(world(), { dir: join(p.dir, 'apps', 'web') }, { to: 22, manager: pnpm12 });
+    assert.deepEqual([r.plan.releaseAge?.version, r.asked], [version, []], JSON.stringify(pkg));
+  }
+  const old = await plan(world(), pnpm21({}, { pin: 'pnpm@10.33.0' }), { to: 22, manager: pnpm12 });
+  assert.deepEqual([old.plan.releaseAge, old.asked], [null, []]);
+  const other = await plan(world(), { dir: join(pinned({ devEngines: { packageManager: { name: 'yarn', version: '4.18.1' } } }).dir, 'apps', 'web') }, { to: 22, manager: pnpm12 });
+  assert.deepEqual(other.asked.map((a) => a.args), ['--version'], 'the control: a pin for another manager pins nothing');
+  const latest = pnpm21({}, { pin: 'pnpm@latest' });
+  assert.equal(await ageOf(latest, { manager: pnpm12 }), `${join(latest.dir, 'package.json')} pins "pnpm@latest" in packageManager, which names no pnpm version, so the plan can't tell pnpm's minimum release age, and a release younger than that can still stop a command; ask the person to check it with pnpm config get minimum-release-age`);
+  const tagged = pinned({ devEngines: { packageManager: { name: 'pnpm', version: 'latest' } } });
+  assert.match(await ageOf({ dir: join(tagged.dir, 'apps', 'web') }, { manager: pnpm12 }), /package\.json pins "latest" in devEngines\.packageManager, which names no pnpm version, /);
+});
+
+test('yarn takes npmMinimalAgeGate from YARN_NPM_MINIMAL_AGE_GATE in any case, then the nearest .yarnrc.yml, then the home folder\'s', async () => {
+  // yarn 4.18.1, offline: the environment's 120 beat an rc's 60, also as Yarn_Npm_Minimal_Age_Gate; a project's 60 beat
+  // a parent's 90 and the home's 200; a parent's two levels up applied when nothing nearer set it; the home's alone gave
+  // 200; nothing gave its default of a day.
+  const yarn = { manager: { '--version': '4.18.1' } };
+  const rc = (minutes) => ({ '.yarnrc.yml': `npmMinimalAgeGate: ${minutes}\n` });
+  const nested = (files) => { const p = app({ files: { ...files, 'x/app/package.json': JSON.stringify({ name: 'app', dependencies: { ...base, '@angular/core': '^21.0.0' } }), 'x/app/yarn.lock': '' } }); return { dir: join(p.dir, 'x', 'app') }; };
+  const cases = [
+    [yarn21({ files: rc(60) }), { YARN_NPM_MINIMAL_AGE_GATE: '120' }, 120],
+    [yarn21({ files: rc(60) }), { Yarn_Npm_Minimal_Age_Gate: '130' }, 130],
+    [nested({ ...rc(90), 'x/app/.yarnrc.yml': 'npmMinimalAgeGate: 60\n' }), homeWith('npmMinimalAgeGate: 200\n'), 60],
+    [nested(rc(90)), homeWith('npmMinimalAgeGate: 200\n'), 90],
+    [yarn21(), homeWith('npmMinimalAgeGate: 200\n'), 200],
+    [yarn21(), {}, 1440],
+  ];
+  for (const [proj, env, minutes] of cases) assert.equal((await ageOf(proj, { ...yarn, env }))?.minutes, minutes, JSON.stringify(env));
+});
+
+test('yarn reads a duration by its own grammar, and ng update only the whole minutes yarn prints, so a fraction holds back only the install', async () => {
+  // yarn 4.18.1 printed 3d as 4320, 90m as 90, "2h" as 120, 1w as 10080, 1.5h as 90, 30s as 0.5 and "60" as 60, and failed
+  // on every command over "1 d", 2days, 2H, -5 and 1e3. ng update parses what yarn prints with ^(\d+)(ms|s|m|h|d|w)?$,
+  // so 0.5 is no age to it, though yarn's install still holds a release back for half a minute.
+  const yarnAge = (value) => ageOf(yarn21({ files: { '.yarnrc.yml': `npmMinimalAgeGate: ${value}\n` } }), { manager: { '--version': '4.18.1' } });
+  for (const [value, minutes] of [['3d', 4320], ['90m', 90], ['"2h"', 120], ['1w', 10080], ['1.5h', 90], ['"60"', 60]]) {
+    const age = await yarnAge(value);
+    assert.deepEqual([age?.minutes, age?.ngUpdateReads], [minutes, true], value);
+  }
+  const half = await yarnAge('30s');
+  assert.deepEqual([half?.minutes, half?.ngUpdateReads], [0.5, false]);
+  for (const value of ['1 d', '2days', '2H', '-5', '1e3']) assert.match(await yarnAge(value), new RegExp(`\\.yarnrc\\.yml sets npmMinimalAgeGate to "${value}", which yarn 4\\.18\\.1 refuses: every yarn command fails on it until it is a number with an optional unit \\(ms, s, m, h, d or w\\), so ask the person to fix it$`), value);
+});
+
+test('yarn\'s own default comes with its version: a day from 4.15, none from 4.10 to 4.14, and no such setting before 4.10', async () => {
+  // @yarnpkg/cli-dist defines npmMinimalAgeGate with the default "1d" in 4.15.0 and 4.18.1, "0m" in 4.11.0 to 4.14.1, and
+  // 0 in 4.10.1, as a NUMBER read with parseInt, so 3d gave 3; 4.9.4 has no such setting, and 4.10.0 was never published.
+  // yarn prints its default, so ng update reads the same.
+  for (const [version, minutes] of [['4.18.1', 1440], ['4.15.0', 1440], ['4.14.1', undefined], ['4.10.1', undefined], ['4.9.4', undefined], ['1.22.22', undefined]]) {
+    assert.equal((await ageOf(yarn21(), { manager: { '--version': version } }))?.minutes, minutes, version);
+  }
+  assert.equal((await ageOf(yarn21({ files: { '.yarnrc.yml': 'npmMinimalAgeGate: 3d\n' } }), { manager: { '--version': '4.10.1' } }))?.minutes, 3);
+  assert.equal(await ageOf(yarn21({ files: { '.yarnrc.yml': 'npmMinimalAgeGate: 60\n' } }), { manager: { '--version': '4.9.4' } }), null);
+});
+
+test('yarn\'s version comes from the name of the yarnPath release, which yarn hands over to, before packageManager, and never from running it', async () => {
+  // yarn 4.18.1 ran its yarnPath release in its place unless YARN_IGNORE_PATH was set.
+  const repo = (yarnPath) => yarn21({ pin: 'yarn@4.18.1', files: { '.yarnrc.yml': `${yarnPath ? `yarnPath: ${yarnPath}\n` : ''}npmMinimalAgeGate: 3d\n` } });
+  const yarn = { manager: { '--version': '4.18.1' } };
+  const viaPath = await ageOf(repo('.yarn/releases/yarn-4.10.1.cjs'), yarn);
+  assert.deepEqual([viaPath?.version, viaPath?.minutes], ['4.10.1', 3]);
+  const pinned = await ageOf(repo(null), yarn);
+  assert.deepEqual([pinned?.version, pinned?.minutes], ['4.18.1', 4320], 'the control: packageManager');
+  const ignored = await ageOf(repo('.yarn/releases/yarn-4.10.1.cjs'), { ...yarn, env: { YARN_IGNORE_PATH: '1' } });
+  assert.equal(ignored?.version, '4.18.1');
+  const berry = repo('.yarn/releases/yarn-berry.cjs');
+  const r = await plan(world(), berry, { to: 22, ...yarn });
+  assert.deepEqual(r.asked, []);
+  assert.equal(r.plan.unchecked.find((u) => u.name === 'release age')?.reason, `${join(berry.dir, '.yarnrc.yml')} sets yarnPath to .yarn/releases/yarn-berry.cjs, whose name holds no version, and the plan doesn't run the repo's yarn to ask, so a release younger than yarn's minimum release age can still stop a command; ask the person to check it with yarn config get npmMinimalAgeGate`);
+});
+
+test('yarn fills a setting from the environment, reads the rc file YARN_RC_FILENAME names, and keeps the last of a key set twice', async () => {
+  // yarn 4.18.1: "${AGE}" with AGE=45 gave 45, "${AGE:-15}" with no AGE 15, and YARN_RC_FILENAME=.myrc.yml read that
+  // file; a key set twice gave the second. A name that isn't set and has no fallback fails every command.
+  const yarn = { manager: { '--version': '4.18.1' } };
+  const rc = (text, name = '.yarnrc.yml') => yarn21({ files: { [name]: text } });
+  assert.equal((await ageOf(rc('npmMinimalAgeGate: "${AGE}"\n'), { ...yarn, env: { AGE: '45' } }))?.minutes, 45);
+  assert.equal((await ageOf(rc('npmMinimalAgeGate: "${NG_HOP_UNSET_AGE:-15}"\n'), yarn))?.minutes, 15);
+  assert.match(await ageOf(rc('npmMinimalAgeGate: "${NG_HOP_UNSET_AGE}"\n'), yarn), /sets npmMinimalAgeGate to "\$\{NG_HOP_UNSET_AGE\}", which yarn 4\.18\.1 refuses/);
+  assert.equal((await ageOf(rc('npmMinimalAgeGate: 75\n', '.myrc.yml'), { ...yarn, env: { YARN_RC_FILENAME: '.myrc.yml' } }))?.minutes, 75);
+  assert.equal((await ageOf(rc('npmMinimalAgeGate: 10\nnpmMinimalAgeGate: 20\n'), yarn))?.minutes, 20);
 });
 
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
@@ -1674,7 +1936,7 @@ test('a library whose newest release is too young moves to the newest that is ol
   const text = (await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, text: true, manager: pnpm12 })).stdout;
   assert.match(text, /ui-lib: 21\.0\.0 -> 22\.0\.0; supports it \(\^22\.0\.0\); 22\.1\.0 is newer, but too young for pnpm and ng update until \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
   // The control: pnpm 10 has no minimum release age, and ng update reads none from it.
-  const pnpm10 = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': '10.33.0', 'config get minimum-release-age': 'undefined' } });
+  const pnpm10 = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': '10.33.0' } });
   assert.equal(libIn(pnpm10, 22, 'ui-lib').to, '22.1.0');
 });
 
@@ -1786,9 +2048,9 @@ test('a release younger than pnpm\'s minimum release age makes its major wait, w
   assert.ok(later.plan.hops[0].command.endsWith(' @acme/ui-core@22.0.0 @acme/ui-forms@22.0.0'));
 });
 
-test('the age is the package manager\'s own answer, and the wait is for the first release that fits', async () => {
+test('the age is the one the team set, and the wait is for the first release that fits', async () => {
   const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
-  const week = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { ...pnpm12, 'config get minimum-release-age': '10080' } });
+  const week = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 10080\n' } }), { to: 22, manager: pnpm12 });
   assert.equal(week.code, 2, week.stderr);
   assert.equal(week.plan.waiting.libs.find((l) => l.name === 'ui-lib').to, '22.0.0', 'in two days 22.0.0 is old enough, and 22.1.0 still is not');
   assert.equal(week.plan.waiting.until, ripeAt(lib, '22.0.0', 10080));
@@ -1796,8 +2058,8 @@ test('the age is the package manager\'s own answer, and the wait is for the firs
 
 test('yarn 4.18.1 holds a release back by npmMinimalAgeGate, while yarn 4.9.4, which doesn\'t know it, and yarn 1 hold nothing back', async () => {
   // yarn 4.18.1 printed 1440 with nothing set. yarn 4.9.4 failed: Couldn't find a configuration settings named "npmMinimalAgeGate".
-  const proj = () => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'yarn.lock': '' } });
-  const r = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': '4.18.1', 'config get npmMinimalAgeGate': '1440' } });
+  const proj = (files = {}) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', 'ui-lib': '^21.0.0' }, files: { 'yarn.lock': '', ...files } });
+  const r = await plan(world(youngLib()), proj(), { to: 22, manager: { '--version': '4.18.1' } });
   assert.equal(r.code, 2, r.stderr);
   assert.equal(r.plan.blockers[0].kind, 'too-young');
   assert.ok(r.plan.waiting.sooner.startsWith(`node ${quotePath(UPDATE)} --install-first ui-lib @angular/core@22`), r.plan.waiting.sooner);
@@ -1807,8 +2069,8 @@ test('yarn 4.18.1 holds a release back by npmMinimalAgeGate, while yarn 4.9.4, w
     assert.equal(free.code, 0, `${version}: ${free.stderr}`);
     assert.deepEqual([free.plan.releaseAge, free.plan.unchecked.filter((u) => u.name === 'release age')], [null, []], version);
   }
-  // ng update's parser takes a unit too, as in 3d.
-  const days = await plan(world(), proj(), { to: 22, manager: { '--version': '4.18.1', 'config get npmMinimalAgeGate': '3d' } });
+  // yarn's grammar takes a unit too, as in 3d, which it prints as 4320.
+  const days = await plan(world(), proj({ '.yarnrc.yml': 'npmMinimalAgeGate: 3d\n' }), { to: 22, manager: { '--version': '4.18.1' } });
   assert.equal(days.plan.releaseAge.minutes, 3 * 1440);
 });
 
