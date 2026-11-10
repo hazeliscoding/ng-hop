@@ -311,8 +311,10 @@ test('with one release that has no publish time and one too young, only the youn
   const r = await plan(world(a, b), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0' }), { to: 22, manager: yarn18 });
   assert.equal(r.code, 2, r.stderr);
   assert.equal(r.plan.waiting.sooner, `node ${quotePath(UPDATE)} --install-first ui-b @angular/core@22 @angular/cli@22 ui-a@22.0.0 ui-b@22.0.0`);
-  // The registry dating ui-a's leaves the major waiting on ui-b's, so the result and the major give that time too.
-  const text = (await plan(world(a, b), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0' }), { to: 22, text: true, manager: yarn18 })).stdout;
+  // The registry dating ui-a's leaves the major waiting on ui-b's, so the result and the major give that time too, the
+  // last to be old enough, though ui-c's, out ten hours and listed after it, is old enough first.
+  const c = pkg('ui-c', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 600 } });
+  const text = (await plan(world(a, b, c), yarnApp({ 'ui-a': '^21.0.0', 'ui-b': '^21.0.0', 'ui-c': '^21.0.0' }), { to: 22, text: true, manager: yarn18 })).stdout;
   const at = shown(ripeAt(b, '22.0.0', 1440));
   assert.ok(text.includes(`\nResult: BLOCKED. Angular 22 needs releases with no publish time on the registry, which yarn holds back however old they are, and releases too young for yarn and ng update until ${at}, so this project stays on 21 until the registry gives them one and that time has passed.\n`), text);
   assert.ok(text.includes(`\nAngular 22 (22.2.0), waiting on a publish time from the registry, and until ${at}\n`), text);
