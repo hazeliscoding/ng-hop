@@ -361,6 +361,18 @@ test('yarn updater: --install-first installs through the project\'s yarn, and th
   ]);
 });
 
+test('yarn updater: npm\'s own folder is made before anything is installed first, so failing to make it changes nothing', async () => {
+  // With TEMP, TMP and TMPDIR naming a folder that doesn't exist, mkdtemp failed after --install-first had changed
+  // package.json and yarn.lock, and left them changed: ENOENT: no such file or directory, mkdtemp.
+  const f = firstFixture({ ...acme, devEngines: { packageManager: { name: 'yarn', version: '4.18.1' } } }, { yarn: true });
+  const missing = join(f.project, '..', 'no-such-temp');
+  const r = await runScript(UPDATE, ['--json', ...first, ...acmeHop], { cwd: f.project, env: { ...f.env, TEMP: missing, TMP: missing, TMPDIR: missing } });
+  assert.equal(r.code, 1, r.stdout);
+  assert.match(JSON.parse(r.stdout).error, /mkdtemp/);
+  assert.deepEqual(f.log(), [], 'nothing was installed first');
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: f.project, encoding: 'utf8' }).stdout, '');
+});
+
 test('pnpm updater: --install-first still starts from a clean tree, with the working run above as its control', async () => {
   // Leftovers from an interrupted major dirty the same files, and ng update would skip their migrations.
   const f = firstFixture(acme);

@@ -176,6 +176,15 @@ function main() {
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
   const options = { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 };
+  // npm checks devEngines.packageManager in the package.json of the folder it runs for, and npm 11.19.0 and 10.9.9
+  // refused a yarn project whose pin there names yarn: EBADDEVENGINES. So npm runs for an empty folder of its own, which
+  // --prefix names, and still starts the CLI in the project. It reads that folder's .npmrc as the project's, so the
+  // project's goes in, for its registry and token. The folder is made before anything is installed first, so failing
+  // to make it changes nothing.
+  // shortcut: --prefix also moves npm's global npmrc into that folder, and the .npmrc of an npm workspace root above the
+  // project, which npm read in place of the project's, goes unread; pass either along if a team keeps its registry there.
+  npmFolder = yarn ? mkdtempSync(join(tmpdir(), 'ng-hop-npm-')) : null;
+  if (npmFolder && existsSync(join(cwd, '.npmrc'))) copyFileSync(join(cwd, '.npmrc'), join(npmFolder, '.npmrc'));
   if (first.length) {
     // pnpm keeps the lockfile beside pnpm-workspace.yaml, which can be above the app.
     const workspace = yarn ? null : findWorkspaceFile(cwd);
@@ -197,18 +206,9 @@ function main() {
   // script's own, checked above.
   const update = positionals.filter((spec) => !firstNames.includes(spec.slice(0, spec.lastIndexOf('@'))));
   const dirty = inlined || first.length ? ['--allow-dirty'] : [];
-  // npm checks devEngines.packageManager in the package.json of the folder it runs for, and npm 11.19.0 and 10.9.9
-  // refused a yarn project whose pin there names yarn: EBADDEVENGINES. So npm runs for an empty folder of its own, which
-  // --prefix names, and still starts the CLI in the project. It reads that folder's .npmrc as the project's, so the
-  // project's goes in, for its registry and token.
-  // shortcut: --prefix also moves npm's global npmrc into that folder, and the .npmrc of an npm workspace root above the
-  // project, which npm read in place of the project's, goes unread; pass either along if a team keeps its registry there.
-  const folder = yarn ? mkdtempSync(join(tmpdir(), 'ng-hop-npm-')) : null;
-  if (folder && existsSync(join(cwd, '.npmrc'))) copyFileSync(join(cwd, '.npmrc'), join(folder, '.npmrc'));
-  const args = yarn ? ['exec', '--yes', `--prefix=${folder}`, `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
+  const args = yarn ? ['exec', '--yes', `--prefix=${npmFolder}`, `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
   const run = (argv) => spawnSync(runner.file, [...runner.prefix, ...argv], options);
   const result = run(args);
-  if (folder) rmSync(folder, { recursive: true, force: true });
   let exitCode = result.status ?? 1;
   let catalog = null, install = null;
   if (inlined) {
@@ -231,6 +231,8 @@ function main() {
   return exitCode;
 }
 
+// The folder a yarn hop's npm runs for holds a copy of the project's .npmrc, token included, so it goes however main ends.
+let npmFolder = null;
 try { process.exitCode = main(); }
 catch (error) {
   const message = redact(error.message);
@@ -238,3 +240,4 @@ catch (error) {
   else console.error(message);
   process.exitCode = 1;
 }
+finally { if (npmFolder) rmSync(npmFolder, { recursive: true, force: true }); }
