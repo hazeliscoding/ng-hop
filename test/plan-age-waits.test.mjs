@@ -99,6 +99,22 @@ test('a release the registry dates so late that the age ends past the year 9999 
   assert.equal(libIn(yarn, 22, 'ui-lib').to, '22.1.0');
 });
 
+test('a publish time the registry gives as a number is the date pnpm and yarn read it as, and true is no crash either', async () => {
+  // pnpm 10.34.9 and 11.28.11 and yarn 4.11.0 and 4.18.1 refused a release whose time was a number 5 minutes back, which
+  // they read with new Date(n), and took one whose time was true, which that reads as 1970. The plan stopped on both with
+  // TypeError: (iso || "").slice is not a function.
+  const numbered = youngLib();
+  numbered.time['22.0.0'] = Date.now() - 10 * 60e3;
+  for (const [proj, manager] of [[pnpm21({ 'ui-lib': '^21.0.0' }), pnpm12], [yarnApp(), yarn18]]) {
+    const r = await plan(world(numbered), proj, { to: 22, manager });
+    assert.deepEqual([r.code, r.plan?.waiting?.until], [2, new Date(numbered.time['22.0.0'] + 1440 * 60e3).toISOString()], `${manager['--version']}: ${r.stderr}`);
+  }
+  const yes = youngLib();
+  yes.time['22.0.0'] = true;
+  const r = await plan(world(yes), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+  assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], r.stderr);
+});
+
 test('a library whose newest release is too young moves to the newest that is old enough, as ng update does, and names the young one', async () => {
   const lib = pkg('ui-lib', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 5 * 1440 }, '22.1.0': { peer: '^22.0.0', ago: 10 } });
   const r = await plan(world(lib), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });

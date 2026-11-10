@@ -38,7 +38,7 @@ const VALID_NAME = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i;
 
 const stableOnly = (versions) => versions.filter((v) => semver.valid(v) && !semver.prerelease(v));
 const newestFirst = (versions) => [...versions].sort(semver.rcompare);
-const day = (iso) => (iso || '').slice(0, 10) || null;
+const day = (iso) => (typeof iso === 'string' && iso.slice(0, 10)) || null;
 // From this CLI on, ng update skips a release younger than the package manager's minimum release age
 // (update-resolver.js, isReleaseAgeSatisfied), so on a hop to it only installing first gets a young library past it.
 const NG_UPDATE_AGE = '22.1.0';
@@ -160,7 +160,13 @@ function registryClient(config, dirs, npm) {
     if (!cache.has(key)) cache.set(key, load());
     return cache.get(key);
   };
-  const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)));
+  // pnpm and yarn read a publish time given as a number with new Date(n), so it becomes that date here. 0, which pnpm
+  // counts as no time, stays 0.
+  const dated = (doc) => {
+    for (const [v, t] of Object.entries(doc?.time ?? {})) if (typeof t === 'number' && t && Number.isFinite(new Date(t).getTime())) doc.time[v] = new Date(t).toISOString();
+    return doc;
+  };
+  const get = (name, full = false) => cached(`${name}|${full}`, () => fetchOnce(baseFor(name) + name.replace('/', '%2F'), full ? 'application/json' : 'application/vnd.npm.install-v1+json', () => viaNpm(name)).then(dated));
   // One release's manifest, a few kilobytes, where a whole document can run to megabytes.
   const release = (name, version) => cached(`${name}@${version}`, () => fetchOnce(`${baseFor(name)}${name.replace('/', '%2F')}/${encodeURIComponent(version)}`, 'application/json', () => viaNpmRelease(name, version)));
   // A scope with a registry of its own, apart from the default one, is how a company publishes its packages, and how a
