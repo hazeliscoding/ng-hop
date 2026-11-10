@@ -356,6 +356,13 @@ test('npm, bun and ng update count a release with no publish time old enough, an
     const lib = (r.plan.waiting ?? r.plan.hops.at(-1))?.libs.find((l) => l.name === 'ui-lib');
     assert.deepEqual([r.code, lib?.to], [code, '22.0.0'], `${version}: ${r.stderr}`);
   }
+  // A time of null or "" drops them too: pnpm 11.23.0's dropIncompletePublishTimes asks !meta.time[version].
+  for (const time of [null, '']) {
+    const falsy = undated({ '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+    falsy.time['21.0.0'] = time;
+    const r = await plan(world(falsy), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
+    assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], `${JSON.stringify(time)}: ${r.stderr}`);
+  }
   // So the release with no time is taken too, where it's the one the hop needs. pnpm 11.0.0 and 11.22.0 take it then as
   // well, passing it over only while a release dated and old enough fits: under minimumReleaseAge 1440 each installed
   // 2.0.0 for ^2.0.0 where 1.0.0 was dated and 2.0.0 had no time, or a null one, while pnpm 10.34.9 refused it.
