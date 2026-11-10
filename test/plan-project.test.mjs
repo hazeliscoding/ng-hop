@@ -299,6 +299,11 @@ test('pnpm: a registry line with no value stops the plan with a reason naming wh
       const appEmpty = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': `${key}=\n` }, '10.34.9');
       assert.deepEqual([appEmpty.code, appEmpty.stderr.trim()], [1, `${join(appEmpty.w.dir, '.npmrc')} sets ${key} without an address, which npm reads as "" and pnpm 10 refuses, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
     }
+    // npm 11.19.0 listed `@acme:registry=false` as false and `=null` as null, no address either.
+    for (const value of ['false', 'null']) {
+      const listed = await run({ '.npmrc': `@acme:registry=${value}\nregistry=${mirror.url}\n` }, '12.16.1');
+      assert.deepEqual([listed.code, listed.stderr.trim()], [1, `An .npmrc npm reads in ${listed.w.root} sets @acme:registry without an address, which npm reads as ${value}, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+    }
     // The control: pnpm 12.16.1 reads only the root's .npmrc, so the app's line counts for nothing.
     const later = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': 'registry\r\nsave-exact=true\r\n' }, '12.16.1');
     assert.equal(later.code, 0, later.stderr);
