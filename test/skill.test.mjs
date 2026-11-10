@@ -365,7 +365,10 @@ test('the test script names every test file once, since node --test given a list
 
 test('SECURITY.md says a yarn hop copies the project\'s .npmrc, token included, into a temporary folder', () => {
   assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8'), /copyFileSync\(join\(cwd, '\.npmrc'\)/, 'positive control: update.mjs still copies it');
-  assert.match(readFileSync(join(ROOT, 'SECURITY.md'), 'utf8'), /^- \*\*`update\.mjs`\*\*[^\n]*`\.npmrc`, tokens included,[^\n]*temporary folder/m);
+  const bullet = readFileSync(join(ROOT, 'SECURITY.md'), 'utf8').split('\n').find((line) => line.startsWith('- **`update.mjs`**'));
+  assert.ok(bullet, 'SECURITY.md has to say what update.mjs does');
+  assert.match(bullet, /`\.npmrc`, tokens included/);
+  assert.match(bullet, /temporary folder/);
 });
 
 test('the marketplace points at the plugin', () => {
