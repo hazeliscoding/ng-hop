@@ -233,6 +233,9 @@ test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and old
   } finally {
     await company.close();
   }
+  // With pnpm's version unknown the app's keys still count, as pnpm 10 reads them, so a team registry kept there isn't
+  // passed over for a clean bill of health.
+  blockedOnUiCore(await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': null } }));
 });
 
 test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm reads only the workspace root\'s', async () => {
