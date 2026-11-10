@@ -255,13 +255,15 @@ test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm re
     assert.equal(r.plan.unchecked.some((u) => u.reason.includes(`pnpm ${version} is a prerelease`)), version.includes('-'), version);
   }
   // Nor does its token: with the token only in the app's .npmrc, pnpm 11.28.11 and 12.16.1 got a 401 from the registry
-  // the root's names, so the plan stops too instead of reading with that token.
+  // the root's names, so the plan stops too instead of reading with that token. npm 11.19.0 printed the failure as JSON,
+  // whose first line, {, was all the reason said.
   const company = await startRegistry([uiCore()], { requireAuth: true });
   try {
     const host = company.url.replace(/^http:/, '');
-    const r = await plan(world(), acmeWorkspace({ files: { '.npmrc': `@acme:registry=${company.url}\n`, 'apps/web/.npmrc': `${host}:_authToken=test-only\n` } }), { to: 21, manager: { '--version': '12.16.1' } });
+    const w = acmeWorkspace({ files: { '.npmrc': `@acme:registry=${company.url}\n`, 'apps/web/.npmrc': `${host}:_authToken=test-only\n` } });
+    const r = await plan(world(), w, { to: 21, manager: { '--version': '12.16.1' } });
     assert.equal(r.code, 1, r.stdout);
-    assert.match(r.stderr, /^Could not read @acme\/ui-core from the registry through npm/);
+    assert.equal(r.stderr.trim(), `Could not read @acme/ui-core from the registry through npm: E401 401 Unauthorized - GET ${company.url}@acme%2fui-core - auth required; pnpm 11 and 12 read a token only from the workspace root's .npmrc, ${join(w.root, '.npmrc')}, and not from ${join(w.dir, '.npmrc')}`);
   } finally {
     await company.close();
   }

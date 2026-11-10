@@ -92,9 +92,16 @@ async function runNpm(npm, args, options) {
 // ---- Registry access ------------------------------------------------------------------------------------------
 
 // dirs: where npm reads the project's .npmrc, a pnpm workspace's root first, then on pnpm 10 the app's own folder.
-// npm: its script.
-function registryClient(config, dirs, npm) {
+// npm: its script. unread: why a token in another .npmrc goes unread, said with a 401 or 403.
+function registryClient(config, dirs, npm, unread = null) {
   const cache = new Map();
+  // npm --json prints a failure as JSON, whose first line is only {, so the reason is its code and summary.
+  const failure = (err) => {
+    let error;
+    try { ({ error } = JSON.parse(err.stdout)); } catch { /* not npm's JSON, so its own words */ }
+    const why = error?.code ? `${error.code} ${error.summary ?? ''}` : `${err.message || ''}`.split('\n')[0];
+    return `${plainLine(why, 200)}${unread && /^E40[13]$/.test(error?.code) ? `; ${unread}` : ''}`;
+  };
   const baseFor = (name) => {
     const scope = name.startsWith('@') ? name.split('/')[0] : null;
     const url = (scope && config[`${scope}:registry`]) || config.registry || 'https://registry.npmjs.org/';
@@ -124,7 +131,7 @@ function registryClient(config, dirs, npm) {
     } catch (err) {
       const text = `${err.stdout || ''}${err.message || ''}`;
       if (/E404/.test(text)) return null;
-      throw new PlanError(`Could not read ${name} from the registry through npm: ${text.split('\n')[0].slice(0, 200)}`);
+      throw new PlanError(`Could not read ${name} from the registry through npm: ${failure(err)}`);
     }
   }
 
@@ -136,7 +143,7 @@ function registryClient(config, dirs, npm) {
     } catch (err) {
       const text = `${err.stdout || ''}${err.message || ''}`;
       if (/E404/.test(text)) return null;
-      throw new PlanError(`Could not read ${name}@${version} from the registry through npm: ${text.split('\n')[0].slice(0, 200)}`);
+      throw new PlanError(`Could not read ${name}@${version} from the registry through npm: ${failure(err)}`);
     }
   }
 
@@ -1123,7 +1130,8 @@ async function buildPlan({ projectDir, to, next = false }) {
     const own = fromApp.has(blank);
     throw new PlanError(`${own ? appRc : `An .npmrc npm reads in ${configDir}`} sets ${blank} without an address, which npm reads as ${plainLine(JSON.stringify(config[blank]), 60)}${own ? ' and pnpm 10 refuses' : ''}, so the plan can't tell which registry to ask; ask the person to fix that line.`);
   }
-  const registry = registryClient(config, appKeys ? [configDir, projectDir] : [configDir], npm);
+  const unread = configDir !== projectDir && !appKeys && existsSync(appRc) ? `pnpm 11 and 12 read a token only from the workspace root's .npmrc, ${join(configDir, '.npmrc')}, and not from ${appRc}` : null;
+  const registry = registryClient(config, appKeys ? [configDir, projectDir] : [configDir], npm, unread);
   const asked = releaseAge(project, config, found);
   let age = asked?.unknown ? null : asked;
   const now = Date.now();
