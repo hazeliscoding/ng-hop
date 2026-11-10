@@ -1246,15 +1246,22 @@ async function buildPlan({ projectDir, to, next = false }) {
   const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
   // A release the registry dates so late that the age ends past the year 9999 has no time minute can print, and past the
   // year 275760 none a Date can hold: ui-lib 22.0.0 dated +275760-09-12 stopped the plan with "RangeError: Invalid time
-  // value". Every release the plan gives a time is in these documents, so one like that leaves the age unknown. pnpm
-  // from 11.23 reads no time in a document it checks none of, so a date there is never read.
-  const late = age?.minutes && [['@angular/core', coreDoc], ['@angular/cli', cliDoc], ...docs].filter(([, doc]) => !checksNone(doc))
-    .flatMap(([name, doc]) => Object.keys(doc?.versions ?? {}).filter((v) => Date.parse(doc.time?.[v] ?? '') + age.minutes * 60e3 >= Date.UTC(10000, 0)).map((v) => [name, v, doc.time[v]]))[0];
-  if (late) {
-    const [name, v, time] = late;
-    plan.unchecked.push({ name: 'release age', reason: `the registry says ${name} ${plainLine(v, 60)} came out at "${plainLine(String(time), 60)}", and ${age.manager}'s minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ${name} time` });
+  // value". Every release the plan gives a time is in these documents. pnpm 10.34.9 to 12.16.1 and yarn 4.10.1 to 4.18.1
+  // held a library's such release back, so the plan leaves it out and keeps the age for the rest. One of Angular's own
+  // leaves the age unknown. pnpm from 11.23 reads no time in a document it checks none of, so a date there is never read.
+  // shortcut: a library whose only release that fits is left out reads as having none for the major; give it a wait of
+  // its own if a registry ever dates one that late for a release a hop needs.
+  const lateIn = ([name, doc]) => (doc && !checksNone(doc) ? Object.keys(doc.versions).filter((v) => Date.parse(doc.time?.[v] ?? '') + age.minutes * 60e3 >= Date.UTC(10000, 0)).map((v) => [name, v, doc.time[v]]) : []);
+  const tooLate = (name, v, time, so) => ({ name: 'release age', reason: `the registry says ${name} ${plainLine(v, 60)} came out at "${plainLine(String(time), 60)}", and ${age.manager}'s minimum release age from then ends past the year 9999, too late for the plan to give a date, so ${so}; ask the person to check that time with npm view ${name} time` });
+  const lateAngular = age?.minutes ? [['@angular/core', coreDoc], ['@angular/cli', cliDoc]].flatMap(lateIn)[0] : null;
+  if (lateAngular) {
+    plan.unchecked.push(tooLate(...lateAngular, 'a release younger than that age can still stop a command'));
     age = null;
     plan.releaseAge = null;
+  }
+  for (const [name, v, time] of age?.minutes ? [...docs].flatMap(lateIn) : []) {
+    plan.unchecked.push(tooLate(name, v, time, `the plan leaves that release out, as ${age.manager} holds it back`));
+    delete docs.get(name).versions[v];
   }
   // The picks read only releases old enough. Every lookup of one release's manifest still reads the whole document.
   const ripe = new Map([...docs].map(([name, doc]) => [name, aged(doc, project.installed(name)?.version)]));

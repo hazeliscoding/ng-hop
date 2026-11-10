@@ -74,29 +74,39 @@ test('an age too long to give a date for is unknown, naming where it is set, and
   assert.deepEqual([near.code, near.plan.waiting?.until.slice(0, 2), seconds.code, seconds.plan.waiting?.until.slice(0, 2)], [2, '98', 2, '23'], near.stderr + seconds.stderr);
 });
 
-test('a release the registry dates so late that the age ends past the year 9999 leaves the age unknown, naming it, and the plan neither crashes nor gives a time', async () => {
+test('a library release the registry dates so late that the age ends past the year 9999 is left out, naming it, and the plan neither crashes nor gives a time', async () => {
   // Under pnpm 12.16.1's default age of a day, a registry dating ui-lib 22.0.0 +275760-09-12, the last day a Date holds,
   // stopped the plan with RangeError: Invalid time value, and 9999-12-31 printed BLOCKED until +010000-01-01 12 UTC. A
   // time the registry gives as a list, which Date.parse reads as its text, is quoted as text too.
   const dated = (time) => { const lib = youngLib(); lib.time['22.0.0'] = time; return world(lib); };
   for (const time of ['+275760-09-12T12:00:00.000Z', '9999-12-31T12:00:00.000Z', ['9999-12-31T12:00:00.000Z']]) {
     const r = await plan(dated(time), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22, text: true });
-    assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.stdout.includes(`\n  release age: the registry says ui-lib 22.0.0 came out at "${time}", and pnpm's minimum release age from then ends past the year 9999, too late for the plan to give a date, so a release younger than that age can still stop a command; ask the person to check that time with npm view ui-lib time.`), r.stdout);
-    assert.doesNotMatch(r.stdout, /until|waiting/);
+    assert.equal(r.code, 2, r.stderr);
+    assert.ok(r.stdout.includes(`\n  release age: the registry says ui-lib 22.0.0 came out at "${time}", and pnpm's minimum release age from then ends past the year 9999, too late for the plan to give a date, so the plan leaves that release out, as pnpm holds it back; ask the person to check that time with npm view ui-lib time.`), r.stdout);
+    assert.doesNotMatch(r.stdout, /UTC|waiting/);
   }
   // The control: a release dated in the year 9000 is too young for a day after that, and the plan waits for it.
   const r = await plan(dated('9000-01-01T00:00:00.000Z'), pnpm21({ 'ui-lib': '^21.0.0' }, { pin: 'pnpm@12.16.1' }), { to: 22 });
   assert.deepEqual([r.code, r.plan.waiting?.until], [2, '9000-01-02T00:00:00.000Z'], r.stderr);
-  // With the age unknown, nothing is held back, a release with no time under yarn 4.18.1 included, whose wait the plan
-  // worked out from an age it no longer had: TypeError: Cannot read properties of null (reading 'before').
+  // The age still holds back the rest. Beside a 1.2.0 dated 9999, pnpm 10.34.9, yarn 4.11.0 and yarn 4.18.1 took 1.0.0
+  // for ^1.0.0 over a 1.1.0 with no time, where the plan, with the age gone, put the release with no time in its Run: line.
   const lib = youngLib();
   lib.time['22.0.0'] = '+275760-09-12T12:00:00.000Z';
   lib.versions['22.1.0'] = { ...lib.versions['22.0.0'], version: '22.1.0' };
   lib['dist-tags'].latest = '22.1.0';
-  const yarn = await plan(world(lib), yarnApp(), { to: 22, manager: yarn18 });
-  assert.equal(yarn.code, 0, yarn.stderr);
-  assert.equal(libIn(yarn, 22, 'ui-lib').to, '22.1.0');
+  const pnpm10 = pnpm21({ 'ui-lib': '^21.0.0' }, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1440\n' } });
+  for (const [proj, manager] of [[yarnApp(), yarn18], [pnpm10, { '--version': '10.34.9' }]]) {
+    const held = await plan(world(lib), proj, { to: 22, manager });
+    assert.deepEqual([held.code, held.plan.blockers.map((b) => [b.name, b.version, b.noPublishTime])], [2, [['ui-lib', '22.1.0', true]]], `${manager['--version']}: ${held.stderr}`);
+  }
+  // Angular's own release dated that late still leaves the age unknown, and nothing is held back, a release with no time
+  // under yarn 4.18.1 included, whose wait the plan worked out from an age it no longer had: TypeError: Cannot read
+  // properties of null (reading 'before').
+  const [core, compiler] = angular();
+  youngPatch(core, '22.3.0', '22.2.0');
+  core.time['22.3.0'] = '+275760-09-12T12:00:00.000Z';
+  const yarn = await plan([core, compiler, typescript(), pkg('rxjs', { '7.8.2': {} }), undated()], yarnApp(), { to: 22, manager: yarn18 });
+  assert.deepEqual([yarn.code, libIn(yarn, 22, 'ui-lib')?.to, yarn.plan.releaseAge], [0, '22.0.0', null], yarn.stderr);
   // pnpm from 11.23 reads no time in a document where a release has none, and pnpm view prints it none, so a date past
   // 9999 there never counts, and another library's young release still waits. pnpm 11.28.11 refused a young release
   // asked for by name, and installed one dated 9999 from a document with a release that had no time.
