@@ -118,6 +118,10 @@ test('running ng through the wrong manager or a pinned pnpm has its errors in tr
   // pnpm 10.34.9 under managePackageManagerVersions: true, offline, retried for about 74 s and then said this, where a
   // registry with no pnpm answered ERR_PNPM_FETCH_404.
   assert.ok(trouble.includes('ERR_PNPM_META_FETCH_FAIL'));
+  // package-manager-strict-version stops pnpm 10.34.9 only once the runner's setting keeps it from fetching the pin, and
+  // COREPACK_ENABLE_STRICT=0 in the environment lifts it, as pnpm's own hint says, which is the person's call.
+  assert.match(trouble, /`COREPACK_ENABLE_STRICT=0`/);
+  assert.doesNotMatch(trouble, /whatever the environment says/);
 });
 
 test('under yarn\'s Plug\'n\'Play the app is checked with yarn ng serve, since smoke.mjs finds no CLI there', () => {
