@@ -167,8 +167,9 @@ test('yarn updater: the target CLI runs from npm\'s own cache, so Angular never 
   writeFileSync(npm, driverSource);
   const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm } });
   assert.equal(r.code, 0, r.stderr || r.stdout);
-  // npm runs for a folder of its own, as the devEngines test below explains.
-  assert.deepEqual(f.read().args.filter((arg) => !arg.startsWith('--prefix=')), ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', ...packages]);
+  // npm runs for the project itself, which has no devEngines, so it reads its global npmrc: with --prefix, npm 11.19.0
+  // and 10.9.9 read none, and a hop that needed the proxy set there stopped with ECONNREFUSED, where this one ran.
+  assert.deepEqual(f.read().args, ['exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update', ...packages]);
   assert.equal(f.read().dispatch, 'true', 'the target CLI keeps control instead of handing back to the app\'s old one');
 });
 
@@ -201,11 +202,15 @@ test('yarn updater: npm runs the target CLI for an empty folder of its own, sinc
   writeFileSync(npm, devEnginesDriver);
   const refused = spawnSync(process.execPath, [npm, 'exec', '--yes', '--package=@angular/cli@22', '--', 'ng', 'update'], { cwd: f.project, env: { ...process.env, ...f.env, TEST_RC: rc }, encoding: 'utf8' });
   assert.match(refused.stderr, /EBADDEVENGINES/, 'positive control: the stand-in refuses the project as npm does');
-  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm, TEST_RC: rc } });
+  // --prefix also makes npm read its global npmrc from that folder, which loses its proxy, https-proxy and cafile, so npm
+  // is given its own: etc/npmrc under PREFIX, as npm 11.19.0 placed it. npm test sets the npm_config_ names itself.
+  const globalPrefix = join(f.root, 'global');
+  const r = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm, TEST_RC: rc, PREFIX: globalPrefix, npm_config_globalconfig: '', npm_config_prefix: '' } });
   assert.equal(r.code, 0, r.stderr || r.stdout);
   const called = f.read();
   const prefix = called.args.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
   assert.ok(prefix && !existsSync(prefix), `npm ran for a folder of its own, removed after: ${called.args.join(' ')}`);
+  assert.ok(called.args.includes(`--globalconfig=${join(globalPrefix, 'etc', 'npmrc')}`), `npm reads its own global npmrc: ${called.args.join(' ')}`);
   assert.ok(called.args.indexOf(`--prefix=${prefix}`) < called.args.indexOf('--'), `--prefix is npm's own option, not ng's: ${called.args.join(' ')}`);
   // Inside the project, the copied .npmrc would be an untracked file while ng update runs, which Angular CLI 22's clean
   // check refuses: Repository is not clean. Please commit or stash any changes before updating.

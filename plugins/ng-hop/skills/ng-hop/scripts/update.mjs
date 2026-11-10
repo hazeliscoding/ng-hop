@@ -157,7 +157,7 @@ function main() {
   // that young is installed first, in the form package.json gives it now (^, ~ or exact, as ng update writes it), and
   // ng update moves the rest. Never Angular itself, whose migrations only ng update runs.
   const firstNames = [...new Set(values['install-first'] || [])];
-  const manifest = firstNames.length ? JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) : {};
+  const manifest = firstNames.length || yarn ? JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')) : {};
   const first = firstNames.map((name) => {
     const version = semver.valid(requested.get(name) ?? ''), now = manifest.dependencies?.[name] ?? manifest.devDependencies?.[name];
     if (!version || name === '@angular/core' || name === '@angular/cli' || typeof now !== 'string' || !semver.validRange(now)) throw new Error(`--install-first takes a library the command names at an exact version, which package.json lists with a version range, and never Angular itself. ${name} isn't one. ${unchanged}`);
@@ -176,15 +176,19 @@ function main() {
   for (const key of Object.keys(env)) if (Object.keys(controls).some(owned => owned.toLowerCase() === key.toLowerCase())) delete env[key];
   Object.assign(env, controls);
   const options = { cwd, env, encoding: 'utf8', windowsHide: true, stdio: values.json ? 'pipe' : 'inherit', maxBuffer: 64 * 1024 * 1024 };
-  // npm checks devEngines.packageManager in the package.json of the folder it runs for, and npm 11.19.0 and 10.9.9
-  // refused a yarn project whose pin there names yarn: EBADDEVENGINES. So npm runs for an empty folder of its own, which
-  // --prefix names, and still starts the CLI in the project. It reads that folder's .npmrc as the project's, so the
-  // project's goes in, for its registry and token. The folder is made before anything is installed first, so failing
-  // to make it changes nothing.
-  // shortcut: --prefix also moves npm's global npmrc into that folder, and the .npmrc of an npm workspace root above the
-  // project, which npm read in place of the project's, goes unread; pass either along if a team keeps its registry there.
-  npmFolder = yarn ? mkdtempSync(join(tmpdir(), 'ng-hop-npm-')) : null;
+  // npm checks devEngines in the package.json of the folder it runs for, and npm 11.19.0 and 10.9.9 refused a yarn
+  // project whose devEngines.packageManager names yarn: EBADDEVENGINES. So for a project with devEngines, npm runs for an
+  // empty folder of its own, which --prefix names, and still starts the CLI in the project. It reads that folder's
+  // .npmrc as the project's, so the project's goes in, for its registry and token. --prefix also moves npm's global npmrc
+  // into that folder, which lost its proxy, https-proxy and cafile, so npm is told its own: npm_config_globalconfig, or
+  // etc/npmrc under npm_config_prefix, PREFIX, or Node's folder on Windows and the one above it elsewhere, as npm 11.19.0
+  // placed it. The folder is made before anything is installed first, so failing to make it changes nothing.
+  // shortcut: a prefix set in an .npmrc moves npm's global npmrc too, and the .npmrc of an npm workspace root above the
+  // project, which npm read in place of the project's, goes unread; pass either along if a team keeps settings there.
+  npmFolder = yarn && manifest?.devEngines !== undefined ? mkdtempSync(join(tmpdir(), 'ng-hop-npm-')) : null;
   if (npmFolder && existsSync(join(cwd, '.npmrc'))) copyFileSync(join(cwd, '.npmrc'), join(npmFolder, '.npmrc'));
+  const npmSetting = (name) => Object.entries(process.env).find(([key]) => key.toLowerCase() === name)?.[1];
+  const globalconfig = npmSetting('npm_config_globalconfig') || join(npmSetting('npm_config_prefix') || process.env.PREFIX || (process.platform === 'win32' ? dirname(process.execPath) : dirname(dirname(process.execPath))), 'etc', 'npmrc');
   if (first.length) {
     // pnpm keeps the lockfile beside pnpm-workspace.yaml, which can be above the app.
     const workspace = yarn ? null : findWorkspaceFile(cwd);
@@ -206,7 +210,7 @@ function main() {
   // script's own, checked above.
   const update = positionals.filter((spec) => !firstNames.includes(spec.slice(0, spec.lastIndexOf('@'))));
   const dirty = inlined || first.length ? ['--allow-dirty'] : [];
-  const args = yarn ? ['exec', '--yes', `--prefix=${npmFolder}`, `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
+  const args = yarn ? ['exec', '--yes', ...(npmFolder ? [`--prefix=${npmFolder}`, `--globalconfig=${globalconfig}`] : []), `--package=${cli[0]}`, '--', 'ng', 'update', ...update, ...dirty] : ['dlx', cli[0], 'update', ...update, ...dirty];
   const run = (argv) => spawnSync(runner.file, [...runner.prefix, ...argv], options);
   const result = run(args);
   let exitCode = result.status ?? 1;
