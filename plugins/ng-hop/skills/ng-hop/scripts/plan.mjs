@@ -1084,9 +1084,8 @@ async function buildPlan({ projectDir, to, next = false }) {
   // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10.34.9 lays the app's own over it,
   // where pnpm 11.0.0, 11.28.11 and 12.16.1 passed over the app's, and npm reads one folder's. So npm is asked at the
   // root, then on pnpm 10 for the keys the app's own file sets, since its listing holds every default too.
-  // --workspaces=false keeps npm in the app's folder below a root that declares them.
-  // shortcut: with pnpm's version unknown, the app's keys count, as pnpm 10 reads them; ask the person for the version if
-  // an app's .npmrc ever names a registry its root's doesn't.
+  // --workspaces=false keeps npm in the app's folder below a root that declares them. With pnpm's version unknown, the
+  // app's keys count, as pnpm 10 reads them, and a registry or login key the root's file doesn't set the same is named.
   const npm = npmScript(project);
   const npmConfig = (cwd, args = []) => runNpm(npm, ['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
@@ -1099,7 +1098,7 @@ async function buildPlan({ projectDir, to, next = false }) {
   if (preManager) found.version = semver.coerce(preManager).version;
   const appRc = join(projectDir, '.npmrc');
   const appKeys = configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
-  const fromApp = new Set();
+  const fromApp = new Set(), swayed = [];
   if (appKeys) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
     // Its keys as npm 11.19.0's ini and pnpm 10.34.9's read them: lines split at \r or \n, each up to its first =, or
@@ -1110,7 +1109,10 @@ async function buildPlan({ projectDir, to, next = false }) {
     // quoted key, or one holding ; or #, goes unread; follow ini's decode() if a team writes either.
     for (const line of readFileSync(appRc, 'utf8').split(/[\r\n]+/)) {
       const key = /^([^=]+)(?:=.*)?$/.exec(line)?.[1].trim();
-      if (key && Object.hasOwn(appConfig, key)) { config[key] = appConfig[key]; fromApp.add(key); }
+      if (!key || !Object.hasOwn(appConfig, key)) continue;
+      if (found?.unknown && /(?:^|:)registry$|^\/\/|^_auth/.test(key) && config[key] !== appConfig[key] && !swayed.includes(key)) swayed.push(key);
+      config[key] = appConfig[key];
+      fromApp.add(key);
     }
   }
   // npm reads a registry named with no value, alone on its line, as true, which is no address: pnpm 10.34.9 refused one
@@ -1200,6 +1202,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     latestAngular, target, next: next ? prerelease : null, releaseAge: age, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (asked?.unknown) plan.unchecked.push({ name: 'release age', reason: asked.unknown });
+  if (swayed.length) plan.unchecked.push({ name: appRc, reason: `sets ${swayed.join(', ')}, which pnpm 10 reads over ${join(configDir, '.npmrc')} and pnpm 11 and 12 pass over, and pnpm's version is unknown, so the plan read ${swayed.length > 1 ? 'them' : 'it'} as pnpm 10 does; plan again once pnpm can be asked, or ask the person which pnpm runs here` });
   if (preManager) plan.unchecked.push({ name: 'release age', reason: `${project.packageManager} ${preManager} is a prerelease, which the plan reads as ${found.version}, though a prerelease can hold back other releases than its release does; ask the person to check it with ${project.packageManager === 'pnpm' ? 'pnpm config get minimum-release-age' : 'yarn config get npmMinimalAgeGate'}` });
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
   if (catalogued.length) {

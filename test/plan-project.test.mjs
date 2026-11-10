@@ -234,8 +234,12 @@ test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and old
     await company.close();
   }
   // With pnpm's version unknown the app's keys still count, as pnpm 10 reads them, so a team registry kept there isn't
-  // passed over for a clean bill of health.
-  blockedOnUiCore(await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': null } }));
+  // passed over for a clean bill of health. pnpm 11.0.0, 11.28.11 and 12.16.1 asked only the root's registry, and sent
+  // only the root's token, so the plan says which keys it read the way pnpm 10 does.
+  const unasked = acmeWorkspace();
+  const unknown = await plan(world(), unasked, { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': null } });
+  blockedOnUiCore(unknown);
+  assert.equal(unknown.plan.unchecked.find((u) => u.name === join(unasked.dir, '.npmrc'))?.reason, `sets @acme:registry, which pnpm 10 reads over ${join(unasked.root, '.npmrc')} and pnpm 11 and 12 pass over, and pnpm's version is unknown, so the plan read it as pnpm 10 does; plan again once pnpm can be asked, or ask the person which pnpm runs here`);
 });
 
 test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm reads only the workspace root\'s', async () => {
