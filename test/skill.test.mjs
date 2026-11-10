@@ -62,9 +62,85 @@ test('the skill only ever mentions forcing as something the person must approve'
 
 test('nothing tells an agent to run plain npx ng, which can download an unrelated package', () => {
   const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
-  assert.ok(docs.some((d) => /npx --no-install ng /.test(d)), 'positive control: the safe form is in use');
+  assert.ok(docs.some((d) => /npx --no-install ng\b/.test(d)), 'positive control: the safe form is in use');
   for (const doc of docs) assert.doesNotMatch(doc, /npx ng\b/);
   assert.doesNotMatch(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /['"`]npx['"`]\s*[,}]/);
+});
+
+// One numbered step of SKILL.md, from its heading to the next.
+function skillStep(n) {
+  const start = skill.indexOf(`\n## ${n}. `);
+  assert.ok(start >= 0, `SKILL.md has a step ${n}`);
+  const end = skill.indexOf('\n## ', start + 1);
+  return skill.slice(start, end < 0 ? undefined : end);
+}
+
+test('step 3 runs ng through the project\'s own package manager, since npm refuses npx where devEngines names another', () => {
+  // npm 11.19.0, and 10.9.9 on Linux, stopped `npx --no-install ng build` with EBADDEVENGINES in a project whose
+  // devEngines.packageManager names pnpm, as pnpm 12's `pnpm init` writes it, so step 3 failed before the upgrade began.
+  const three = skillStep(3);
+  assert.match(three, /Install dependencies/, 'positive control: this is the step that records the starting point');
+  for (const runner of ['npx --no-install ng', 'pnpm exec ng', 'yarn ng', 'bunx --no-install ng']) assert.ok(three.includes(`\`${runner}\``), `step 3 has to name ${runner}`);
+  assert.doesNotMatch(three, /^npx --no-install ng /m, 'no command line in step 3 runs npm whatever the manager');
+  assert.match(three, /EBADDEVENGINES/);
+});
+
+test('pnpm runs step 3 with the settings that keep it from fetching or recording itself, in the environment', () => {
+  // pnpm 12.16.1 fetched the pnpm a project pins and wrote packageManagerDependencies into pnpm-lock.yaml, even for its
+  // own version, so update.mjs would refuse the tree. --config.pm-on-fail=ignore kept the outer pnpm quiet, but not the
+  // `pnpm --version` that Angular CLI 22.2.5 runs at startup, which only sees the environment.
+  const update = readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8');
+  for (const setting of ['pnpm_config_pm_on_fail', 'npm_config_manage_package_manager_versions']) assert.match(update, new RegExp(setting), `positive control: update.mjs gives the hop ${setting}`);
+  const three = skillStep(3);
+  assert.match(three, /`pnpm_config_pm_on_fail=ignore`/);
+  assert.match(three, /`npm_config_manage_package_manager_versions=false`/);
+  assert.match(three, /in the environment/);
+  // The plan's own pnpm commands start a pnpm in the agent's environment too, where pnpm 12.16.1 recorded the pin before
+  // update.mjs, which gives the settings only to what it starts, refused the tree.
+  assert.match(three, /the plan's `Run:`, `Sooner` and patch commands/);
+  // With both set, the pnpm on this machine runs whatever the project pins, while the plan plans by the pin: pnpm 10.34.9
+  // ran itself in a project pinned to pnpm 12.16.1 and refused a release the plan had called ready.
+  assert.match(three, /compare `pnpm --version`[^.]*with the version the project pins/);
+  // The plan quotes update.mjs's path in single quotes, which bash, pwsh 7 and Windows PowerShell 5.1 read and cmd.exe
+  // passed on as part of the path: Error: Cannot find module '...\'C:\...'.
+  assert.match(three, /`pnpm_config_pm_on_fail=ignore npm_config_manage_package_manager_versions=false <command>`/);
+  assert.match(three, /`\$env:pnpm_config_pm_on_fail='ignore'; \$env:npm_config_manage_package_manager_versions='false'`/);
+  assert.match(three, /cmd\.exe/);
+  assert.match(step('c'), /step 3's two settings in the environment/);
+  const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
+  for (const doc of docs) assert.doesNotMatch(doc, /--(?:config\.)?pm-on-fail/, 'a flag never reaches the pnpm that ng starts itself');
+});
+
+test('the references run ng the way step 3 does, never through npm alone', () => {
+  // troubleshooting.md and libraries.md said `npx --no-install ng update`, `ng generate` and `ng build`, which npm
+  // refuses in a pnpm or yarn project whose devEngines names its manager.
+  const refs = readdirSync(join(SKILL_DIR, 'references')).map((f) => [f, readFileSync(join(SKILL_DIR, 'references', f), 'utf8')]);
+  assert.ok(refs.some(([, text]) => text.includes('--migrate-only')), 'positive control: the references still run ng');
+  for (const [file, text] of refs) assert.doesNotMatch(text, /npx --no-install ng [a-z]/, file);
+});
+
+test('running ng through the wrong manager or a pinned pnpm has its errors in troubleshooting.md', () => {
+  // What npm 11.19.0 and pnpm 12.16.1 printed, which is what the next agent searches for.
+  const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
+  for (const text of ['EBADDEVENGINES', 'ERR_PNPM_BAD_CONFIG_DEP', 'ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE']) assert.ok(trouble.includes(text), text);
+  // pnpm 10.34.9 under managePackageManagerVersions: true, offline, retried for about 74 s and then said this, where a
+  // registry with no pnpm answered ERR_PNPM_FETCH_404.
+  assert.ok(trouble.includes('ERR_PNPM_META_FETCH_FAIL'));
+  // package-manager-strict-version stops pnpm 10.34.9 only once the runner's setting keeps it from fetching the pin, and
+  // COREPACK_ENABLE_STRICT=0 in the environment lifts it, as pnpm's own hint says, which is the person's call.
+  assert.match(trouble, /`COREPACK_ENABLE_STRICT=0`/);
+  // pnpm 11.28.11 printed its frozen-lockfile stop on one line, with no ERR_PNPM_ code.
+  assert.ok(trouble.includes('[ERROR] Cannot update packageManagerDependencies with "frozen-lockfile" because the lockfile is not up to date'));
+  assert.doesNotMatch(trouble, /whatever the environment says/);
+});
+
+test('under yarn\'s Plug\'n\'Play the app is checked with yarn ng serve, since smoke.mjs finds no CLI there', () => {
+  // smoke.mjs starts node_modules/@angular/cli/bin/ng.js, which Plug'n'Play doesn't have, while `yarn ng serve` on
+  // Angular CLI 22.2.5 and yarn 4.16.0 served the page.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'smoke.mjs'), 'utf8'), /No Angular CLI at/, 'positive control: smoke.mjs still says this');
+  assert.match(skillStep(3), /Plug'n'Play/);
+  const section = troubleSection('No Angular CLI at');
+  assert.match(section, /yarn ng serve/);
 });
 
 test('the force recipe puts a pnpm override where pnpm 11 and newer read it', () => {
@@ -142,6 +218,8 @@ test('a release too young for ng update is covered on yarn 4.15 and newer too', 
   assert.ok(pointer, 'the peer-error section has to point here');
   assert.match(pointer, /yarn 4\.15 or newer/);
   assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4\.15 or newer/);
+  // A release with no publish time waits on yarn from 4.11 and pnpm 10, while pnpm 11.0.0 to 12.16.1 took it.
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /yarn from 4\.11[^.]*`waiting on a publish time from the registry`[^.]*pnpm 11 and 12 take it/);
 });
 
 test('a release too young for ng update goes in first through update.mjs, never with --allow-dirty by hand', () => {
@@ -167,6 +245,13 @@ test('a major waiting on young releases is a question for the person, never a co
   const line = skill.split('\n').find((l) => l.includes('waiting until'));
   assert.ok(line, 'SKILL.md has to answer the line plan.mjs prints');
   for (const word of [/\bwait\b/, /exempt/, /approv/, /Sooner/, /No sooner way/]) assert.match(line, word);
+  // A release the registry gives no publish time has no time to wait for, which yarn from 4.11 and pnpm 10 hold back.
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'plan.mjs'), 'utf8'), /waiting on a publish time from the registry/, 'positive control: the plan prints it');
+  assert.match(line, /`waiting on a publish time from the registry`/);
+  assert.match(skillStep(5), /`waiting on a publish time from the registry`/);
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /`waiting on a publish time from the registry`/);
+  // pnpm 11.0.0 and 11.22.0 took such a release where nothing dated and old enough fit, and pnpm 10.34.9 refused it.
+  for (const doc of [line, readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), troubleSection(youngRelease)]) assert.doesNotMatch(doc, /pnpm before 11\.23|11 before 11\.23/);
 });
 
 test('the release-age section gives each manager\'s own error, since that is what the next agent searches for', () => {
@@ -285,6 +370,22 @@ test('the team\'s libraries that need each other are upgraded and published toge
   assert.ok(first, 'positive control: blocked.md offers to upgrade the team\'s libraries first');
   assert.match(first, /need each other/);
   assert.match(first, /upgrade and publish them together/);
+});
+
+test('the test script names every test file once, since node --test given a list runs only those', () => {
+  // CONTRIBUTING.md says a new file goes in package.json's test script, and a file left out would never run, here or in CI.
+  const listed = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts.test.split(/\s+/).filter((arg) => arg.endsWith('.test.mjs')).sort();
+  const files = readdirSync(join(ROOT, 'test'), { recursive: true }).map((file) => `test/${file.replace(/\\/g, '/')}`).filter((file) => file.endsWith('.test.mjs')).sort();
+  assert.ok(listed.includes('test/skill.test.mjs'), 'positive control: the script names this file');
+  assert.deepEqual(listed, files);
+});
+
+test('SECURITY.md says a yarn hop copies the project\'s .npmrc, token included, into a temporary folder', () => {
+  assert.match(readFileSync(join(SKILL_DIR, 'scripts', 'update.mjs'), 'utf8'), /copyFileSync\(join\(cwd, '\.npmrc'\)/, 'positive control: update.mjs still copies it');
+  const bullet = readFileSync(join(ROOT, 'SECURITY.md'), 'utf8').split('\n').find((line) => line.startsWith('- **`update.mjs`**'));
+  assert.ok(bullet, 'SECURITY.md has to say what update.mjs does');
+  assert.match(bullet, /`\.npmrc`, tokens included/);
+  assert.match(bullet, /temporary folder/);
 });
 
 test('the marketplace points at the plugin', () => {
