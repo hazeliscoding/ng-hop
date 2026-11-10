@@ -201,6 +201,8 @@ test('a release too young for ng update is covered on yarn 4.15 and newer too', 
   assert.ok(pointer, 'the peer-error section has to point here');
   assert.match(pointer, /yarn 4\.15 or newer/);
   assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /pnpm 11 or newer, or yarn 4\.15 or newer/);
+  // A release with no publish time waits on yarn from 4.11 and pnpm 10, while pnpm 11.0.0 to 12.16.1 took it.
+  assert.match(readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8'), /yarn from 4\.11[^.]*`waiting on a publish time from the registry`[^.]*pnpm 11 and 12 take it/);
 });
 
 test('a release too young for ng update goes in first through update.mjs, never with --allow-dirty by hand', () => {
