@@ -173,9 +173,10 @@ test('yarn updater: the target CLI runs from npm\'s own cache, so Angular never 
 });
 
 // Stands in for npm 11.19.0, which checks devEngines.packageManager in the package.json of the folder it runs for, the one
-// --prefix names or else the nearest up from where it runs, and refuses one naming another manager.
+// --prefix names or else the nearest up from where it runs, and refuses one naming another manager. Like npm, it reads
+// its own options only before --, and leaves what follows to the command it runs.
 const devEnginesDriver = `const nodeFs = require('node:fs'), nodePath = require('node:path');
-const prefix = process.argv.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
+const prefix = process.argv.slice(0, process.argv.indexOf('--') >>> 0).find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
 let folder = prefix ?? process.cwd();
 while (!prefix && !nodeFs.existsSync(nodePath.join(folder, 'package.json')) && nodePath.dirname(folder) !== folder) folder = nodePath.dirname(folder);
 const manifest = nodePath.join(folder, 'package.json');
@@ -205,6 +206,7 @@ test('yarn updater: npm runs the target CLI for an empty folder of its own, sinc
   const called = f.read();
   const prefix = called.args.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
   assert.ok(prefix && !existsSync(prefix), `npm ran for a folder of its own, removed after: ${called.args.join(' ')}`);
+  assert.ok(called.args.indexOf(`--prefix=${prefix}`) < called.args.indexOf('--'), `--prefix is npm's own option, not ng's: ${called.args.join(' ')}`);
   assert.equal(realpathSync(called.cwd), realpathSync(f.project), 'the CLI still runs in the project');
   assert.equal(readFileSync(rc, 'utf8'), 'registry=https://npm.example.invalid/\n', 'npm reads the project\'s .npmrc');
 });
