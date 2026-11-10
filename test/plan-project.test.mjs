@@ -238,11 +238,14 @@ test('pnpm: the app\'s own .npmrc counts too, token included, as pnpm 10 and old
 test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm reads only the workspace root\'s', async () => {
   // In apps/web, pnpm 11.0.0, 11.28.11 and 12.16.1 read the registry the root's .npmrc named and passed over the app's
   // own, which pnpm 10.34.9 read over the root's. So the plan asks the registry pnpm asks for the team's scope.
-  for (const version of ['11.0.0', '12.16.1']) {
+  // 11.0.0-rc.5 did too, though semver sorts it below 11.0.0, so a prerelease takes its release's rules, and the plan
+  // says it's a prerelease, since 12.0.0-beta.1 held back no young release at all where 12.16.1 holds one back a day.
+  for (const version of ['11.0.0', '12.16.1', '11.0.0-rc.5']) {
     const hits = [];
     const r = await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': version }, registryOptions: { hits } });
     assert.equal(r.code, 0, `${version}: ${r.stderr}`);
     assert.ok(hits.includes('@acme/ui-core'), `${version} asks the root's registry: ${hits.join(', ')}`);
+    assert.equal(r.plan.unchecked.some((u) => u.reason.includes(`pnpm ${version} is a prerelease`)), version.includes('-'), version);
   }
   blockedOnUiCore(await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': '10.34.9' } }));
 });

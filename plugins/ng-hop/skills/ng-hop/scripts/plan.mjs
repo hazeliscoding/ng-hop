@@ -1093,6 +1093,10 @@ async function buildPlan({ projectDir, to, next = false }) {
   const configDir = project.pnpmRoot || projectDir;
   const config = await npmConfig(configDir);
   const found = ['pnpm', 'yarn'].includes(project.packageManager) ? await managerVersion(project, project.packageManager) : null;
+  // semver sorts a prerelease below its release, so pnpm 11.0.0-rc.5 counted as pnpm 10, though it read .npmrc as 11.0.0
+  // does. A prerelease takes its release's rules, and the plan says so, since 12.0.0-beta.1 held back no young release.
+  const preManager = found?.version && semver.prerelease(found.version) ? found.version : null;
+  if (preManager) found.version = semver.coerce(preManager).version;
   const appRc = join(projectDir, '.npmrc');
   const appKeys = configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
   const fromApp = new Set();
@@ -1196,6 +1200,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     latestAngular, target, next: next ? prerelease : null, releaseAge: age, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
   };
   if (asked?.unknown) plan.unchecked.push({ name: 'release age', reason: asked.unknown });
+  if (preManager) plan.unchecked.push({ name: 'release age', reason: `${project.packageManager} ${preManager} is a prerelease, which the plan reads as ${found.version}, though a prerelease can hold back other releases than its release does; ask the person to check it with ${project.packageManager === 'pnpm' ? 'pnpm config get minimum-release-age' : 'yarn config get npmMinimalAgeGate'}` });
   if (project.nx) plan.notes.push('This is an Nx workspace. Nx has its own `nx migrate` flow, which this plan does not model, so use that for the framework packages.');
   if (catalogued.length) {
     const sharedWith = project.pnpmRoot ? catalogUsers(project.pnpmRoot, projectDir, catalogued) : [];
