@@ -121,6 +121,8 @@ test('running ng through the wrong manager or a pinned pnpm has its errors in tr
   // package-manager-strict-version stops pnpm 10.34.9 only once the runner's setting keeps it from fetching the pin, and
   // COREPACK_ENABLE_STRICT=0 in the environment lifts it, as pnpm's own hint says, which is the person's call.
   assert.match(trouble, /`COREPACK_ENABLE_STRICT=0`/);
+  // pnpm 11.28.11 printed its frozen-lockfile stop on one line, with no ERR_PNPM_ code.
+  assert.ok(trouble.includes('[ERROR] Cannot update packageManagerDependencies with "frozen-lockfile" because the lockfile is not up to date'));
   assert.doesNotMatch(trouble, /whatever the environment says/);
 });
 
