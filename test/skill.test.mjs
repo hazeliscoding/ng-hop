@@ -231,6 +231,8 @@ test('a major waiting on young releases is a question for the person, never a co
   assert.match(line, /`waiting on a publish time from the registry`/);
   assert.match(skillStep(5), /`waiting on a publish time from the registry`/);
   assert.match(readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), /`waiting on a publish time from the registry`/);
+  // pnpm 11.0.0 and 11.22.0 took such a release where nothing dated and old enough fit, and pnpm 10.34.9 refused it.
+  for (const doc of [line, readFileSync(join(SKILL_DIR, 'references', 'blocked.md'), 'utf8'), troubleSection(youngRelease)]) assert.doesNotMatch(doc, /pnpm before 11\.23|11 before 11\.23/);
 });
 
 test('the release-age section gives each manager\'s own error, since that is what the next agent searches for', () => {
