@@ -609,6 +609,10 @@ test('a waiting major prints after the one that is ready, and the result says ho
   const undatedLib = pkg('ui-lib', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0' } });
   const yarn = (await plan(world(undatedLib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, files: { 'yarn.lock': '' } }), { to: 22, text: true, manager: yarn18 })).stdout;
   assert.match(yarn, /^Result: BLOCKED at Angular 22, which needs releases with no publish time on the registry, which yarn holds back however old they are\. Angular 21 is the highest version everything supports today\.$/m, yarn);
+  // With a young release as well, the result gives its time too.
+  const youngToo = pkg('ui-young', { '20.1.0': { peer: '^20.0.0', at: '2025-06-01' }, '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', ago: 10 } });
+  const both = (await plan(world(undatedLib, youngToo), app({ deps: { ...base, 'ui-lib': '^20.0.0', 'ui-young': '^20.0.0' }, files: { 'yarn.lock': '' } }), { to: 22, text: true, manager: yarn18 })).stdout;
+  assert.ok(both.includes(`\nResult: BLOCKED at Angular 22, which needs releases with no publish time on the registry, which yarn holds back however old they are, and releases too young for yarn and ng update until ${shown(ripeAt(youngToo, '22.0.0', 1440))}. Angular 21 is the highest version everything supports today.\n`), both);
   const before = `before=${new Date(Date.now() - 60 * 60e3).toISOString()}\n`;
   const npm = (await plan(world(lib), app({ deps: { ...base, 'ui-lib': '^20.0.0' }, lock: { ...lockBase, 'ui-lib': '20.1.0' }, files: { '.npmrc': before } }), { to: 22, text: true })).stdout;
   assert.match(npm, /^Result: BLOCKED at Angular 22, which needs releases newer than npm's before, \d{4}-\d\d-\d\d \d\d:\d\d UTC\. Angular 21 is the highest version everything supports today\.$/m, npm);
