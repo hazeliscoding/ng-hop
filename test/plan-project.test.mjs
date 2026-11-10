@@ -254,6 +254,17 @@ test('pnpm: from pnpm 11 the app\'s own .npmrc counts for nothing, since pnpm re
     assert.ok(hits.includes('@acme/ui-core'), `${version} asks the root's registry: ${hits.join(', ')}`);
     assert.equal(r.plan.unchecked.some((u) => u.reason.includes(`pnpm ${version} is a prerelease`)), version.includes('-'), version);
   }
+  // Nor does its token: with the token only in the app's .npmrc, pnpm 11.28.11 and 12.16.1 got a 401 from the registry
+  // the root's names, so the plan stops too instead of reading with that token.
+  const company = await startRegistry([uiCore()], { requireAuth: true });
+  try {
+    const host = company.url.replace(/^http:/, '');
+    const r = await plan(world(), acmeWorkspace({ files: { '.npmrc': `@acme:registry=${company.url}\n`, 'apps/web/.npmrc': `${host}:_authToken=test-only\n` } }), { to: 21, manager: { '--version': '12.16.1' } });
+    assert.equal(r.code, 1, r.stdout);
+    assert.match(r.stderr, /^Could not read @acme\/ui-core from the registry through npm/);
+  } finally {
+    await company.close();
+  }
   blockedOnUiCore(await plan(world(), acmeWorkspace(), { to: 21, own: { scope: '@acme', packages: [uiCore()] }, manager: { '--version': '10.34.9' } }));
 });
 
