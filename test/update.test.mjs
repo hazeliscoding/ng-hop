@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, isAbsolute, join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { runScript, UPDATE } from './helpers/harness.mjs';
 
@@ -207,6 +207,10 @@ test('yarn updater: npm runs the target CLI for an empty folder of its own, sinc
   const prefix = called.args.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
   assert.ok(prefix && !existsSync(prefix), `npm ran for a folder of its own, removed after: ${called.args.join(' ')}`);
   assert.ok(called.args.indexOf(`--prefix=${prefix}`) < called.args.indexOf('--'), `--prefix is npm's own option, not ng's: ${called.args.join(' ')}`);
+  // Inside the project, the copied .npmrc would be an untracked file while ng update runs, which Angular CLI 22's clean
+  // check refuses: Repository is not clean. Please commit or stash any changes before updating.
+  const fromProject = relative(f.project, prefix);
+  assert.ok(fromProject.startsWith('..') || isAbsolute(fromProject), `the folder is outside the project: ${prefix}`);
   assert.equal(realpathSync(called.cwd), realpathSync(f.project), 'the CLI still runs in the project');
   assert.equal(readFileSync(rc, 'utf8'), 'registry=https://npm.example.invalid/\n', 'npm reads the project\'s .npmrc');
 });
