@@ -97,6 +97,13 @@ test('a release the registry dates so late that the age ends past the year 9999 
   const yarn = await plan(world(lib), yarnApp(), { to: 22, manager: yarn18 });
   assert.equal(yarn.code, 0, yarn.stderr);
   assert.equal(libIn(yarn, 22, 'ui-lib').to, '22.1.0');
+  // pnpm from 11.23 reads no time in a document where a release has none, and pnpm view prints it none, so a date past
+  // 9999 there never counts, and another library's young release still waits. pnpm 11.28.11 refused a young release
+  // asked for by name, and installed one dated 9999 from a document with a release that had no time.
+  const odd = pkg('odd-lib', { '21.0.0': { peer: '^21.0.0' }, '22.0.0': { peer: '^22.0.0' } });
+  odd.time['22.0.0'] = '9999-12-31T23:00:00.000Z';
+  const dropped = await plan(world(youngLib(), odd), pnpm21({ 'ui-lib': '^21.0.0', 'odd-lib': '^21.0.0' }), { to: 22, manager: { '--version': '11.28.11' } });
+  assert.deepEqual([dropped.code, dropped.plan.blockers.map((b) => [b.name, b.version]), dropped.plan.unchecked], [2, [['ui-lib', '22.0.0']], []], dropped.stderr);
 });
 
 test('a publish time the registry gives as a number is the date pnpm and yarn read it as, and true is no crash either', async () => {

@@ -1246,8 +1246,9 @@ async function buildPlan({ projectDir, to, next = false }) {
   const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
   // A release the registry dates so late that the age ends past the year 9999 has no time minute can print, and past the
   // year 275760 none a Date can hold: ui-lib 22.0.0 dated +275760-09-12 stopped the plan with "RangeError: Invalid time
-  // value". Every release the plan gives a time is in these documents, so one like that leaves the age unknown.
-  const late = age?.minutes && [['@angular/core', coreDoc], ['@angular/cli', cliDoc], ...docs]
+  // value". Every release the plan gives a time is in these documents, so one like that leaves the age unknown. pnpm
+  // from 11.23 reads no time in a document it checks none of, so a date there is never read.
+  const late = age?.minutes && [['@angular/core', coreDoc], ['@angular/cli', cliDoc], ...docs].filter(([, doc]) => !checksNone(doc))
     .flatMap(([name, doc]) => Object.keys(doc?.versions ?? {}).filter((v) => Date.parse(doc.time?.[v] ?? '') + age.minutes * 60e3 >= Date.UTC(10000, 0)).map((v) => [name, v, doc.time[v]]))[0];
   if (late) {
     const [name, v, time] = late;
