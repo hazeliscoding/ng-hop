@@ -1104,8 +1104,9 @@ async function buildPlan({ projectDir, to, next = false }) {
     }
   }
   // npm reads a registry named with no value, alone on its line, as true, which is no address: pnpm 10.34.9 refused one
-  // in an app's own .npmrc, `registry` should be a string, and the plan stopped with a TypeError.
-  const blank = Object.keys(config).find((key) => /(?:^|:)registry$/.test(key) && typeof config[key] !== 'string');
+  // in an app's own .npmrc, `registry` should be a string, and the plan stopped with a TypeError. With = and nothing
+  // after it npm reads "", which pnpm refused too, ERR_INVALID_URL, while the plan asked the public registry instead.
+  const blank = Object.keys(config).find((key) => /(?:^|:)registry$/.test(key) && (typeof config[key] !== 'string' || !config[key]));
   if (blank) {
     const own = fromApp.has(blank);
     throw new PlanError(`${own ? appRc : `An .npmrc npm reads in ${configDir}`} sets ${blank} without an address, which npm reads as ${plainLine(JSON.stringify(config[blank]), 60)}${own ? ' and pnpm 10 refuses' : ''}, so the plan can't tell which registry to ask; ask the person to fix that line.`);

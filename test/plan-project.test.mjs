@@ -274,11 +274,13 @@ test('pnpm: a registry line with no value stops the plan with a reason naming wh
   // .npmrc: `registry` should be a string. The plan stopped with TypeError: url.endsWith is not a function.
   const mirror = await startRegistry(world());
   const home = app({}).dir;
+  // A refusing proxy keeps a plan that falls back to the public registry offline.
+  const offline = { HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1', NODE_USE_ENV_PROXY: '1' };
   const run = async (files, version) => {
     const w = acmeWorkspace({ files: { 'user.npmrc': '', ...files } });
     const pnpm = fakeManager('pnpm', { '--version': version });
     try {
-      return { w, ...await runScript(PLAN, ['--project', w.dir, '--to', '21'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file, HOME: home, USERPROFILE: home } }) };
+      return { w, ...await runScript(PLAN, ['--project', w.dir, '--to', '21'], { cwd: w.dir, env: { npm_config_userconfig: join(w.root, 'user.npmrc'), npm_execpath: pnpm.file, HOME: home, USERPROFILE: home, ...offline } }) };
     } finally {
       pnpm.remove();
     }
@@ -288,6 +290,15 @@ test('pnpm: a registry line with no value stops the plan with a reason naming wh
     assert.deepEqual([own.code, own.stderr.trim()], [1, `${join(own.w.dir, '.npmrc')} sets registry without an address, which npm reads as true and pnpm 10 refuses, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
     const root = await run({ '.npmrc': '@acme:registry\nsave-exact=true\n' }, '10.34.9');
     assert.deepEqual([root.code, root.stderr.trim()], [1, `An .npmrc npm reads in ${root.w.root} sets @acme:registry without an address, which npm reads as true, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+    // With = and nothing after it, npm 11.19.0 read "", which pnpm 10.34.9, 11.0.0 and 11.28.11 refused with
+    // ERR_INVALID_URL at the root, and 10.34.9 in the app's own .npmrc too. The plan asked the public registry, or the
+    // default one for the scope, and called the app reachable.
+    for (const key of ['registry', '@acme:registry']) {
+      const empty = await run({ '.npmrc': `${key}=\n${key === 'registry' ? '' : `registry=${mirror.url}\n`}` }, '10.34.9');
+      assert.deepEqual([empty.code, empty.stderr.trim()], [1, `An .npmrc npm reads in ${empty.w.root} sets ${key} without an address, which npm reads as "", so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+      const appEmpty = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': `${key}=\n` }, '10.34.9');
+      assert.deepEqual([appEmpty.code, appEmpty.stderr.trim()], [1, `${join(appEmpty.w.dir, '.npmrc')} sets ${key} without an address, which npm reads as "" and pnpm 10 refuses, so the plan can't tell which registry to ask; ask the person to fix that line.`]);
+    }
     // The control: pnpm 12.16.1 reads only the root's .npmrc, so the app's line counts for nothing.
     const later = await run({ '.npmrc': `registry=${mirror.url}\n`, 'apps/web/.npmrc': 'registry\r\nsave-exact=true\r\n' }, '12.16.1');
     assert.equal(later.code, 0, later.stderr);
