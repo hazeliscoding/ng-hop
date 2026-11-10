@@ -300,6 +300,11 @@ test('with no publish time, tooling that follows Angular\'s major, a patch and A
   assert.equal(next.plan.waiting.noSooner, 'Angular 23 itself has no publish time on the registry, which yarn holds back');
   // No exemption is offered for Angular itself, whose package group the plan reads no times for, so its blocker says so too.
   assert.equal(next.plan.blockers[0].reason, '23.0.0 has no publish time on the registry, so yarn\'s npmMinimalAgeGate can\'t tell its age and holds it back however old it is, until the registry gives it one');
+  // Nor for the CLI with no time, beside a core 5 days old.
+  const [core23, compiler23] = angular();
+  for (const doc of [core23, compiler23]) { doc.versions['23.0.0'] = { ...doc.versions['22.2.0'], version: '23.0.0' }; doc.time['23.0.0'] = new Date(Date.now() - 5 * 1440 * 60e3).toISOString(); doc['dist-tags'].latest = '23.0.0'; }
+  const cliOnly = await plan([core23, compiler23, typescript(), pkg('rxjs', { '7.8.2': {} }), pkg('@angular/cli', { '22.2.0': { at: '2026-05-28' }, '23.0.0': {} })], on22(), { manager: yarn18 });
+  assert.deepEqual([cliOnly.code, cliOnly.plan.blockers.map((b) => [b.name, b.reason])], [2, [['@angular/cli', '23.0.0 has no publish time on the registry, so yarn\'s npmMinimalAgeGate can\'t tell its age and holds it back however old it is, until the registry gives it one']]], cliOnly.stderr);
 });
 
 test('with one release that has no publish time and one too young, only the young one goes in first, so the other\'s migrations still run', async () => {
