@@ -115,6 +115,9 @@ test('running ng through the wrong manager or a pinned pnpm has its errors in tr
   // What npm 11.19.0 and pnpm 12.16.1 printed, which is what the next agent searches for.
   const trouble = readFileSync(join(SKILL_DIR, 'references', 'troubleshooting.md'), 'utf8');
   for (const text of ['EBADDEVENGINES', 'ERR_PNPM_BAD_CONFIG_DEP', 'ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE']) assert.ok(trouble.includes(text), text);
+  // pnpm 10.34.9 under managePackageManagerVersions: true, offline, retried for about 74 s and then said this, where a
+  // registry with no pnpm answered ERR_PNPM_FETCH_404.
+  assert.ok(trouble.includes('ERR_PNPM_META_FETCH_FAIL'));
 });
 
 test('under yarn\'s Plug\'n\'Play the app is checked with yarn ng serve, since smoke.mjs finds no CLI there', () => {
