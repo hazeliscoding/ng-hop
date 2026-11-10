@@ -213,6 +213,11 @@ test('yarn updater: npm runs the target CLI for an empty folder of its own, sinc
   assert.ok(fromProject.startsWith('..') || isAbsolute(fromProject), `the folder is outside the project: ${prefix}`);
   assert.equal(realpathSync(called.cwd), realpathSync(f.project), 'the CLI still runs in the project');
   assert.equal(readFileSync(rc, 'utf8'), 'registry=https://npm.example.invalid/\n', 'npm reads the project\'s .npmrc');
+  // A failed hop removes its folder too, since that holds a copy of the project's .npmrc, token included.
+  const failed = await runScript(UPDATE, ['--json', ...packages], { cwd: f.project, env: { ...f.env, npm_execpath: npm, TEST_RC: rc, TEST_PEER_FAILURE: '1' } });
+  assert.equal(failed.code, 2, failed.stdout);
+  const left = f.read().args.find((arg) => arg.startsWith('--prefix='))?.slice('--prefix='.length);
+  assert.ok(left && left !== prefix && !existsSync(left), `a failed hop removes its folder too: ${left}`);
 });
 
 test('pnpm updater: executable shims are resolved without running a command shell', async () => {
