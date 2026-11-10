@@ -98,6 +98,9 @@ test('pnpm runs step 3 with the settings that keep it from fetching or recording
   // The plan's own pnpm commands start a pnpm in the agent's environment too, where pnpm 12.16.1 recorded the pin before
   // update.mjs, which gives the settings only to what it starts, refused the tree.
   assert.match(three, /the plan's `Run:`, `Sooner` and patch commands/);
+  // With both set, the pnpm on this machine runs whatever the project pins, while the plan plans by the pin: pnpm 10.34.9
+  // ran itself in a project pinned to pnpm 12.16.1 and refused a release the plan had called ready.
+  assert.match(three, /compare `pnpm --version`[^.]*with the version the project pins/);
   assert.match(step('c'), /step 3's two settings in the environment/);
   const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
   for (const doc of docs) assert.doesNotMatch(doc, /--(?:config\.)?pm-on-fail/, 'a flag never reaches the pnpm that ng starts itself');
