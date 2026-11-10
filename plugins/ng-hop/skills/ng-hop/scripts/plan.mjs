@@ -1265,8 +1265,9 @@ async function buildPlan({ projectDir, to, next = false }) {
   const docs = new Map(await mapLimited([...coupledNames, ...followerNames], async (name) => [name, await registry.get(name, true)]));
   // A release the registry dates so late that the age ends past the year 9999 has no time minute can print, and past the
   // year 275760 none a Date can hold: ui-lib 22.0.0 dated +275760-09-12 stopped the plan with "RangeError: Invalid time
-  // value". Every release the plan gives a time is in these documents. pnpm 10.34.9 to 12.16.1 and yarn 4.10.1 to 4.18.1
-  // held a library's such release back, so the plan leaves it out and keeps the age for the rest. One of Angular's own
+  // value". Every release the plan gives a time is in these documents. pnpm 10.34.9, 11.0.0, 11.22.0, 11.28.11 and 12.16.1
+  // and yarn 4.10.1, 4.11.0 and 4.18.1 took 1.0.0 for ^1.0.0 over a 1.2.0 dated 9999, so the plan leaves a library's such
+  // release out and keeps the age for the rest. One of Angular's own
   // leaves the age unknown. pnpm from 11.23 reads no time in a document it checks none of, so a date there is never read.
   // shortcut: a library whose only release that fits is left out reads as having none for the major; give it a wait of
   // its own if a registry ever dates one that late for a release a hop needs.
