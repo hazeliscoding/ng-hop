@@ -101,6 +101,11 @@ test('pnpm runs step 3 with the settings that keep it from fetching or recording
   // With both set, the pnpm on this machine runs whatever the project pins, while the plan plans by the pin: pnpm 10.34.9
   // ran itself in a project pinned to pnpm 12.16.1 and refused a release the plan had called ready.
   assert.match(three, /compare `pnpm --version`[^.]*with the version the project pins/);
+  // The plan quotes update.mjs's path in single quotes, which bash, pwsh 7 and Windows PowerShell 5.1 read and cmd.exe
+  // passed on as part of the path: Error: Cannot find module '...\'C:\...'.
+  assert.match(three, /`pnpm_config_pm_on_fail=ignore npm_config_manage_package_manager_versions=false <command>`/);
+  assert.match(three, /`\$env:pnpm_config_pm_on_fail='ignore'; \$env:npm_config_manage_package_manager_versions='false'`/);
+  assert.match(three, /cmd\.exe/);
   assert.match(step('c'), /step 3's two settings in the environment/);
   const docs = [skill, ...readdirSync(join(SKILL_DIR, 'references')).map((f) => readFileSync(join(SKILL_DIR, 'references', f), 'utf8'))];
   for (const doc of docs) assert.doesNotMatch(doc, /--(?:config\.)?pm-on-fail/, 'a flag never reaches the pnpm that ng starts itself');
