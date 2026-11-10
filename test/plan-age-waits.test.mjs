@@ -250,8 +250,8 @@ test('yarn from 4.11 and pnpm 10 hold back a release the registry gives no publi
   // The control: yarn 4.10.1's gate read new Date(undefined), whose time is NaN, so it took the release.
   const old = await plan(world(undated()), yarnApp(undefined, gate), { to: 22, manager: { '--version': '4.10.1' } });
   assert.deepEqual([old.code, libIn(old, 22, 'ui-lib')?.to], [0, '22.0.0'], old.stderr);
-  // pnpm 10.34.9 and 11.0.0 held back a release whose time was null, "", 0 or false too, keeping only one whose time is
-  // set and before the cutoff, while yarn 4.18.1 took each of those, its gate asking only whether the time is undefined.
+  // pnpm 10.34.9 held back a release whose time was null, "", 0 or false too, keeping only one whose time is set and
+  // before the cutoff, while yarn 4.18.1 took each of those, its gate asking only whether the time is undefined.
   const timed = (time) => { const lib = undated(); lib.time['22.0.0'] = time; return world(lib); };
   for (const time of [null, 0]) {
     const pnpm = await plan(timed(time), pnpm21({ 'ui-lib': '^21.0.0' }, { files: { 'pnpm-workspace.yaml': 'minimumReleaseAge: 1440\n' } }), { to: 22, manager: { '--version': '10.34.9' } });
@@ -356,11 +356,17 @@ test('npm, bun and ng update count a release with no publish time old enough, an
     const lib = (r.plan.waiting ?? r.plan.hops.at(-1))?.libs.find((l) => l.name === 'ui-lib');
     assert.deepEqual([r.code, lib?.to], [code, '22.0.0'], `${version}: ${r.stderr}`);
   }
-  // So the release with no time is taken too, where it's the one the hop needs.
-  for (const version of ['11.28.11', '12.16.1']) {
+  // So the release with no time is taken too, where it's the one the hop needs. pnpm 11.0.0 and 11.22.0 take it then as
+  // well, passing it over only while a release dated and old enough fits: under minimumReleaseAge 1440 each installed
+  // 2.0.0 for ^2.0.0 where 1.0.0 was dated and 2.0.0 had no time, or a null one, while pnpm 10.34.9 refused it.
+  for (const version of ['11.0.0', '11.22.0', '11.28.11', '12.16.1']) {
     const r = await plan(world(undated()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': version } });
     assert.deepEqual([r.code, libIn(r, 22, 'ui-lib')?.to], [0, '22.0.0'], `${version}: ${r.stderr}`);
   }
+  const nullTime = undated();
+  nullTime.time['22.0.0'] = null;
+  const taken = await plan(world(nullTime), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: { '--version': '11.22.0' } });
+  assert.deepEqual([taken.code, libIn(taken, 22, 'ui-lib')?.to], [0, '22.0.0'], taken.stderr);
   const dated = await plan(world(youngLib()), pnpm21({ 'ui-lib': '^21.0.0' }), { to: 22, manager: pnpm12 });
   assert.equal(dated.code, 2, 'the control: with 21.0.0 dated too, pnpm 12 holds 22.0.0 back');
 });

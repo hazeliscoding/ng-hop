@@ -1123,18 +1123,21 @@ async function buildPlan({ projectDir, to, next = false }) {
   const now = Date.now();
   // pnpm 11.23.0 added dropIncompletePublishTimes (pnpm/pnpm#13750), which drops a package's times when any release
   // lacks one, and 11.28.11, 12.4.2 and 12.16.1 then check none of its releases against the age, and pnpm view prints
-  // them no times, so ng update skips none either. pnpm 11.22.0 doesn't have it, and 11.0.0 kept the times as pnpm 10
-  // does. Each document is looked through once, since a registry can list thousands of releases.
+  // them no times, so ng update skips none either. pnpm 11.0.0 and 11.22.0 don't have it, and kept the times. Each
+  // document is looked through once, since a registry can list thousands of releases.
   // shortcut: with minimumReleaseAgeIgnoreMissingTime false, which the plan doesn't read, they fail on such a package
   // instead, with ERR_PNPM_MISSING_TIME; read it if a team sets it.
   const dropsTimes = age?.manager === 'pnpm' && semver.gte(age.version, '11.23.0');
   // A release the registry gives no publish time, which a private registry can do: npm 11.19.0, bun 1.4.2, yarn 4.10.1
   // and ng update 22.2.6 count it old enough, while yarn 4.11.0 to 4.18.1 hold it back however old it is, their gate
-  // asking typeof time > "u", and so do pnpm 10.34.9 and 11.0.0, which keep only releases with a time before their cutoff.
-  // A time of null, "", 0 or false is none to pnpm, which held each back, while yarn 4.18.1 took each.
+  // asking typeof time > "u", and so does pnpm 10.34.9, which keeps only releases with a time before its cutoff. pnpm
+  // 11.0.0 and 11.22.0 pass it over only while a release dated and old enough fits the range, and take it when none
+  // does, as they took one a command named. A time of null, "", 0 or false is none to pnpm, while yarn 4.18.1 took each.
   // shortcut: a release whose time doesn't parse, which npm and pnpm hold back, and every release of a package with no
   // times at all, of which yarn 4.10.1 found none, count as old enough; follow them if a registry ever sends either.
-  const holdsUndated = age?.manager === 'yarn' ? semver.gte(age.version, '4.11.0') : age?.manager === 'pnpm' && !dropsTimes;
+  // shortcut: pnpm 11.0.0 held such a release back under minimumReleaseAgeStrict: true, which the plan doesn't read,
+  // where 11.22.0 still took it; read that setting if a team on an early pnpm 11 sets it.
+  const holdsUndated = age?.manager === 'yarn' ? semver.gte(age.version, '4.11.0') : age?.manager === 'pnpm' && semver.lt(age.version, '11.0.0');
   const undated = (doc, v) => Boolean(doc?.versions?.[v]) && (age?.manager === 'yarn' ? doc.time?.[v] === undefined : !doc.time?.[v]);
   const checked = new WeakMap();
   const checksNone = (doc) => dropsTimes && Boolean(doc) && (checked.get(doc) ?? checked.set(doc, Object.keys(doc.versions).some((v) => !doc.time?.[v])).get(doc));
