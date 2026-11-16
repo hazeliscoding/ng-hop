@@ -1084,8 +1084,36 @@ async function broughtLicenses(registry, lib, before, after) {
 
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
-async function buildPlan({ projectDir, to, next = false }) {
+// npm fills ${NAME} in an .npmrc from the environment, in a key or a value, unless an odd run of backslashes comes before
+// it, and reads no line that starts with ; or #. So a repo nobody has checked yet could have the plan's first request
+// carry the person's token to a server the repo chose. A variable the environment doesn't hold carries nothing.
+function envAsks(project, dir, approved) {
+  const asks = [];
+  for (const rc of new Set([join(project.pnpmRoot || dir, '.npmrc'), join(dir, '.npmrc')])) {
+    const found = new Map();
+    for (const line of (readText(rc) ?? '').split(/[\r\n]+/)) {
+      if (/^\s*[;#]/.test(line)) continue;
+      const [key, ...rest] = line.split('=');
+      const to = key.trim().startsWith('//') ? key.trim().slice(2).split('/')[0] : /(?:^|:)registry$/.test(key.trim()) ? rest.join('=').trim() : 'the registry';
+      for (const [, slashes, name] of line.matchAll(/(?<!\\)(\\*)\$\{([^${}?]+)\??\}/g)) {
+        if (slashes.length % 2 || !process.env[name] || approved.has(name) || found.has(name)) continue;
+        found.set(name, plainLine(to, 80));
+      }
+    }
+    if (found.size) asks.push({ rc, found });
+  }
+  if (!asks.length) return;
+  const names = asks.flatMap(({ found }) => [...found.keys()]);
+  const odd = names.find((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+  const said = asks.map(({ rc, found }) => `${rc} takes ${[...found].map(([name, to]) => `${plainLine(name, 60)} (sent to ${to})`).join(' and ')} from the environment`).join(', and ');
+  throw new PlanError(`${said}, and the plan's requests would send them there before anyone has installed from this repo. No request was made. ${odd
+    ? `"${plainLine(odd, 60)}" is a name that can't be approved on a command line, so ask the person to change that line.`
+    : `Ask the person, and with their yes run the plan again with --send-env ${[...new Set(names)].join(',')}.`}`);
+}
+
+async function buildPlan({ projectDir, to, next = false, sendEnv = [] }) {
   const project = readProject(projectDir);
+  envAsks(project, projectDir, new Set(sendEnv));
   const assets = angularAssets(projectDir);
   const pins = nodePins(projectDir);
   // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10.34.9 lays the app's own over it,
@@ -1784,19 +1812,20 @@ function render(plan) {
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
 
-const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--json]
+const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--send-env <names>] [--json]
 
 Works out how far an Angular app can upgrade today, and what is in the way. Changes nothing.
   --project  the project folder (default: the current folder)
   --to       the Angular major to aim for (default: the latest stable)
   --next     aim for Angular's next prerelease instead, only when someone asks to try one
+  --send-env environment variables the repo's .npmrc names, separated by commas, that the person agreed to send
   --json     print the plan as JSON
 Exit codes: 0 the target is reachable or there is nothing to do, 2 blocked before the target, 1 no plan could be made.`;
 
 async function main() {
   let values;
   try {
-    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
+    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, 'send-env': { type: 'string', multiple: true }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
   } catch (err) {
     throw new PlanError(`${err.message.split('.')[0]}.\n${USAGE}`);
   }
@@ -1807,7 +1836,7 @@ async function main() {
     to = Number(values.to);
     if (!Number.isInteger(to) || to < 2) throw new PlanError(`--to takes an Angular major version such as 22, not "${values.to}".`);
   }
-  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next) });
+  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next), sendEnv: (values['send-env'] ?? []).flatMap((names) => names.split(',')) });
   process.stdout.write(`${values.json ? JSON.stringify(plan, null, 2) : render(plan)}\n`);
   process.exitCode = plan.status === 'blocked' ? 2 : 0;
 }

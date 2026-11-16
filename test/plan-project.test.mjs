@@ -490,3 +490,30 @@ test('a lockfile that cannot be read falls back instead of making up a version',
     assert.equal(r.plan.project.angularSource, 'package.json range');
   }
 });
+
+test('a value the repo\'s .npmrc takes from the environment is sent only after the person says so', async () => {
+  // npm fills ${NAME} in from the environment, so a repo nobody has checked yet could have the plan's first request
+  // carry the person's token to a server the repo chose.
+  const proj = (rc) => app({ deps: base, lock: lockBase, files: { '.npmrc': rc } });
+  const rc = '//npm.acme.test/:_authToken=${ACME_TOKEN}\n@acme:registry=https://${ACME_HOST}/npm/\n; proxy=${IN_A_COMMENT}\nnote=\\${ESCAPED}\ncafile=${NOT_SET}\n';
+  const env = { ACME_TOKEN: 'secret', ACME_HOST: 'internal', IN_A_COMMENT: 'x', ESCAPED: 'x' };
+  const hits = [];
+  const asked = proj(rc);
+  const stopped = await plan(world(), asked, { to: 21, env, registryOptions: { hits } });
+  assert.deepEqual([stopped.code, stopped.stdout, hits], [1, '', []]);
+  assert.equal(stopped.stderr.trim(), `${join(asked.dir, '.npmrc')} takes ACME_TOKEN (sent to npm.acme.test) and ACME_HOST (sent to https://\${ACME_HOST}/npm/) from the environment, and the plan's requests would send them there before anyone has installed from this repo. No request was made. Ask the person, and with their yes run the plan again with --send-env ACME_TOKEN,ACME_HOST.`);
+  // Positive control: the same file, with one yes missing, still stops, and with both the plan asks the registry.
+  const half = await plan(world(), proj(rc), { to: 21, env, registryOptions: { hits }, more: ['--send-env', 'ACME_TOKEN'] });
+  assert.deepEqual([half.code, hits], [1, []]);
+  assert.match(half.stderr, /takes ACME_HOST \(/);
+  const yes = await plan(world(), proj('//npm.acme.test/:_authToken=${ACME_TOKEN}\n'), { to: 21, env, registryOptions: { hits }, more: ['--send-env', 'ACME_TOKEN'] });
+  assert.equal(yes.code, 0, yes.stderr);
+  assert.ok(hits.length > 0);
+  // A variable the environment doesn't hold carries nothing, so nobody is asked.
+  assert.equal((await plan(world(), proj('//npm.acme.test/:_authToken=${ACME_TOKEN}\n'), { to: 21 })).code, 0);
+  // A name that can't be typed safely on a command line gets no flag to approve it.
+  const odd = await plan(world(), proj('//npm.acme.test/:_authToken=${ODD NAME;x}\n'), { to: 21, env: { 'ODD NAME;x': 'secret' }, registryOptions: { hits: [] } });
+  assert.equal(odd.code, 1);
+  assert.match(odd.stderr, /can't be approved on a command line, so ask the person to change that line\.$/m);
+  assert.doesNotMatch(odd.stderr, /--send-env/);
+});

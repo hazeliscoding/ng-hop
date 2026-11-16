@@ -34,6 +34,8 @@ node $SCRIPTS/plan.mjs --to <major>     # omit --to for the latest Angular
 
 It reads `package.json`, the lockfile and npm, and the package manager's minimum release age from its settings files and the environment. It runs nothing from the repo and changes nothing. Exit 0 means the target is reachable or there's nothing to do, 2 means blocked before the target, 1 means no plan could be made. On exit 1, report the error and stop: a version guessed from memory or from the numbers is how upgrades go wrong, because library versions often don't match Angular's (`@clr/angular` 18.5.0 supports Angular 22) and an old release can claim to support a major it predates.
 
+One exit 1 is a question for the person instead. When the repo's `.npmrc` takes a value from the environment, such as `${NPM_TOKEN}`, the plan stops before any request and names each variable and where it would be sent. Ask the person, and only with their yes run the plan again with the `--send-env` it prints, because npm would otherwise send their token to a server the repo chose, before anyone has checked the repo.
+
 Show the person the result in a few lines: where they can get to, what blocks anything further, and which libraries are unconfirmed.
 
 - **If they only asked a question** ("how far can I go?", "does PrimeNG support 22?", "is this upgrade safe?"), answer from the plan and stop. Change nothing.
