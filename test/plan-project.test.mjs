@@ -298,7 +298,8 @@ test('pnpm: a registry line with no value stops the plan with a reason naming wh
   const mirror = await startRegistry(world());
   const home = app({}).dir;
   // A refusing proxy keeps a plan that falls back to the public registry offline.
-  const offline = { HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1', NODE_USE_ENV_PROXY: '1' };
+  // Node 22 warns on stderr that the proxy agent is experimental, and the test reads stderr whole.
+  const offline = { HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1', NODE_USE_ENV_PROXY: '1', NODE_NO_WARNINGS: '1' };
   const run = async (files, version) => {
     const w = acmeWorkspace({ files: { 'user.npmrc': '', ...files } });
     const pnpm = fakeManager('pnpm', { '--version': version });
