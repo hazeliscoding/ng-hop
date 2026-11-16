@@ -151,7 +151,7 @@ M7's run and its review found places where the plan says too little, or can't ru
 - [x] Drop `npm_config_pm_on_fail=error` from the runner. No pnpm reads it: pnpm 10.34.9 has no such setting, and 11.28.11 and 12.16.1 read it only as `pnpm_config_`. npm 11 warns about it on every yarn hop.
 - [ ] Check the app under yarn's Plug'n'Play. `smoke.mjs` starts `node_modules/@angular/cli/bin/ng.js`, so with no `node_modules` it reports `no-cli`, and step 3 has the agent run `yarn ng serve` by hand instead.
 - [x] Judge Node for Angular 22 and newer the way its CLI does, before Node 27 is stable. CLI 22 starts only on the majors its range lists, and warns on 23 and 25, so on Node 27 `ng` exits while the plan says ok.
-- [ ] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
+- [x] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
 - [ ] Run the example's dev container on Docker Engine on Linux, which has no `host.docker.internal`: add the host gateway, and have the registry listen on the bridge address too, never on every address. Check it on a Linux host first.
 - [ ] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up.
 

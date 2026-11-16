@@ -313,23 +313,34 @@ function nodePins(dir) {
   const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } };
   const add = (path, value, kind = 'version') => pins.push({ file: relative(dir, path).replace(/\\/g, '/'), value: String(value).trim(), kind });
   const bases = [...new Set([dir, root])];
+  const dockerfiles = new Set();
+  const dockerfile = (path) => {
+    if (dockerfiles.has(path)) return;
+    dockerfiles.add(path);
+    const text = read(path) || '';
+    // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
+    const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
+    for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(path, image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
+  };
   for (const base of bases) {
     for (const name of ['.nvmrc', '.node-version']) { const text = read(join(base, name)); if (text?.trim()) add(join(base, name), text.trim().split('\n')[0]); }
     // asdf writes nodejs, and mise reads node too.
     const tools = /^node(?:js)?\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
     if (tools) add(join(base, '.tool-versions'), tools[1]);
-    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
-      const text = read(join(base, docker)) || '';
-      // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
-      const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
-      for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
+    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) dockerfile(join(base, docker));
+    // A dev container's settings are in .devcontainer/devcontainer.json or in .devcontainer.json at the root.
+    for (const file of [join(base, '.devcontainer', 'devcontainer.json'), join(base, '.devcontainer.json')]) {
+      // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
+      const devcontainer = (read(file) || '').replace(/^[ \t]*\/\/.*$/gm, '');
+      const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (image) add(file, image, 'image');
+      const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (feature) add(file, feature);
+      // Its build can name a Dockerfile anywhere, from the settings file's folder, as build.dockerfile or the older
+      // dockerFile. One outside the repo isn't the repo's pin, and isn't read.
+      const named = /"docker[fF]ile"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (named && inside(resolve(dirname(file), named), root)) dockerfile(resolve(dirname(file), named));
     }
-    // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
-    const devcontainer = (read(join(base, '.devcontainer', 'devcontainer.json')) || '').replace(/^[ \t]*\/\/.*$/gm, '');
-    const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
-    if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
-    const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
-    if (feature) add(join(base, '.devcontainer', 'devcontainer.json'), feature);
     // A workspace keeps engines and volta at its root too, and Volta's members extend the root's.
     try {
       const pkg = JSON.parse(read(join(base, 'package.json')) || '{}');
@@ -355,6 +366,11 @@ function nodePins(dir) {
   return pins;
 }
 
+// A version pin that names no number, such as lts/iron in .nvmrc or lts in a dev container's Node feature: what it stands
+// for changes with time, so the plan names it instead of counting it as fitting.
+const PIN_VERSION = /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/;
+const pinUnread = (pin) => pin.kind === 'version' && !PIN_VERSION.test(pin.value);
+
 // Whether a pin keeps the team on a Node the range accepts. A bare major such as "22" floats to its newest release, so
 // it fits when any release of that major does; a fixed version has to be in the range itself.
 function pinFits(pin, range) {
@@ -366,7 +382,7 @@ function pinFits(pin, range) {
     // the Node in it is the two-digit major after that, and a tag that is only the image's version (5-trixie) says none.
     // shortcut: an image's own version freezes the Node inside it, so only its major is known from the tag; read the
     // image's NODE_VERSION if a frozen pin below the range's floor ever matters.
-    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
+    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : PIN_VERSION.exec(pin.value)?.[1];
     if (!version) return true;
     const parts = version.split('.');
     const asRange = parts.length === 3 ? version : `${version}.x`;
@@ -1501,6 +1517,8 @@ async function buildPlan({ projectDir, to, next = false, sendEnv = [] }) {
       node.status = !semver.satisfies(version, nodeRange) ? (semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old') : listed && !listed.includes(semver.major(version)) ? 'too-new' : 'ok';
       const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
       if (below.length) node.pins = below;
+      const unread = pins.filter(pinUnread).map(({ file, value }) => ({ file, value: plainLine(value, 60) }));
+      if (unread.length) node.unreadPins = unread;
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
@@ -1782,6 +1800,7 @@ function render(plan) {
     lines.push('', `Angular ${hop.major} (${hop.angular}${hop.angularNewer ? `; ${newer(hop.angularNewer, hop.ngUpdateSkips)}` : ''})${waits ? (hop.until ? `, waiting until ${minute(hop.until, true)}` : age.before ? ', waiting on npm\'s before' : `, waiting on a publish time from the registry${dated ? `, and until ${minute(dated, true)}` : ''}`) : ''}`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
+    if (hop.node.unreadPins) lines.push(`  Node pins the plan can't read, in the repo: ${hop.node.unreadPins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
       const held = hop.held?.find((h) => h.name === lib.name);

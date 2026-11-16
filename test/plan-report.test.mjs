@@ -127,6 +127,22 @@ test('a Node pin written the way docker init, mise or a GitHub matrix writes it 
   ]);
 });
 
+test('a pin with no number in it is named as unread, and a root dev container and the Dockerfile its build names are read', async () => {
+  const r = await plan(nodeWorld(), app({ deps: base, lock: lockBase, files: {
+    ...git,
+    '.nvmrc': 'lts/iron\n',
+    '.devcontainer.json': '{ "build": { "dockerfile": "docker/dev.Dockerfile" }, "features": { "ghcr.io/devcontainers/features/node:1": { "version": "lts" } } }',
+    'docker/dev.Dockerfile': 'FROM node:20-bookworm\n',
+    // A Dockerfile outside the repo is nobody's pin here.
+    '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "../../outside.Dockerfile" } }',
+  } }), { to: 21, text: false });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.plan.hops[0].node.pins, [{ file: 'docker/dev.Dockerfile', value: 'node:20-bookworm' }]);
+  assert.deepEqual(r.plan.hops[0].node.unreadPins, [{ file: '.nvmrc', value: 'lts/iron' }, { file: '.devcontainer.json', value: 'lts' }]);
+  // Positive control: a pin with a number in it is never called unread.
+  assert.equal((await plan(nodeWorld(), app({ deps: base, lock: lockBase, files: { ...git, '.nvmrc': 'v20.18.0\n' } }), { to: 21 })).plan.hops[0].node.unreadPins, undefined);
+});
+
 test('the forms read before are still read, and node-version-file is no version', async () => {
   assert.deepEqual(await pinsOf({
     Dockerfile: 'FROM --platform=linux/amd64 node:20-alpine AS build\nFROM nginx:1.27\n',
