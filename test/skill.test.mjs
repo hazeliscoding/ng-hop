@@ -328,6 +328,8 @@ test('a Node in a gap of Angular\'s range is too old, and a newer release of the
   assert.match(rule, /odd majors/);
   assert.match(rule, /newer release of the line they're on/);
   assert.match(rule, /`unsupported` means Node is newer than every/);
+  // CLI 22.2.7 exits on a Node major its range doesn't name, such as 27.
+  assert.match(rule, /`too-new` means .* `ng` exits there, so stop and ask/);
 });
 
 const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');

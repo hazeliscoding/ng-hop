@@ -217,6 +217,17 @@ test('a Node in a gap of a major\'s range is too old, since a newer one fits and
   assert.equal(r.plan.hops[0].node.status, 'too-old');
 });
 
+test('a Node major that Angular 22\'s range doesn\'t list is too new, since its CLI exits there', async () => {
+  // CLI 22.2.7's bin/ng.js starts only on a major its range lists, so on Node 27 it exits with code 3 though 27 fits
+  // >=26.0.0. CLI 21.2.30 checks a minimum only.
+  const on = async (major, node) => (await plan(nodeWorld(major), app({ deps: base, lock: lockBase }), { to: major, node })).plan.hops.at(-1).node.status;
+  assert.equal(await on(22, '27.0.0'), 'too-new');
+  assert.equal(await on(22, '26.3.0'), 'ok');
+  assert.equal(await on(21, '27.0.0'), 'ok');
+  const text = await plan(nodeWorld(22), app({ deps: base, lock: lockBase }), { to: 22, node: '27.0.0', text: true });
+  assert.match(text.stdout, /^  Node: too-new \(needs /m);
+});
+
 // ---- The report people read ---------------------------------------------------------------------------------------------
 
 test('the text report leads with the result and names the blocker', async () => {

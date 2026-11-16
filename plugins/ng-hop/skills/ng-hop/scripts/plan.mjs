@@ -1495,7 +1495,10 @@ async function buildPlan({ projectDir, to, next = false, sendEnv = [] }) {
     if (nodeRange && semver.validRange(nodeRange)) {
       const version = process.version.replace(/^v/, '');
       // A Node in a gap of the range, as 24.14 is in Angular 22's, is too old: a newer one fits, and ng won't start on it.
-      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old';
+      // CLI 22.2.7's bin/ng.js starts only on a Node major its range lists, so >=26.0.0 means 26 alone, and ng exits on 27.
+      // shortcut: a pin that names such a major still counts as fitting; judge pins this way once Node 27 is out.
+      const listed = major >= 22 && nodeRange.split('||').map((part) => semver.minVersion(part)?.major);
+      node.status = !semver.satisfies(version, nodeRange) ? (semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old') : listed && !listed.includes(semver.major(version)) ? 'too-new' : 'ok';
       const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
       if (below.length) node.pins = below;
     }
