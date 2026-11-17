@@ -84,10 +84,11 @@ Everything else gets ordinary care, but none of these three gets traded away for
 | Release | Date | Milestones | What it delivered |
 |---|---|---|---|
 | 0.1.0 | 2026-11-07 | M0 to M4 | The repo, brand and CI. `plan.mjs`, which finds the highest reachable major from npm's own data in seconds, tested against a fake registry. The skill, which moves an app one committed major at a time with the build, tests and running app checked, and stops to ask at a blocker or a license change. pnpm 12, workspaces included. 25 eval cases run three times with and without the skill on GitHub's machines, trigger evals, and the scores in the README. Install from the marketplace, checked in CI. |
+| 0.5.0 | 2026-11-16 | M6 to M8, and M5 but for its open items | Carries what was planned as 0.2.0 to 0.5.0, none of which was tagged on its own. Release age read the way each package manager and `ng update` apply it. A blocking library that is the team's own, upgraded first, with `examples/enterprise` and its video. Plans for apps in npm, yarn and bun workspaces, pnpm catalogs taken through an upgrade, and real upgrades on yarn and bun. A question before the plan sends a value from the environment. Node pins, a Node too new, and the app check under Plug'n'Play and through Chrome's DevTools protocol. A whole upgrade through OpenCode on Windows, weekly evals, and the enterprise example as a case. |
 
 ## Milestones
 
-### M5: 0.2.0, real apps, OpenCode, Windows and evals that keep up
+### M5: real apps, OpenCode, Windows and evals that keep up
 
 The evals use small apps built for them, run on Linux, and only when someone starts them. This release is about apps nobody built for a test, another agent, Windows, and noticing when a library catches up.
 
@@ -105,64 +106,10 @@ The evals use small apps built for them, run on Linux, and only when someone sta
 
 **Done when:** both apps are on the latest Angular through the skill, the README's agent table says what OpenCode really did, a scheduled run has reported, and real upgrades have run on Windows.
 
-### M6: 0.3.0, fewer stops
-
-Each of these is a place where the skill stops or says less than it could today.
-
-- [x] Take a pnpm catalog through an upgrade instead of refusing it. Angular 22's CLI lists the steps: edit the catalog, `pnpm install`, then `ng update <package> --migrate-only --from <old version>`. Plain Claude did this and passed.
-- [x] Real yarn and bun fixtures. The plan prints their commands, but no real upgrade has run on either. Both now pass from Angular 20 to 22.
-- [x] Say when a framework package the app uses is deprecated. `@angular/animations` is, from Angular 20.2 on, in favour of `animate.enter` and `animate.leave`.
-- [x] Check the licenses of what a moved library brings with it: shared packages the plan moves, and new dependencies, such as `@primeui/license-manager` with PrimeNG 22.
-- [x] A `--next` mode, for trying a prerelease Angular. Angular's `next` tag can be a new major or a minor of the current one, so it has to handle both.
-- [x] See every console error in the app check, through Chrome's DevTools protocol instead of its log. Today a plain `console.error('oops')` goes unnoticed.
-
-**Done when:** the catalog, yarn and bun cases pass in the evals with and without the skill, scored like the rest, `--next` plans a real prerelease, and the app check fails on a plain `console.error`.
-
-Met on 2026-11-08. With the skill: yarn 16/16, bun 16/16 and the catalog 14/14, once the grader read a catalog's commits right. Without it: 11/15, 11/15 and 11/13, mostly no commits and the work left on main. `--next` planned Angular's real `22.3.0-next.4` on an app at 22.2.5, and the app check's tests fail on a plain `console.error` in Chrome.
-
-### M7: 0.4.0, an enterprise upgrade, on video
-
-A company's app is rarely one package. This release takes one built like the real thing from Angular 21 to 22, and turns the run into a tutorial. The video is for developers who are new to agentic coding but not to development, and should still work for juniors and seniors.
-
-- [x] A fixture: an Angular 21 app on the pnpm toolchain, with internal UI libraries whose peer ranges stop at Angular 21, so they have to reach 22 before the app can. It's `examples/enterprise/`: `acme-ui`, `acme-portal` and a local registry.
-- [x] Set up for a dev container, and upgraded from the Windows host, not inside the container. Rebuilt afterwards, the container runs Node 22.23.4, builds the app and serves it.
-- [x] When a blocking library belongs to the person, offer to upgrade it first, in dependency order, besides waiting, replacing or forcing.
-- [x] Take it to Angular 22 with the skill: the libraries first, then the app. Claude Code did it in six turns from the Windows host, for $7.62. What it ran into, and what the skill learned from it:
-  - `ng update` refused at first, because the libraries' new 22.0.0 was minutes old. The agent blamed pnpm 12's minimum release age, and Claude Code's own safety check stopped it from relaxing that, so it asked. A later check showed pnpm installs a release named exactly and writes the exemption itself, unless `minimumReleaseAgeStrict` is set.
-  - Exempted, the release still failed: from Angular CLI 22.1, `ng update` applies the age rule in its own resolver and reads no exemption list. The agent found that in the CLI's source, then installed the releases by hand before updating Angular, with approval. `update.mjs --install-first` does that step now, and the troubleshooting guide gives the cause and both ways on.
-  - The agent missed the dev container's `FROM node:22.12.0`, and the container then refused Angular 22. The plan now names the repo's own Node pins below a major's range: from `.nvmrc`, `.node-version`, `.tool-versions`, a Dockerfile, the dev container and `package.json`'s `engines` and `volta`, in the app's folder and at the repo's root, and from GitHub workflows. The skill searches for the rest.
-- [x] Make a video tutorial from that run. It runs 7:52 in eight chapters, with captions and asides for newer developers and for team leads. Its source is in `docs/video/enterprise/`.
-
-**Done when:** the skill takes the libraries and then the app to Angular 22 from the Windows host, the dev container still builds and serves the app afterwards, and the video is made.
-
-Met on 2026-11-08. A review of the whole milestone afterwards found real problems, among them a pnpm workspace's `.npmrc` that the plan never read, so a blocked app looked reachable, and a way past the release-age rule that the runner refused to carry out. They're fixed, and what the review left for later is in M8.
-
-### M8: 0.5.0, the edges the enterprise run found
-
-M7's run and its review found places where the plan says too little, or can't run at all.
-
-- [x] The plan checks release age the way the package manager and `ng update` do. A release younger than pnpm's `minimum-release-age`, yarn's `npmMinimalAgeGate` or npm's `before` makes the printed command fail, so the plan should name it and the wait instead of calling the hop ready. It now does, and reads each manager's settings from its files and the environment, running none of them in the repo.
-- [x] A plan for an app inside an npm, yarn or bun workspace. npm refused `config list` there with `ENOWORKSPACES`, so the plan exited. It now finds the root whose `workspaces` list the app, reads the root's lockfile and `.npmrc`, as npm 11.19.0 does for a member, and takes the manager `angular.json`'s `cli.packageManager` names first.
-- [ ] Take a whole upgrade through an app in an npm, yarn or bun workspace, since only the plan has run there. Check whether `ng update` from CLI 22.0 and older misses a scope registry set at such a root, as it does at a pnpm one. Pick the manager fully as CLI 22.2.7 does: `package.json`'s `packageManager` before `angular.json`, then lockfiles in every folder up to the git root, as pnpm, yarn, bun, then npm. Read a root's `bunfig.toml` if bun does for a member.
-- [x] Run `ng` in step 3 through the project's own package manager. npm 11 refuses `npx --no-install ng build` with `EBADDEVENGINES` in a project whose `devEngines.packageManager` names pnpm or yarn, as pnpm 12's `pnpm init` writes it. Step 3 now names one runner per manager. npm refused the yarn hop's own `npm exec` there too, so it now runs for an empty folder.
-- [x] Ask before the plan sends a value from the environment that the repo's `.npmrc` names, as the 2026-11-10 decision says. npm fills a `${...}` in from the person's environment, so the plan's requests send the value to the server the repo names, as the upgrade's installs do. The plan already turns npm's own update check off.
-- [x] Follow yarn 4.11 and newer, which hold back a release with no publish time, by their source. The plan counted such a release as old enough for every manager. It now follows each manager's own rule.
-- [x] Check what pnpm 10 and 11 do with the runner's `npm_config_pm_on_fail=error`, and whether they record themselves in the lockfile during a hop, as pnpm 12 did. Neither reads that setting. pnpm 10.34.9 never recorded itself. 11.28.11 did, as 12 does, but not under the runner's `pnpm_config_pm_on_fail=ignore`, so the runner needed no change.
-- [x] Stop a run of blank lines in an app's `.npmrc` from stalling the plan. `buildPlan` read its keys with a pattern that started each line with `\s*`, so 40,000 blank lines took about 2 s, and a 1 MB file would take many minutes. The suggested `[ \t]*` and `[^=\n]` still took 17 s on one long line of spaces, so the plan now reads the file line by line, as npm and pnpm 10 do.
-- [x] Drop `npm_config_pm_on_fail=error` from the runner. No pnpm reads it: pnpm 10.34.9 has no such setting, and 11.28.11 and 12.16.1 read it only as `pnpm_config_`. npm 11 warns about it on every yarn hop.
-- [x] Check the app under yarn's Plug'n'Play. `smoke.mjs` started `node_modules/@angular/cli/bin/ng.js`, so with no `node_modules` it reported `no-cli`. It now starts the CLI through the app's `.pnp.cjs`, which checked a real Angular 22.2.7 app on yarn 4.18.1.
-- [x] Judge Node for Angular 22 and newer the way its CLI does, before Node 27 is stable. CLI 22 starts only on the majors its range lists, and warns on 23 and 25, so on Node 27 `ng` exits while the plan says ok.
-- [x] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
-- [x] Run the example's dev container on Docker Engine on Linux, which has no `host.docker.internal`. The container adds the host gateway under that name, and `registry/bridge.mjs` forwards Docker's bridge address to the registry, never every address. The volume for `node_modules` is writable by any user in the container, since Linux gives the container's user the host user's id. The `Example` workflow brings the container up on GitHub's Ubuntu machine, then builds and tests the app in it.
-- [x] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up. `ask-enterprise-blocked` asks whether the portal can go to Angular 22. `evals/prepare.mjs` runs the example's own setup, and `evals/registry.mjs` starts its registry where a case runs. With the skill it scored 6/6, and without it 4/5, missing that ui-core goes first.
-
-**Done when:** the plan names a release too young for the printed command, an app in an npm, yarn or bun workspace gets a plan, and the enterprise example runs in the evals.
-
-Met on 2026-11-16. The plan names a release too young for the printed command, an app in an npm workspace got a plan from real npm 11.19.0, and `ask-enterprise-blocked` ran on GitHub's machines, 6/6 with the skill and 4/5 without. A whole upgrade inside a workspace is the one item still open.
-
 ## Later
 
 - Run the skill for real in GitHub Copilot. So far it's checked from Copilot's docs only.
+- Take a whole upgrade through an app in an npm, yarn or bun workspace, since only the plan has run there. Check whether `ng update` from CLI 22.0 and older misses a scope registry set at such a root, as it does at a pnpm one. Pick the manager fully as CLI 22.2.7 does: `package.json`'s `packageManager` before `angular.json`, then lockfiles in every folder up to the git root, as pnpm, yarn, bun, then npm. Read a root's `bunfig.toml` if bun does for a member.
 - Take the whole enterprise upgrade through the evals: the libraries, a publish, then the app. Today's case only asks the question.
 
 ## Not planned
