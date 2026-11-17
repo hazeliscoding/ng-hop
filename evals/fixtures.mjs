@@ -15,6 +15,10 @@ const zonelessConfig = (imports, providers) => ({
 });
 
 export const FIXTURES = {
+  // The enterprise example's app: Angular 21 on pnpm, with the team's own libraries from a private registry, whose
+  // peer ranges stop at Angular 21. prepare.mjs starts that registry and publishes them, and a case needs it running.
+  'enterprise-portal': { example: 'acme-portal' },
+
   // Every library has a release for each major, and the numbers don't line up with Angular's.
   'clean-path': {
     angular: 20,

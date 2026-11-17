@@ -154,13 +154,14 @@ M7's run and its review found places where the plan says too little, or can't ru
 - [x] Judge Node for Angular 22 and newer the way its CLI does, before Node 27 is stable. CLI 22 starts only on the majors its range lists, and warns on 23 and 25, so on Node 27 `ng` exits while the plan says ok.
 - [x] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
 - [x] Run the example's dev container on Docker Engine on Linux, which has no `host.docker.internal`. The container adds the host gateway under that name, and `registry/bridge.mjs` forwards Docker's bridge address to the registry, never every address. The volume for `node_modules` is writable by any user in the container, since Linux gives the container's user the host user's id. The `Example` workflow brings the container up on GitHub's Ubuntu machine, then builds and tests the app in it.
-- [ ] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up.
+- [x] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up. `ask-enterprise-blocked` asks whether the portal can go to Angular 22. `evals/prepare.mjs` runs the example's own setup, and `evals/registry.mjs` starts its registry where a case runs. With the skill it scored 6/6, and without it 4/5, missing that ui-core goes first.
 
 **Done when:** the plan names a release too young for the printed command, an app in an npm, yarn or bun workspace gets a plan, and the enterprise example runs in the evals.
 
 ## Later
 
 - Run the skill for real in GitHub Copilot. So far it's checked from Copilot's docs only.
+- Take the whole enterprise upgrade through the evals: the libraries, a publish, then the app. Today's case only asks the question.
 
 ## Not planned
 

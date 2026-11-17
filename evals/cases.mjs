@@ -407,6 +407,20 @@ should I just use --force?`,
     ],
   },
   {
+    // The enterprise example: the team's own libraries, from a private registry, stop at Angular 21. The registry has
+    // to be running, which prepare.mjs and the Evals workflow see to (evals/registry.mjs).
+    name: 'ask-enterprise-blocked', tier: 'plan', fixture: 'enterprise-portal',
+    prompt: "Can this app go to Angular 22? Just tell me, don't change anything.",
+    assertions: [
+      check.skillFired(),
+      check.says('Says Angular 22 is blocked today', /block|can'?t|cannot|not (yet )?(possible|reachable)|stays? on (Angular )?21/i),
+      check.says('Names both of the team\'s libraries', /@acme\/ui-core[\s\S]*@acme\/ui-forms|@acme\/ui-forms[\s\S]*@acme\/ui-core/),
+      check.says('Says they come from a registry of the team\'s own', /localhost:4873|registry/i),
+      check.says('Says ui-core has to move before ui-forms', /ui-core[^.\n]*\b(first|before)\b|\bfirst\b[^.\n]*ui-core|ui-core`?,? (and )?then\b/i),
+      check.noChanges(),
+    ],
+  },
+  {
     // From Angular 21's CLI on, a plain `ng update` dirties pnpm-lock.yaml and then refuses to run on the dirty tree.
     name: 'upgrade-pnpm', tier: 'upgrade', fixture: 'pnpm-clean',
     prompt: 'Upgrade this app to Angular 22, along with its libraries.',

@@ -172,6 +172,10 @@ jobs:
         run: |
           sudo cp -r "$RUNNER_TEMP/templates" /home/evals/ws/templates
           sudo chown -R evals: /home/evals/ws
+      # The enterprise example's app takes its team's libraries from a registry on this machine, which serves what the
+      # prepare job published. It starts only when those packages came with the apps.
+      - name: Start the example's registry
+        run: as-evals node evals/registry.mjs --if-published
       - name: Run the case
         env:
           LOGIN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
