@@ -134,8 +134,13 @@ function stopTree(child) {
 
 function startServer(dir, { app, port, timeoutMs }) {
   const ng = join(dir, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
-  if (!existsSync(ng)) return Promise.resolve({ state: 'no-cli', log: `No Angular CLI at ${ng}. Install the project's dependencies first.` });
-  const args = [ng, 'serve', ...(app ? [app] : []), '--port', String(port), '--host', '127.0.0.1'];
+  // Under yarn's Plug'n'Play there is no node_modules, and yarn's own loader finds the CLI. Angular 22.2.7 built and
+  // served that way on yarn 4.18.1.
+  // shortcut: the app's own .pnp.cjs only; look above it if a Plug'n'Play workspace's app is ever checked.
+  const pnp = !existsSync(ng) && existsSync(join(dir, '.pnp.cjs'));
+  if (!existsSync(ng) && !pnp) return Promise.resolve({ state: 'no-cli', log: `No Angular CLI at ${ng}. Install the project's dependencies first.` });
+  const start = pnp ? ['-r', './.pnp.cjs', ...(existsSync(join(dir, '.pnp.loader.mjs')) ? ['--experimental-loader', './.pnp.loader.mjs'] : []), '-e', "process.argv.splice(1, 0, 'ng'); require('@angular/cli/bin/ng.js')"] : [ng];
+  const args = [...start, 'serve', ...(app ? [app] : []), '--port', String(port), '--host', '127.0.0.1'];
   // From Angular 22, @angular/build's dev server takes PORT over --port, so a PORT left in the shell would move it.
   const env = { ...process.env, NG_CLI_ANALYTICS: 'false', CI: '1', PORT: String(port) };
   const child = spawn(process.execPath, args, { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
