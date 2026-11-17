@@ -157,6 +157,7 @@ M7's run and its review found places where the plan says too little, or can't ru
 - [x] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up. `ask-enterprise-blocked` asks whether the portal can go to Angular 22. `evals/prepare.mjs` runs the example's own setup, and `evals/registry.mjs` starts its registry where a case runs. With the skill it scored 6/6, and without it 4/5, missing that ui-core goes first.
 
 **Done when:** the plan names a release too young for the printed command, an app in an npm, yarn or bun workspace gets a plan, and the enterprise example runs in the evals.
+nMet on 2026-11-16. The plan names a release too young for the printed command, an app in an npm workspace got a plan from real npm 11.19.0, and `ask-enterprise-blocked` ran on GitHub's machines, 6/6 with the skill and 4/5 without. A whole upgrade inside a workspace is the one item still open.
 
 ## Later
 
