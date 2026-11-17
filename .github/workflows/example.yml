@@ -1,0 +1,59 @@
+name: Example
+
+# Sets up the enterprise example and brings its dev container up on Docker Engine on Linux, which has no
+# host.docker.internal of its own, so the container reaches the registry through examples/enterprise/registry/bridge.mjs.
+# No agent runs here, and nothing holds a login or any secret.
+
+on:
+  pull_request:
+    paths:
+      - 'examples/enterprise/**'
+      - '.github/workflows/example.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devcontainer:
+    name: Dev container on Docker Engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NG_CLI_ANALYTICS: 'false'
+      PORTAL: ${{ github.workspace }}/../acme/acme-portal
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install pnpm and the dev container CLI
+        run: |
+          npm install -g --prefix "$RUNNER_TEMP/tools" pnpm@12.16.1 @devcontainers/cli@0.90.0 verdaccio@7.0.2
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+      - name: Start the registry
+        run: |
+          nohup verdaccio --config examples/enterprise/registry/config.yaml > "$RUNNER_TEMP/registry.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://localhost:4873/-/ping > /dev/null && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/registry.log"; exit 1
+      - name: Set the example up
+        run: node examples/enterprise/setup.mjs "$GITHUB_WORKSPACE/../acme"
+      - name: Forward Docker's bridge address to the registry
+        run: |
+          nohup node examples/enterprise/registry/bridge.mjs > "$RUNNER_TEMP/bridge.log" 2>&1 &
+          sleep 2; cat "$RUNNER_TEMP/bridge.log"; grep -q Forwarding "$RUNNER_TEMP/bridge.log"
+      # The container's install takes @acme packages from the registry, so it fails if the container can't reach it.
+      - name: Bring the dev container up
+        run: devcontainer up --workspace-folder "$PORTAL"
+      - name: Build and test the app in it
+        run: |
+          devcontainer exec --workspace-folder "$PORTAL" pnpm run build
+          devcontainer exec --workspace-folder "$PORTAL" pnpm test --watch=false
+      - name: Show the logs
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/registry.log" | tail -40
+          cat "$RUNNER_TEMP/bridge.log"
+          devcontainer exec --workspace-folder "$PORTAL" cat /tmp/registry-forward.log || true
