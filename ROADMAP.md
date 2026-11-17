@@ -97,7 +97,7 @@ The evals use small apps built for them, run on Linux, and only when someone sta
   - [x] No test signal: an app with no `test` target runs the project's own test command, and a run where no test can run at all stops to ask.
   - [x] The report: release notes from the repository when a package ships none, the version `ng update` chose inside a range, and only the optional migrations that would change the app.
   - [x] Check the files `angular.json` loads from a library against its next release, so a dropped file such as `marked.min.js` shows in the plan instead of the build.
-  - [ ] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says.
+  - [x] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says. Recorded on 2026-11-16 with the skill as of M8: the same app, to Angular 21, with the stop at Nebular.
 - [x] Take a whole upgrade through OpenCode, and update the README's agent table with what happened. OpenCode 2.2 on a free model took the test app from Angular 20 to 22 on Windows, one commit per major, and passed all 17 checks.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
 - [x] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
@@ -157,7 +157,8 @@ M7's run and its review found places where the plan says too little, or can't ru
 - [x] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up. `ask-enterprise-blocked` asks whether the portal can go to Angular 22. `evals/prepare.mjs` runs the example's own setup, and `evals/registry.mjs` starts its registry where a case runs. With the skill it scored 6/6, and without it 4/5, missing that ui-core goes first.
 
 **Done when:** the plan names a release too young for the printed command, an app in an npm, yarn or bun workspace gets a plan, and the enterprise example runs in the evals.
-nMet on 2026-11-16. The plan names a release too young for the printed command, an app in an npm workspace got a plan from real npm 11.19.0, and `ask-enterprise-blocked` ran on GitHub's machines, 6/6 with the skill and 4/5 without. A whole upgrade inside a workspace is the one item still open.
+
+Met on 2026-11-16. The plan names a release too young for the printed command, an app in an npm workspace got a plan from real npm 11.19.0, and `ask-enterprise-blocked` ran on GitHub's machines, 6/6 with the skill and 4/5 without. A whole upgrade inside a workspace is the one item still open.
 
 ## Later
 
