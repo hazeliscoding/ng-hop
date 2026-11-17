@@ -30,7 +30,7 @@ The plan prints a major as `waiting until` a time when a release it needs is you
 
 - **Which releases, and until when:** the major's lines and its `Blockers` give each one's publish time and when it's old enough.
 - **Whose they are:** the team's own, just published (confirm with `npm view <package> repository.url author`), or anyone else's.
-- **Whether there's a sooner way:** `No sooner way:` says why there's none: Angular itself is too young, a library ships migrations that installing it first would skip, `ng update` applies npm's setting itself and reads no exemption list, or the project's npm has no `min-release-age-exclude`, which npm 11.17 added. Then only waiting gets past it, or under npm's `before` only moving that setting.
+- **Whether there's a sooner way:** `No sooner way:` says why there's none: Angular itself is too young, or has no publish time on the registry, a library ships migrations that installing it first would skip, `ng update` applies npm's setting itself and reads no exemption list, or the project's npm has no `min-release-age-exclude`, which npm 11.17 added. Then only waiting gets past it, for the registry when Angular has no publish time, or under npm's `before` only moving that setting.
 
 **Wait** costs only the time shown. Recommend it for anyone else's library.
 
@@ -40,6 +40,8 @@ The plan prints a major as `waiting until` a time when a release it needs is you
 - **yarn:** `.yarnrc.yml`, `npmPreapprovedPackages:` with `- "@acme/ui-core@22.0.0"`.
 - **npm 11.17 or newer:** `.npmrc`, `min-release-age-exclude[]=@acme/ui-core`.
 - **bun:** `bunfig.toml`, under `[install]`, `minimumReleaseAgeExcludes = ["@acme/ui-core"]`.
+
+**With no publish time,** the plan prints the major as `waiting on a publish time from the registry`, and the release as missing its publish time, which some private registries leave out. yarn from 4.11 and pnpm 10 hold such a release back however old it is, while `ng update` takes it, so there's no time to wait for: until whoever runs the registry gives the release its time, exempting it as above is the only way past, and the `Sooner, once ...` command installs nothing first for it. When the major also needs a young release, the plan gives that one's time too.
 
 **Under npm's `before`,** the plan prints the major as `waiting on npm's before`, with no time, since that date moves only when someone moves it. npm's install lets an excluded package past `before` too, but `ng update` from Angular CLI 22.1 applies `before` itself and reads no exemption list, so for a hop to Angular 22.1 or newer the plan prints `No sooner way:`. Moving `before` is the person's call, so ask.
 

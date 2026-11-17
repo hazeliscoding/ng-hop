@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { after, test } from 'node:test';
 import { project, runScript, SMOKE } from './helpers/harness.mjs';
 
@@ -7,7 +8,16 @@ const made = [];
 after(() => made.forEach((p) => p.remove()));
 
 const CHROME = [process.env.CHROME_BIN, 'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((p) => p && existsSync(p));
-let port = 4300 + (process.pid % 400);
+// A port the system says is free, since one worked out from the process id can be taken already: WSL's relay held
+// 127.0.0.1:4311, and a run whose process id gave a test that port failed with EADDRINUSE.
+// shortcut: another process can take the port in the moment between this and the stand-in server listening on it; if
+// that shows up, have smoke.mjs take --port 0 and report the port the server got.
+const freePort = () => new Promise((resolve, reject) => {
+  const probe = createServer().once('error', reject).listen(0, '127.0.0.1', () => {
+    const { port } = probe.address();
+    probe.close(() => resolve(port));
+  });
+});
 
 // A stand-in for the Angular CLI, so the script's real process handling runs in seconds.
 function fakeApp(cliBody, { index = '<html><body><app-root></app-root></body></html>' } = {}) {
@@ -18,7 +28,7 @@ function fakeApp(cliBody, { index = '<html><body><app-root></app-root></body></h
 }
 const server = (html) => `http.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end(${JSON.stringify(html)}); }).listen(port, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + port + '/'));`;
 const check = async (p, ...extra) => {
-  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--json', ...extra], { cwd: p.dir });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '20', '--json', ...extra], { cwd: p.dir });
   return { code: r.code, result: JSON.parse(r.stdout || '{}'), stderr: r.stderr };
 };
 
@@ -44,7 +54,7 @@ test('a server that dies quietly fails', async () => {
 
 test('a server that never gets ready fails on the timeout', async () => {
   const p = fakeApp("setInterval(() => {}, 1000);");
-  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '2', '--json', '--no-browser'], { cwd: p.dir });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '2', '--json', '--no-browser'], { cwd: p.dir });
   assert.equal(r.code, 1);
   assert.equal(JSON.parse(r.stdout).serve, 'timeout');
 });
@@ -67,7 +77,7 @@ test('positive control: a module Vite cannot resolve on the first request fails,
 test('the dev server gets the port through PORT too, which Angular 22 prefers to --port', async () => {
   const angular22 = "const at = Number(process.env.PORT || port);\nhttp.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root>hi</app-root></body></html>'); }).listen(at, '127.0.0.1', () => console.log('  Local:   http://127.0.0.1:' + at + '/'));";
   const p = fakeApp(angular22);
-  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir, env: { PORT: String(port + 500) } });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir, env: { PORT: String(await freePort()) } });
   assert.equal(r.code, 0, r.stdout);
   assert.equal(JSON.parse(r.stdout).http, 200);
 });
@@ -81,7 +91,7 @@ test('a failed page with no error line shows the server\'s last lines instead', 
 
 test('the text report shows the server\'s last lines when nothing matched, and where to look them up', async () => {
   const p = fakeApp("http.createServer((q, r) => { console.log('something the patterns do not know went wrong'); r.writeHead(500); r.end('nope'); }).listen(port, '127.0.0.1', () => console.log('Compiled successfully.'));");
-  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--no-browser'], { cwd: p.dir });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '20', '--no-browser'], { cwd: p.dir });
   assert.equal(r.code, 1);
   assert.match(r.stdout, /server log: something the patterns do not know went wrong/);
   assert.match(r.stdout, /references\/troubleshooting\.md/);
@@ -105,7 +115,7 @@ test('a project with no install says what to do', async () => {
 
 test('the server is stopped afterwards, so the port is free again', async () => {
   const p = fakeApp(server('<html><body><app-root>hello</app-root></body></html>'));
-  const used = port++;
+  const used = await freePort();
   const first = await runScript(SMOKE, ['--project', p.dir, '--port', String(used), '--timeout', '20', '--json', '--no-browser'], { cwd: p.dir });
   assert.equal(first.code, 0);
   await new Promise((r) => setTimeout(r, 500));
@@ -115,7 +125,7 @@ test('the server is stopped afterwards, so the port is free again', async () => 
 
 test('the text report leads with the verdict', async () => {
   const p = fakeApp(server('<html><body><app-root>hello</app-root></body></html>'));
-  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(port++), '--timeout', '20', '--no-browser'], { cwd: p.dir });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '20', '--no-browser'], { cwd: p.dir });
   assert.match(r.stdout, /^App check: PASS/);
 });
 
