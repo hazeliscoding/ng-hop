@@ -43,7 +43,8 @@ jobs:
       - name: Forward Docker's bridge address to the registry
         run: |
           nohup node examples/enterprise/registry/bridge.mjs > "$RUNNER_TEMP/bridge.log" 2>&1 &
-          sleep 2; cat "$RUNNER_TEMP/bridge.log"; grep -q Forwarding "$RUNNER_TEMP/bridge.log"
+          for i in $(seq 1 30); do grep -q Forwarding "$RUNNER_TEMP/bridge.log" && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/bridge.log"; exit 1
       # The container's install takes @acme packages from the registry, so it fails if the container can't reach it.
       - name: Bring the dev container up
         run: devcontainer up --workspace-folder "$PORTAL"
