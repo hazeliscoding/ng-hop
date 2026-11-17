@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fakeManager, pkg, plan, PLAN, runScript, startRegistry, UPDATE } from './helpers/harness.mjs';
@@ -489,6 +490,56 @@ test('a lockfile that cannot be read falls back instead of making up a version',
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.plan.project.angularSource, 'package.json range');
   }
+});
+
+// An Angular 21 app at apps/web of an npm, yarn or bun workspace, whose lockfile is at the root.
+const member = (files, { workspaces = ['apps/*'], at = 'apps/web', own = {} } = {}) => {
+  const p = app({ files: {
+    'package.json': JSON.stringify({ name: 'root', private: true, workspaces }),
+    [`${at}/package.json`]: JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' } }),
+    ...files, ...Object.fromEntries(Object.entries(own).map(([name, text]) => [`${at}/${name}`, text])),
+  } });
+  return { dir: join(p.dir, ...at.split('/')), root: p.dir };
+};
+const npmLock = (packages) => JSON.stringify({ lockfileVersion: 3, packages: Object.fromEntries(Object.entries(packages).map(([key, version]) => [key, { version }])) });
+
+test('an app in an npm workspace gets a plan, from the root\'s lockfile and .npmrc', async () => {
+  // npm 11.19.0 refused `config list` in a member with ENOWORKSPACES, so the plan exited. It reads the root's .npmrc
+  // for a member and warns that it ignores the member's own, and keeps a member's own copy of a package under its folder.
+  const acme = [pkg('@acme/ui', { '21.0.0': { peer: '^21.0.0', at: '2025-12-01' }, '22.0.0': { peer: '^22.0.0', at: '2026-06-01' } })];
+  const w = member({ 'package-lock.json': npmLock({ 'node_modules/@angular/core': '20.2.0', 'apps/web/node_modules/@angular/core': '21.2.0', 'node_modules/@acme/ui': '21.0.0' }) }, { own: { '.npmrc': '@acme:registry=http://127.0.0.1:9/\n' } });
+  writeFileSync(join(w.dir, 'package.json'), JSON.stringify({ name: 'web', dependencies: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0', '@acme/ui': '^21.0.0' } }));
+  const r = await plan(world(), w, { to: 22, own: { scope: '@acme', packages: acme, rcDir: w.root } });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual([r.plan.project.packageManager, r.plan.project.angular, r.plan.project.angularSource, r.plan.project.workspaceRoot], ['npm', '21.2.0', 'lockfile', w.root]);
+  assert.equal(libIn(r, 22, '@acme/ui').to, '22.0.0');
+  assert.match(r.plan.hops[0].command, /^npx --no-install ng update /);
+});
+
+test('an app in a yarn or bun workspace reads the root\'s lockfile, and a folder the workspace doesn\'t list reads its own', async () => {
+  const yarn = await plan(world(), member({ 'package.json': JSON.stringify({ name: 'root', private: true, workspaces: { packages: ['apps/*'] } }), 'yarn.lock': '"@angular/core@npm:^21.0.0":\n  version: 21.2.0\n' }), { to: 22 });
+  assert.equal(yarn.code, 0, yarn.stderr);
+  assert.deepEqual([yarn.plan.project.packageManager, yarn.plan.project.angular, yarn.plan.project.angularSource], ['yarn', '21.2.0', 'lockfile']);
+  // bun 1.4.2 keys a member's own copy by the member's name, and the hoisted one by the package's alone.
+  const bunLock = JSON.stringify({ lockfileVersion: 1, packages: { '@angular/core': ['@angular/core@20.2.0', '', {}, 'sha512-x'], 'web/@angular/core': ['@angular/core@21.2.0', '', {}, 'sha512-x'] } });
+  const bun = await plan(world(), member({ 'bun.lock': bunLock }), { to: 22 });
+  assert.equal(bun.code, 0, bun.stderr);
+  assert.deepEqual([bun.plan.project.packageManager, bun.plan.project.angular, bun.plan.project.angularSource], ['bun', '21.2.0', 'lockfile']);
+  // Positive control: outside the workspace's patterns the root's lockfile isn't the app's, and its own is read.
+  const apart = await plan(world(), member({ 'package-lock.json': npmLock({ 'node_modules/@angular/core': '20.2.0' }) }, { at: 'tools/web', own: { 'package-lock.json': npmLock({ 'node_modules/@angular/core': '21.1.0' }) } }), { to: 22 });
+  assert.deepEqual([apart.plan.project.angular, apart.plan.project.workspaceRoot], ['21.1.0', undefined]);
+  // A pattern the plan can't read stops it, since it can't tell whose settings count.
+  const braces = await plan(world(), member({}, { workspaces: ['{apps,libs}/*'] }), { to: 22 });
+  assert.equal(braces.code, 1);
+  assert.match(braces.stderr, /has a workspaces pattern the plan can't read, "\{apps,libs\}\/\*", so the plan can't tell whether .* is in that workspace\.$/m);
+});
+
+test('angular.json\'s cli.packageManager names the manager before any lockfile does, as ng update takes it', async () => {
+  const proj = (cli) => app({ deps: { ...base, '@angular/core': '^21.0.0', '@angular/cli': '^21.0.0' }, lock: { ...lockBase, '@angular/core': '21.2.0' }, files: { 'angular.json': JSON.stringify({ version: 1, cli, projects: {} }) } });
+  assert.equal((await plan(world(), proj({ packageManager: 'bun' }), { to: 22 })).plan.project.packageManager, 'bun');
+  assert.equal((await plan(world(), proj({}), { to: 22 })).plan.project.packageManager, 'npm');
+  // A name that is no package manager is passed over, since it would end up in a printed command.
+  assert.equal((await plan(world(), proj({ packageManager: 'npm; echo x' }), { to: 22 })).plan.project.packageManager, 'npm');
 });
 
 test('a value the repo\'s .npmrc takes from the environment is sent only after the person says so', async () => {
