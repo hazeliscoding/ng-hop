@@ -211,6 +211,9 @@ async function main() {
       result.ok = page.status === 200 && result.rendered !== false && result.consoleErrors.length === 0;
     } finally {
       // The server writes errors after startup too, such as a module it can't resolve on first request.
+      // Its answer can get here before the line it logged while answering has come through the pipe, which lost that
+      // line on a CI machine, so the log gets a moment to catch up.
+      await new Promise((done) => setTimeout(done, 250));
       const late = server.log.split('\n').filter((l) => FAILED.test(l));
       if (late.length) result.serverErrors = late.slice(0, 15).map((l) => l.trim().slice(0, 300));
     }
