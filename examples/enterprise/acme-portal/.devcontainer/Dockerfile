@@ -8,7 +8,8 @@ FROM node:22.12.0-bookworm
 RUN npm install -g corepack@0.34.7 \
  && corepack enable \
  && mkdir -p /workspaces/acme-portal/node_modules \
- && chown -R node:node /workspaces/acme-portal \n && chmod 1777 /workspaces/acme-portal/node_modules
+ && chown -R node:node /workspaces/acme-portal
 
 # On Docker Engine on Linux the dev container gives the node user the host user's id, which then doesn't own the
 # volume: pnpm's install stopped with "Permission denied (os error 13)". So any user in the container may write there.
+RUN chmod 1777 /workspaces/acme-portal/node_modules
