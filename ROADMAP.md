@@ -97,7 +97,7 @@ The evals use small apps built for them, run on Linux, and only when someone sta
   - [x] No test signal: an app with no `test` target runs the project's own test command, and a run where no test can run at all stops to ask.
   - [x] The report: release notes from the repository when a package ships none, the version `ng update` chose inside a range, and only the optional migrations that would change the app.
   - [x] Check the files `angular.json` loads from a library against its next release, so a dropped file such as `marked.min.js` shows in the plan instead of the build.
-  - [ ] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says.
+  - [x] Record the README demo again, since the plan's lines changed (`fits`, `repository`), as its 2026-11-05 decision says. Recorded on 2026-11-16 with the skill as of M8: the same app, to Angular 21, with the stop at Nebular.
 - [x] Take a whole upgrade through OpenCode, and update the README's agent table with what happened. OpenCode 2.2 on a free model took the test app from Angular 20 to 22 on Windows, one commit per major, and passed all 17 checks.
 - [ ] Answer every upgrade problem someone files, with the plan's output and a fix or a reason.
 - [x] Evals on a schedule, so a library catching up shows as a changed result. A full batch costs about $32 of usage, so the weekly run covers the question cases, with the skill only.
@@ -142,24 +142,28 @@ Met on 2026-11-08. A review of the whole milestone afterwards found real problem
 M7's run and its review found places where the plan says too little, or can't run at all.
 
 - [x] The plan checks release age the way the package manager and `ng update` do. A release younger than pnpm's `minimum-release-age`, yarn's `npmMinimalAgeGate` or npm's `before` makes the printed command fail, so the plan should name it and the wait instead of calling the hop ready. It now does, and reads each manager's settings from its files and the environment, running none of them in the repo.
-- [ ] A plan for an app inside an npm, yarn or bun workspace. npm refuses `config list` there with `ENOWORKSPACES`, so the plan exits today. It needs the workspace's root, lockfile and package manager. `npm prefix` can't find the root, because it masks path parts that look like secrets. `ng update` picks the manager from `angular.json`'s `cli.packageManager`, then from lockfiles up to the git root, and the plan should pick it the same way. Check too whether `ng update` from CLI 22.0 and older misses a scope registry set at such a root, as it does at a pnpm one.
+- [x] A plan for an app inside an npm, yarn or bun workspace. npm refused `config list` there with `ENOWORKSPACES`, so the plan exited. It now finds the root whose `workspaces` list the app, reads the root's lockfile and `.npmrc`, as npm 11.19.0 does for a member, and takes the manager `angular.json`'s `cli.packageManager` names first.
+- [ ] Take a whole upgrade through an app in an npm, yarn or bun workspace, since only the plan has run there. Check whether `ng update` from CLI 22.0 and older misses a scope registry set at such a root, as it does at a pnpm one. Pick the manager fully as CLI 22.2.7 does: `package.json`'s `packageManager` before `angular.json`, then lockfiles in every folder up to the git root, as pnpm, yarn, bun, then npm. Read a root's `bunfig.toml` if bun does for a member.
 - [x] Run `ng` in step 3 through the project's own package manager. npm 11 refuses `npx --no-install ng build` with `EBADDEVENGINES` in a project whose `devEngines.packageManager` names pnpm or yarn, as pnpm 12's `pnpm init` writes it. Step 3 now names one runner per manager. npm refused the yarn hop's own `npm exec` there too, so it now runs for an empty folder.
-- [ ] Ask before the plan sends a value from the environment that the repo's `.npmrc` names, as the 2026-11-10 decision says. npm fills a `${...}` in from the person's environment, so the plan's requests send the value to the server the repo names, as the upgrade's installs do. The plan already turns npm's own update check off.
+- [x] Ask before the plan sends a value from the environment that the repo's `.npmrc` names, as the 2026-11-10 decision says. npm fills a `${...}` in from the person's environment, so the plan's requests send the value to the server the repo names, as the upgrade's installs do. The plan already turns npm's own update check off.
 - [x] Follow yarn 4.11 and newer, which hold back a release with no publish time, by their source. The plan counted such a release as old enough for every manager. It now follows each manager's own rule.
 - [x] Check what pnpm 10 and 11 do with the runner's `npm_config_pm_on_fail=error`, and whether they record themselves in the lockfile during a hop, as pnpm 12 did. Neither reads that setting. pnpm 10.34.9 never recorded itself. 11.28.11 did, as 12 does, but not under the runner's `pnpm_config_pm_on_fail=ignore`, so the runner needed no change.
 - [x] Stop a run of blank lines in an app's `.npmrc` from stalling the plan. `buildPlan` read its keys with a pattern that started each line with `\s*`, so 40,000 blank lines took about 2 s, and a 1 MB file would take many minutes. The suggested `[ \t]*` and `[^=\n]` still took 17 s on one long line of spaces, so the plan now reads the file line by line, as npm and pnpm 10 do.
-- [ ] Drop `npm_config_pm_on_fail=error` from the runner. No pnpm reads it: pnpm 10.34.9 has no such setting, and 11.28.11 and 12.16.1 read it only as `pnpm_config_`. npm 11 warns about it on every yarn hop.
-- [ ] Check the app under yarn's Plug'n'Play. `smoke.mjs` starts `node_modules/@angular/cli/bin/ng.js`, so with no `node_modules` it reports `no-cli`, and step 3 has the agent run `yarn ng serve` by hand instead.
-- [ ] Judge Node for Angular 22 and newer the way its CLI does, before Node 27 is stable. CLI 22 starts only on the majors its range lists, and warns on 23 and 25, so on Node 27 `ng` exits while the plan says ok.
-- [ ] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
-- [ ] Run the example's dev container on Docker Engine on Linux, which has no `host.docker.internal`: add the host gateway, and have the registry listen on the bridge address too, never on every address. Check it on a Linux host first.
-- [ ] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up.
+- [x] Drop `npm_config_pm_on_fail=error` from the runner. No pnpm reads it: pnpm 10.34.9 has no such setting, and 11.28.11 and 12.16.1 read it only as `pnpm_config_`. npm 11 warns about it on every yarn hop.
+- [x] Check the app under yarn's Plug'n'Play. `smoke.mjs` started `node_modules/@angular/cli/bin/ng.js`, so with no `node_modules` it reported `no-cli`. It now starts the CLI through the app's `.pnp.cjs`, which checked a real Angular 22.2.7 app on yarn 4.18.1.
+- [x] Judge Node for Angular 22 and newer the way its CLI does, before Node 27 is stable. CLI 22 starts only on the majors its range lists, and warns on 23 and 25, so on Node 27 `ng` exits while the plan says ok.
+- [x] Name a Node pin the plan can't read, such as `lts/iron` in `.nvmrc`, instead of counting it as fitting. Read a dev container at the repo's root (`.devcontainer.json`), and a Dockerfile that `build.dockerfile` names elsewhere.
+- [x] Run the example's dev container on Docker Engine on Linux, which has no `host.docker.internal`. The container adds the host gateway under that name, and `registry/bridge.mjs` forwards Docker's bridge address to the registry, never every address. The volume for `node_modules` is writable by any user in the container, since Linux gives the container's user the host user's id. The `Example` workflow brings the container up on GitHub's Ubuntu machine, then builds and tests the app in it.
+- [x] Run the enterprise example as an eval case, with its registry started in CI, so a change that breaks it shows up. `ask-enterprise-blocked` asks whether the portal can go to Angular 22. `evals/prepare.mjs` runs the example's own setup, and `evals/registry.mjs` starts its registry where a case runs. With the skill it scored 6/6, and without it 4/5, missing that ui-core goes first.
 
 **Done when:** the plan names a release too young for the printed command, an app in an npm, yarn or bun workspace gets a plan, and the enterprise example runs in the evals.
+
+Met on 2026-11-16. The plan names a release too young for the printed command, an app in an npm workspace got a plan from real npm 11.19.0, and `ask-enterprise-blocked` ran on GitHub's machines, 6/6 with the skill and 4/5 without. A whole upgrade inside a workspace is the one item still open.
 
 ## Later
 
 - Run the skill for real in GitHub Copilot. So far it's checked from Copilot's docs only.
+- Take the whole enterprise upgrade through the evals: the libraries, a publish, then the app. Today's case only asks the question.
 
 ## Not planned
 

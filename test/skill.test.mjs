@@ -303,7 +303,7 @@ test('the skill raises the Node pins the plan names when the app is already on t
 });
 
 test('the skill looks for Node pins past the files the plan reads', () => {
-  // The plan reads a fixed set of files, and passes over a version it can't read, such as lts/iron in .nvmrc. An agent
+  // The plan reads a fixed set of files, and only names a pin with no number in it, such as lts/iron in .nvmrc. An agent
   // that took its list as complete would repeat the enterprise run's missed dev container.
   assert.match(step('e'), /Raise each Node pin the plan lists/, 'positive control: this is the step that raises pins');
   assert.match(step('e'), /search the repo for other pins/);
@@ -328,6 +328,8 @@ test('a Node in a gap of Angular\'s range is too old, and a newer release of the
   assert.match(rule, /odd majors/);
   assert.match(rule, /newer release of the line they're on/);
   assert.match(rule, /`unsupported` means Node is newer than every/);
+  // CLI 22.2.7 exits on a Node major its range doesn't name, such as 27.
+  assert.match(rule, /`too-new` means .* `ng` exits there, so stop and ask/);
 });
 
 const libraries = () => readFileSync(join(SKILL_DIR, 'references', 'libraries.md'), 'utf8');

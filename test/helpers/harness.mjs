@@ -189,7 +189,7 @@ console.log(answer);
 // makes the registry want the token the .npmrc then holds. manager: what an unpinned pnpm or yarn answers, by default a
 // version with no minimum release age. env: more of the plan's environment, over what the tests run with. The plan gets
 // an empty home and XDG_CONFIG_HOME of its own, so no ~/.yarnrc.yml or pnpm config.yaml on this machine counts.
-export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager, env = {} } = {}) {
+export async function plan(packages, proj, { to, next = false, text = false, registryOptions, own = null, node, manager, env = {}, more = [] } = {}) {
   const registry = await startRegistry(packages, registryOptions);
   const company = own && await startRegistry(own.packages, { requireAuth: Boolean(own.auth) });
   const token = company && own.auth ? `${company.url.replace(/^http:/, '')}:_authToken=test-only\n` : '';
@@ -202,6 +202,7 @@ export async function plan(packages, proj, { to, next = false, text = false, reg
     if (to !== undefined) args.push('--to', String(to));
     if (next) args.push('--next');
     if (!text) args.push('--json');
+    args.push(...more);
     const isolated = { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, '.config') };
     const out = await runScript(PLAN, args, { cwd: proj.dir, env: { npm_config_registry: registry.url, npm_execpath: fake.file, ...isolated, ...env }, node });
     return { ...out, plan: !text && out.stdout ? JSON.parse(out.stdout) : null, asked: fake.asked() };

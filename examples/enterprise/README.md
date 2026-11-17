@@ -41,7 +41,13 @@ npx @devcontainers/cli exec --workspace-folder <folder>/acme-portal pnpm test --
 
 A plain `up` keeps a container made before the upgrade, on its old Node, and it reports success once the install is done, before anything runs Angular. `--watch=false` makes the tests run once and stop, since in a terminal they'd wait for changes.
 
-The container reaches the registry on your machine through `.devcontainer/registry-forward.mjs` and Docker Desktop's `host.docker.internal`, which leads to your machine's 127.0.0.1, where the registry listens. Docker Engine on Linux has no such name by default, so there the container can't install the `@acme` packages.
+The container reaches the registry on your machine through `.devcontainer/registry-forward.mjs` and Docker Desktop's `host.docker.internal`, which leads to your machine's 127.0.0.1, where the registry listens. Docker Engine on Linux has no Docker Desktop to do that, so the dev container gives itself that name for Docker's bridge address, and you forward that address to the registry, in a terminal you leave running:
+
+```sh
+node examples/enterprise/registry/bridge.mjs
+```
+
+It listens on the bridge address only, never on every address, so nothing outside this machine's containers reaches the registry through it. The `Example` workflow runs all of this on a Linux machine.
 
 ## On video
 

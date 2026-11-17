@@ -293,12 +293,16 @@ function readYarnLock(dir, deps) {
 
 // bun.lock is JSON with trailing commas. A top-level key is the hoisted copy, which is the app's own; a nested one,
 // such as "some-lib/@angular/core", belongs to another package.
-function readBunLock(dir) {
+function readBunLock(dir, member = null) {
   try {
     const packages = JSON.parse(readFileSync(join(dir, 'bun.lock'), 'utf8').replace(/,(\s*[}\]])/g, '$1')).packages || {};
-    return Object.fromEntries(Object.entries(packages)
-      .filter(([key, value]) => VALID_NAME.test(key) && Array.isArray(value) && typeof value[0] === 'string')
+    const own = typeof member === 'string' && member ? `${member}/` : null;
+    const versions = (keep) => Object.fromEntries(Object.entries(packages)
+      .map(([key, value]) => [keep(key), value])
+      .filter(([key, value]) => key && VALID_NAME.test(key) && Array.isArray(value) && typeof value[0] === 'string')
       .map(([key, value]) => [key, value[0].slice(value[0].lastIndexOf('@') + 1)]));
+    // A workspace member's own copy, "web/@angular/core" for the member named web, wins over the hoisted one.
+    return { ...versions((key) => key), ...(own ? versions((key) => (key.startsWith(own) ? key.slice(own.length) : null)) : {}) };
   } catch {
     return {};
   }
@@ -313,23 +317,34 @@ function nodePins(dir) {
   const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } };
   const add = (path, value, kind = 'version') => pins.push({ file: relative(dir, path).replace(/\\/g, '/'), value: String(value).trim(), kind });
   const bases = [...new Set([dir, root])];
+  const dockerfiles = new Set();
+  const dockerfile = (path) => {
+    if (dockerfiles.has(path)) return;
+    dockerfiles.add(path);
+    const text = read(path) || '';
+    // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
+    const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
+    for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(path, image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
+  };
   for (const base of bases) {
     for (const name of ['.nvmrc', '.node-version']) { const text = read(join(base, name)); if (text?.trim()) add(join(base, name), text.trim().split('\n')[0]); }
     // asdf writes nodejs, and mise reads node too.
     const tools = /^node(?:js)?\s+(\S+)/m.exec(read(join(base, '.tool-versions')) || '');
     if (tools) add(join(base, '.tool-versions'), tools[1]);
-    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) {
-      const text = read(join(base, docker)) || '';
-      // docker init writes the version as an ARG's default: ARG NODE_VERSION=20.11.0, then FROM node:${NODE_VERSION}-alpine.
-      const args = new Map([...text.matchAll(/^\s*ARG\s+(\w+)=["']?([^\s"']+)/gim)].map(([, key, value]) => [key, value]));
-      for (const [, image] of text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)/gim)) add(join(base, docker), image.replace(/\$\{?(\w+)\}?/g, (m, key) => args.get(key) ?? m), 'image');
+    for (const docker of ['.devcontainer/Dockerfile', 'Dockerfile']) dockerfile(join(base, docker));
+    // A dev container's settings are in .devcontainer/devcontainer.json or in .devcontainer.json at the root.
+    for (const file of [join(base, '.devcontainer', 'devcontainer.json'), join(base, '.devcontainer.json')]) {
+      // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
+      const devcontainer = (read(file) || '').replace(/^[ \t]*\/\/.*$/gm, '');
+      const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (image) add(file, image, 'image');
+      const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (feature) add(file, feature);
+      // Its build can name a Dockerfile anywhere, from the settings file's folder, as build.dockerfile or the older
+      // dockerFile. One outside the repo isn't the repo's pin, and isn't read.
+      const named = /"docker[fF]ile"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
+      if (named && inside(resolve(dirname(file), named), root)) dockerfile(resolve(dirname(file), named));
     }
-    // devcontainer.json allows comments, and a commented-out image is no pin and mustn't hide the one in use.
-    const devcontainer = (read(join(base, '.devcontainer', 'devcontainer.json')) || '').replace(/^[ \t]*\/\/.*$/gm, '');
-    const image = /"image"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
-    if (image) add(join(base, '.devcontainer', 'devcontainer.json'), image, 'image');
-    const feature = /features\/node:\d+"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/.exec(devcontainer)?.[1];
-    if (feature) add(join(base, '.devcontainer', 'devcontainer.json'), feature);
     // A workspace keeps engines and volta at its root too, and Volta's members extend the root's.
     try {
       const pkg = JSON.parse(read(join(base, 'package.json')) || '{}');
@@ -355,6 +370,11 @@ function nodePins(dir) {
   return pins;
 }
 
+// A version pin that names no number, such as lts/iron in .nvmrc or lts in a dev container's Node feature: what it stands
+// for changes with time, so the plan names it instead of counting it as fitting.
+const PIN_VERSION = /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/;
+const pinUnread = (pin) => pin.kind === 'version' && !PIN_VERSION.test(pin.value);
+
 // Whether a pin keeps the team on a Node the range accepts. A bare major such as "22" floats to its newest release, so
 // it fits when any release of that major does; a fixed version has to be in the range itself.
 function pinFits(pin, range) {
@@ -366,7 +386,7 @@ function pinFits(pin, range) {
     // the Node in it is the two-digit major after that, and a tag that is only the image's version (5-trixie) says none.
     // shortcut: an image's own version freezes the Node inside it, so only its major is known from the tag; read the
     // image's NODE_VERSION if a frozen pin below the range's floor ever matters.
-    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : /^v?(\d+(?:\.\d+){0,2})(?:\.x)?$/.exec(pin.value)?.[1];
+    const version = pin.kind === 'image' ? /(?:^|[/:])(?:node:|(?:typescript|javascript)-node:(?:\d+(?:\.\d+){0,2}-)?(?=[1-9]\d))(\d+(?:\.\d+){0,2})(?:[-@]|$)/.exec(pin.value)?.[1] : PIN_VERSION.exec(pin.value)?.[1];
     if (!version) return true;
     const parts = version.split('.');
     const asRange = parts.length === 3 ? version : `${version}.x`;
@@ -398,6 +418,27 @@ function angularAssets(dir) {
   return found;
 }
 
+// The npm, yarn or bun workspace an app is in: the nearest folder above it, up to the git root, whose package.json lists
+// it under workspaces, as a list or as yarn's { packages }. npm 11.19.0 refuses `config list` in a member with
+// ENOWORKSPACES, and reads the root's .npmrc and lockfile for it. A pattern the plan can't read stops it, since it can't
+// tell whose settings count.
+function findWorkspaceRoot(dir) {
+  const stop = gitRoot(dir);
+  if (stop === dir) return null;
+  for (const root of upFrom(dir).slice(1)) {
+    let pkg = null;
+    try { pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')); } catch { /* no package.json, or a broken one, is no root */ }
+    const patterns = Array.isArray(pkg?.workspaces) ? pkg.workspaces : pkg?.workspaces?.packages;
+    if (Array.isArray(patterns)) {
+      const covers = takesIn(patterns.filter((p) => typeof p === 'string'), relative(root, dir).replace(/\\/g, '/'), false);
+      if (typeof covers === 'string') throw new PlanError(`${join(root, 'package.json')} has ${covers.replace('a packages pattern', 'a workspaces pattern')}, so the plan can't tell whether ${dir} is in that workspace.`);
+      if (covers) return root;
+    }
+    if (root === stop) break;
+  }
+  return null;
+}
+
 function readProject(dir) {
   const pkgPath = join(dir, 'package.json');
   if (!existsSync(pkgPath)) throw new PlanError(`No package.json in ${dir}. Run this from the Angular project's root.`);
@@ -406,25 +447,41 @@ function readProject(dir) {
   if (!deps['@angular/core']) {
     throw new PlanError(`${dir} has no @angular/core dependency, so it isn't an Angular project${pkg.workspaces ? ' root (it declares workspaces: run this in the app that depends on Angular)' : ''}.`);
   }
-  const lockPath = join(dir, 'package-lock.json');
-  const lock = existsSync(lockPath) ? readJson(lockPath) : null;
-  const pnpmRoot = lock ? null : findPnpmRoot(dir);
+  // A lockfile is the app's own, or its workspace root's.
+  const wsRoot = findWorkspaceRoot(dir);
+  const at = (name) => [dir, wsRoot].find((d) => d && existsSync(join(d, name)));
+  const lockDir = at('package-lock.json');
+  // ng update takes the manager angular.json's cli.packageManager names before it looks for a lockfile, as CLI 22.2.7's
+  // getConfiguredPackageManager does.
+  // shortcut: that CLI reads package.json's packageManager before angular.json, and lockfiles in every folder up to the
+  // git root as pnpm, yarn, bun, then npm; here a lockfile still goes first, in the plan's own order, and only the app's
+  // folder and its workspace root are looked in. Follow the CLI if a repo with two managers' files is planned wrong.
+  let configured = null;
+  try { configured = String(JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8')).cli?.packageManager ?? '').split('@')[0]; } catch { /* no angular.json here, or one with comments, names none */ }
+  if (!['npm', 'pnpm', 'yarn', 'bun'].includes(configured)) configured = null;
+  const pnpmAt = configured && configured !== 'pnpm' ? null : !configured && lockDir ? null : findPnpmRoot(dir);
+  const packageManager = configured
+    || (lockDir ? 'npm'
+    : pnpmAt ? 'pnpm'
+    : at('yarn.lock') ? 'yarn'
+    : at('bun.lockb') || at('bun.lock') ? 'bun'
+    : (pkg.packageManager || 'npm').split('@')[0]);
+  const lock = packageManager === 'npm' && lockDir ? readJson(join(lockDir, 'package-lock.json')) : null;
+  const pnpmRoot = packageManager === 'pnpm' ? pnpmAt : null;
   const pnpmLock = pnpmRoot ? readPnpmLock(pnpmRoot, dir) : {};
-  const packageManager = lock ? 'npm'
-    : pnpmRoot ? 'pnpm'
-    : existsSync(join(dir, 'yarn.lock')) ? 'yarn'
-    : existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, 'bun.lock')) ? 'bun'
-    : (pkg.packageManager || 'npm').split('@')[0];
+  // In a root's lockfile a member's own copy comes before the hoisted one: npm keys it by the member's folder, and
+  // bun 1.4.2 by the member's name.
+  const member = lockDir && lockDir !== dir ? `${relative(lockDir, dir).replace(/\\/g, '/')}/` : '';
 
-  const otherLock = packageManager === 'yarn' && existsSync(join(dir, 'yarn.lock')) ? readYarnLock(dir, deps)
-    : packageManager === 'bun' && existsSync(join(dir, 'bun.lock')) ? readBunLock(dir)
+  const otherLock = packageManager === 'yarn' && at('yarn.lock') ? readYarnLock(at('yarn.lock'), deps)
+    : packageManager === 'bun' && at('bun.lock') ? readBunLock(at('bun.lock'), at('bun.lock') !== dir ? pkg.name : null)
     : {};
 
   const installed = (name) => {
-    const fromLock = lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name] || otherLock[name];
+    const fromLock = (member && lock?.packages?.[`${member}node_modules/${name}`]?.version) || lock?.packages?.[`node_modules/${name}`]?.version || lock?.dependencies?.[name]?.version || pnpmLock[name] || otherLock[name];
     if (fromLock && semver.valid(fromLock)) return { version: fromLock, source: 'lockfile' };
-    const modPath = join(dir, 'node_modules', name, 'package.json');
-    if (existsSync(modPath)) {
+    const modPath = [dir, wsRoot].filter(Boolean).map((d) => join(d, 'node_modules', name, 'package.json')).find((path) => existsSync(path));
+    if (modPath) {
       try { const v = JSON.parse(readFileSync(modPath, 'utf8')).version; if (semver.valid(v)) return { version: v, source: 'node_modules' }; } catch { /* a broken install falls through to the declared range */ }
     }
     const spec = deps[name];
@@ -434,7 +491,7 @@ function readProject(dir) {
     }
     return null;
   };
-  return { dir, pkg, deps, packageManager, installed, pnpmRoot, nx: existsSync(join(dir, 'nx.json')) };
+  return { dir, pkg, deps, packageManager, installed, pnpmRoot, wsRoot: pnpmRoot ? null : wsRoot, nx: existsSync(join(dir, 'nx.json')) };
 }
 
 // ---- Release age: read as pnpm and yarn read it, from their files and the environment ---------------------------
@@ -740,7 +797,7 @@ const idOf = (path) => { try { const { dev, ino } = statSync(path, { bigint: tru
 function repoPart(project, path) {
   const rc = process.env[envNamed(/^yarn_rc_filename$/i)] || '.yarnrc.yml';
   const settings = upFrom(project.dir).filter((dir) => !inside(homedir(), dir) && [rc, 'pnpm-workspace.yaml'].some((name) => existsSync(join(dir, name))));
-  const parts = [[project.dir, 'folder'], [project.pnpmRoot, 'pnpm workspace'], [gitRoot(project.dir), 'git repository'], ...settings.map((dir) => [dir, 'repository'])].filter(([dir]) => dir);
+  const parts = [[project.dir, 'folder'], [project.pnpmRoot, 'pnpm workspace'], [project.wsRoot, 'workspace'], [gitRoot(project.dir), 'git repository'], ...settings.map((dir) => [dir, 'repository'])].filter(([dir]) => dir);
   const ids = new Map();
   for (const [dir, what] of parts) { const id = idOf(dir); if (id && !ids.has(id)) ids.set(id, what); }
   const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
@@ -1084,8 +1141,36 @@ async function broughtLicenses(registry, lib, before, after) {
 
 // ---- The plan ---------------------------------------------------------------------------------------------------
 
-async function buildPlan({ projectDir, to, next = false }) {
+// npm fills ${NAME} in an .npmrc from the environment, in a key or a value, unless an odd run of backslashes comes before
+// it, and reads no line that starts with ; or #. So a repo nobody has checked yet could have the plan's first request
+// carry the person's token to a server the repo chose. A variable the environment doesn't hold carries nothing.
+function envAsks(project, dir, approved) {
+  const asks = [];
+  for (const rc of new Set([join(project.pnpmRoot || project.wsRoot || dir, '.npmrc'), join(dir, '.npmrc')])) {
+    const found = new Map();
+    for (const line of (readText(rc) ?? '').split(/[\r\n]+/)) {
+      if (/^\s*[;#]/.test(line)) continue;
+      const [key, ...rest] = line.split('=');
+      const to = key.trim().startsWith('//') ? key.trim().slice(2).split('/')[0] : /(?:^|:)registry$/.test(key.trim()) ? rest.join('=').trim() : 'the registry';
+      for (const [, slashes, name] of line.matchAll(/(?<!\\)(\\*)\$\{([^${}?]+)\??\}/g)) {
+        if (slashes.length % 2 || !process.env[name] || approved.has(name) || found.has(name)) continue;
+        found.set(name, plainLine(to, 80));
+      }
+    }
+    if (found.size) asks.push({ rc, found });
+  }
+  if (!asks.length) return;
+  const names = asks.flatMap(({ found }) => [...found.keys()]);
+  const odd = names.find((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+  const said = asks.map(({ rc, found }) => `${rc} takes ${[...found].map(([name, to]) => `${plainLine(name, 60)} (sent to ${to})`).join(' and ')} from the environment`).join(', and ');
+  throw new PlanError(`${said}, and the plan's requests would send them there before anyone has installed from this repo. No request was made. ${odd
+    ? `"${plainLine(odd, 60)}" is a name that can't be approved on a command line, so ask the person to change that line.`
+    : `Ask the person, and with their yes run the plan again with --send-env ${[...new Set(names)].join(',')}.`}`);
+}
+
+async function buildPlan({ projectDir, to, next = false, sendEnv = [] }) {
   const project = readProject(projectDir);
+  envAsks(project, projectDir, new Set(sendEnv));
   const assets = angularAssets(projectDir);
   const pins = nodePins(projectDir);
   // pnpm reads a workspace's registry settings from the .npmrc at its root, and pnpm 10.34.9 lays the app's own over it,
@@ -1096,7 +1181,7 @@ async function buildPlan({ projectDir, to, next = false }) {
   const npm = npmScript(project);
   const npmConfig = (cwd, args = []) => runNpm(npm, ['config', 'list', '--json', ...args], { cwd }).then(({ stdout }) => JSON.parse(stdout))
     .catch((err) => { throw new PlanError(`Could not run npm to read the registry settings: ${err.message.split('\n')[0]}`); });
-  const configDir = project.pnpmRoot || projectDir;
+  const configDir = project.pnpmRoot || project.wsRoot || projectDir;
   const config = await npmConfig(configDir);
   const found = ['pnpm', 'yarn'].includes(project.packageManager) ? await managerVersion(project, project.packageManager) : null;
   // semver sorts a prerelease below its release, so pnpm 11.0.0-rc.5 counted as pnpm 10, though it read .npmrc as 11.0.0
@@ -1104,7 +1189,7 @@ async function buildPlan({ projectDir, to, next = false }) {
   const preManager = found?.version && semver.prerelease(found.version) ? found.version : null;
   if (preManager) found.version = semver.coerce(preManager).version;
   const appRc = join(projectDir, '.npmrc');
-  const appKeys = configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
+  const appKeys = Boolean(project.pnpmRoot) && configDir !== projectDir && existsSync(appRc) && semver.lt(found?.version ?? '0.0.0', '11.0.0');
   const fromApp = new Set(), swayed = [];
   if (appKeys) {
     const appConfig = await npmConfig(projectDir, ['--workspaces=false']);
@@ -1130,7 +1215,7 @@ async function buildPlan({ projectDir, to, next = false }) {
     const own = fromApp.has(blank);
     throw new PlanError(`${own ? appRc : `An .npmrc npm reads in ${configDir}`} sets ${blank} without an address, which npm reads as ${plainLine(JSON.stringify(config[blank]), 60)}${own ? ' and pnpm 10 refuses' : ''}, so the plan can't tell which registry to ask; ask the person to fix that line.`);
   }
-  const unread = configDir !== projectDir && !appKeys && existsSync(appRc) ? `pnpm 11 and 12 read a token only from the workspace root's .npmrc, ${join(configDir, '.npmrc')}, and not from ${appRc}` : null;
+  const unread = configDir !== projectDir && !appKeys && existsSync(appRc) ? `${project.wsRoot ? 'npm reads' : 'pnpm 11 and 12 read'} a token only from the workspace root's .npmrc, ${join(configDir, '.npmrc')}, and not from ${appRc}` : null;
   const registry = registryClient(config, appKeys ? [configDir, projectDir] : [configDir], npm, unread);
   const asked = releaseAge(project, config, found);
   let age = asked?.unknown ? null : asked;
@@ -1204,7 +1289,7 @@ async function buildPlan({ projectDir, to, next = false }) {
 
   const plan = {
     project: {
-      dir: projectDir, packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
+      dir: projectDir, ...(project.wsRoot ? { workspaceRoot: project.wsRoot } : {}), packageManager: project.packageManager, node: process.version.replace(/^v/, ''),
       angular: currentCore.version, angularSource: currentCore.source, nx: project.nx,
     },
     latestAngular, target, next: next ? prerelease : null, releaseAge: age, reachable: currentMajor, status: 'ok', hops: [], blockers: [], unchecked: [], notes: [], licenseChanges: [], deprecations: [],
@@ -1467,9 +1552,14 @@ async function buildPlan({ projectDir, to, next = false }) {
     if (nodeRange && semver.validRange(nodeRange)) {
       const version = process.version.replace(/^v/, '');
       // A Node in a gap of the range, as 24.14 is in Angular 22's, is too old: a newer one fits, and ng won't start on it.
-      node.status = semver.satisfies(version, nodeRange) ? 'ok' : semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old';
+      // CLI 22.2.7's bin/ng.js starts only on a Node major its range lists, so >=26.0.0 means 26 alone, and ng exits on 27.
+      // shortcut: a pin that names such a major still counts as fitting; judge pins this way once Node 27 is out.
+      const listed = major >= 22 && nodeRange.split('||').map((part) => semver.minVersion(part)?.major);
+      node.status = !semver.satisfies(version, nodeRange) ? (semver.gtr(version, nodeRange) ? 'unsupported' : 'too-old') : listed && !listed.includes(semver.major(version)) ? 'too-new' : 'ok';
       const below = pins.filter((p) => !pinFits(p, nodeRange)).map(({ file, value }) => ({ file, value }));
       if (below.length) node.pins = below;
+      const unread = pins.filter(pinUnread).map(({ file, value }) => ({ file, value: plainLine(value, 60) }));
+      if (unread.length) node.unreadPins = unread;
     }
 
     const moved = libs.filter((l) => l.from !== l.to);
@@ -1751,6 +1841,7 @@ function render(plan) {
     lines.push('', `Angular ${hop.major} (${hop.angular}${hop.angularNewer ? `; ${newer(hop.angularNewer, hop.ngUpdateSkips)}` : ''})${waits ? (hop.until ? `, waiting until ${minute(hop.until, true)}` : age.before ? ', waiting on npm\'s before' : `, waiting on a publish time from the registry${dated ? `, and until ${minute(dated, true)}` : ''}`) : ''}`);
     lines.push(`  Node: ${hop.node.status}${hop.node.range ? ` (needs ${hop.node.range})` : ''}`);
     if (hop.node.pins) lines.push(`  Node pins below that, in the repo: ${hop.node.pins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
+    if (hop.node.unreadPins) lines.push(`  Node pins the plan can't read, in the repo: ${hop.node.unreadPins.map((p) => `${p.file} (${p.value})`).join(', ')}`);
     for (const lib of hop.libs) {
       const move = lib.from === lib.to ? `${lib.to}, no change` : `${lib.from ?? 'not installed'} -> ${lib.to}`;
       const held = hop.held?.find((h) => h.name === lib.name);
@@ -1784,19 +1875,20 @@ function render(plan) {
 
 // ---- Entry point ----------------------------------------------------------------------------------------------------
 
-const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--json]
+const USAGE = `Usage: plan.mjs [--project <dir>] [--to <major>] [--next] [--send-env <names>] [--json]
 
 Works out how far an Angular app can upgrade today, and what is in the way. Changes nothing.
   --project  the project folder (default: the current folder)
   --to       the Angular major to aim for (default: the latest stable)
   --next     aim for Angular's next prerelease instead, only when someone asks to try one
+  --send-env environment variables the repo's .npmrc names, separated by commas, that the person agreed to send
   --json     print the plan as JSON
 Exit codes: 0 the target is reachable or there is nothing to do, 2 blocked before the target, 1 no plan could be made.`;
 
 async function main() {
   let values;
   try {
-    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
+    ({ values } = parseArgs({ options: { project: { type: 'string' }, to: { type: 'string' }, next: { type: 'boolean' }, 'send-env': { type: 'string', multiple: true }, json: { type: 'boolean' }, help: { type: 'boolean' } } }));
   } catch (err) {
     throw new PlanError(`${err.message.split('.')[0]}.\n${USAGE}`);
   }
@@ -1807,7 +1899,7 @@ async function main() {
     to = Number(values.to);
     if (!Number.isInteger(to) || to < 2) throw new PlanError(`--to takes an Angular major version such as 22, not "${values.to}".`);
   }
-  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next) });
+  const plan = await buildPlan({ projectDir, to, next: Boolean(values.next), sendEnv: (values['send-env'] ?? []).flatMap((names) => names.split(',')) });
   process.stdout.write(`${values.json ? JSON.stringify(plan, null, 2) : render(plan)}\n`);
   process.exitCode = plan.status === 'blocked' ? 2 : 0;
 }

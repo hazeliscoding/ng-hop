@@ -26,7 +26,10 @@ function run(cmd, args, cwd) {
 }
 
 async function versions(name) {
-  const res = await fetch(`${REGISTRY}${name.replace('/', '%2f')}`);
+  // Asked again once: after the minutes a build takes, the first try can land on a connection the registry has closed,
+  // which failed the setup on a Linux CI machine with "fetch failed".
+  const url = `${REGISTRY}${name.replace('/', '%2f')}`;
+  const res = await fetch(url).catch(() => fetch(url));
   return res.ok ? Object.keys((await res.json()).versions ?? {}) : [];
 }
 

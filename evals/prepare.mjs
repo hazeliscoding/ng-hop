@@ -6,7 +6,8 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { FIXTURES } from './fixtures.mjs';
-import { developerEnv, TEMPLATES, testCommand } from './common.mjs';
+import { developerEnv, REPO, TEMPLATES, testCommand } from './common.mjs';
+import { startRegistry } from './registry.mjs';
 
 const run = (cmd, cwd, opts = {}) => execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf8', timeout: 600000, env: developerEnv({ NG_CLI_ANALYTICS: 'false' }), ...opts });
 
@@ -59,6 +60,21 @@ for (const name of names) {
       writeFileSync(join(dir, '.ng-hop-ok'), new Date().toISOString());
       const core = JSON.parse(readFileSync(join(dir, 'node_modules/@angular/core/package.json'), 'utf8')).version;
       console.log(`${name}: ok, a real app on Angular ${core}, build ${built ? 'passes' : 'FAILS'}, tests ${tested ? 'pass' : 'fail or there are none'}, ${Math.round((Date.now() - started) / 1000)}s`);
+      continue;
+    }
+    if (fixture.example) {
+      // The example's own setup builds, tests and publishes the libraries, then installs and builds the app.
+      await startRegistry();
+      const target = join(TEMPLATES, `.setup-${name}`);
+      rmSync(target, { recursive: true, force: true });
+      run(`node "${join(REPO, 'examples', 'enterprise', 'setup.mjs')}" "${target}"`, TEMPLATES, { timeout: 1800000 });
+      // Without node_modules: pnpm's links there point back into the folder they were made in, and a case installs for itself.
+      cpSync(join(target, fixture.example), dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules|dist|\.angular)$/.test(src) });
+      rmSync(target, { recursive: true, force: true });
+      run('git init -q -b main && git add -A && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -q -m "chore: start of the example app"', dir);
+      writeFileSync(join(dir, '.git', 'info', 'exclude'), '.ng-hop-ok\n');
+      writeFileSync(join(dir, '.ng-hop-ok'), new Date().toISOString());
+      console.log(`${name}: ok, the enterprise example's ${fixture.example}, ${Math.round((Date.now() - started) / 1000)}s`);
       continue;
     }
     const manager = fixture.packageManager || 'npm';

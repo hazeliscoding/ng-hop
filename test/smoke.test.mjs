@@ -104,6 +104,19 @@ test('positive control: Vite\'s Internal server error on a request fails the che
   assert.match(result.serverErrors.join(), /Internal server error: Transform failed/);
 });
 
+test('under yarn\'s Plug\'n\'Play, with no node_modules, the CLI is started through yarn\'s loader', async () => {
+  // A stand-in loader that answers for @angular/cli the way .pnp.cjs does, with a server that is ready and serves a page.
+  const served = "const http = require('http'); const port = Number(process.argv[process.argv.indexOf('--port') + 1]); http.createServer((q, r) => { r.writeHead(200, {'content-type':'text/html'}); r.end('<html><body><app-root>hi</app-root></body></html>'); }).listen(port, '127.0.0.1', () => console.log('Local: http://127.0.0.1:' + port + '/ via ' + process.argv[1]));";
+  const p = project({ deps: { '@angular/core': '^22.0.0' }, files: {
+    'cli/ng.js': served,
+    '.pnp.cjs': "const Module = require('module'); const path = require('path'); const resolve = Module._resolveFilename; Module._resolveFilename = function (request, ...rest) { return request === '@angular/cli/bin/ng.js' ? path.join(__dirname, 'cli', 'ng.js') : resolve.call(this, request, ...rest); };",
+  } });
+  const r = await runScript(SMOKE, ['--project', p.dir, '--port', String(await freePort()), '--timeout', '20', '--no-browser', '--json'], { cwd: p.dir });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout).http, 200);
+  p.remove();
+});
+
 test('a project with no install says what to do', async () => {
   const p = project({ deps: { '@angular/core': '^21.0.0' } });
   made.push(p);
