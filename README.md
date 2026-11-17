@@ -9,7 +9,7 @@
 
 An Angular upgrade fails on your dependencies, not on Angular. Library version numbers rarely match Angular's, some libraries lag behind, and an old release can claim to support a major it predates. `--force` makes the error go away and leaves you to find out what broke. ng-hop is an agent skill that works out how far your whole app can go today, moves it there one commit per major, and asks you when a library is in the way.
 
-**Status:** 0.1.0, the first release. See [ROADMAP.md](ROADMAP.md) for what's next.
+**Status:** 0.5.0. See [ROADMAP.md](ROADMAP.md) for what's next.
 
 ![Claude Code loads ng-hop, plans the upgrade, moves an Angular 20 app to 21, gets past a build break without forcing anything, commits, and stops to ask what to do about Nebular, which blocks Angular 22](docs/demo/upgrade.gif)
 
@@ -89,7 +89,7 @@ claude plugin install ng-hop@ng-hop
 
 It needs Node 18 or newer, and nothing else.
 
-Real upgrades have run on npm and on pnpm 12, including an app inside a pnpm workspace. An app whose Angular comes from a pnpm catalog gets the same commands, and the pnpm runner moves the catalog's entries itself, because `ng update` can't. yarn and bun get the right commands, but no real upgrade has run on them yet.
+Real upgrades have run on npm and on pnpm 12, including an app inside a pnpm workspace. An app whose Angular comes from a pnpm catalog gets the same commands, and the pnpm runner moves the catalog's entries itself, because `ng update` can't. yarn and bun have each taken a test app from Angular 20 to 22. An app inside an npm, yarn or bun workspace gets a plan, but no whole upgrade has run there yet.
 
 ### Other agents
 
