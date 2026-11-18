@@ -169,6 +169,40 @@ function bumpToAngular21(dir) {
 export const CASES = [
   // ---- Questions: answer accurately and change nothing --------------------------------------------------------
   {
+    name: 'ask-lint-remediation-choice', tier: 'plan', fixture: 'plain-20',
+    prompt: "Plan this app's upgrade to Angular 22, without changing anything. Our lint review estimates @angular-eslint/prefer-on-push-component-change-detection will flag about 80 existing components after the migration adds Eager. We haven't decided whether to fix all that code in the upgrade or keep the diff small. A full domain regression is expensive, but a giant PR is expensive too. What decision do you need from us?",
+    assertions: [
+      check.skillFired(), check.noChanges(), check.noForcing(),
+      check.says('Offers fixing the affected code now', /moderniz|fix[^.\n]{0,80}(now|code|findings)|signals?[^.\n]{0,80}(now|migrat)/i),
+      check.says('Offers compatibility with scoped exceptions', /compatibility|scoped[^.\n]{0,80}(exception|suppression)|retain[^.\n]{0,80}eager/i),
+      check.says('Names the actual rule and Eager conflict', /prefer-on-push-component-change-detection[\s\S]{0,500}eager|eager[\s\S]{0,500}prefer-on-push-component-change-detection/i),
+      check.says('Explains the review versus regression tradeoff', /regression[\s\S]{0,500}(diff|review|PR)|(diff|review|PR)[\s\S]{0,500}regression/i),
+      check.endsWithQuestion(),
+    ],
+  },
+  {
+    name: 'ask-lint-modernize-plan', tier: 'plan', fixture: 'plain-20',
+    prompt: "Plan this app's upgrade to Angular 22; don't change files yet. We have already chosen modernize now for the estimated 80 components affected by @angular-eslint/prefer-on-push-component-change-detection after the Eager migration. Include only that work, not standalone or unrelated cleanup. We want one combined final regression. Explain the scope and checks; don't ask us to choose the same strategy again.",
+    assertions: [
+      check.skillFired(), check.noChanges(),
+      check.says('Honors the selected modernization scope', /moderniz|affected components|80 components/i),
+      check.says('Retains per-major verification', /each (major|hop)|every (major|hop)|per-major/i),
+      check.doesNotSay('Does not re-ask the already selected strategy', /which (path|option|strategy) (do|would|should)|do you (want|prefer) (?:me to )?(modernize|fix|keep)/i),
+    ],
+  },
+  {
+    name: 'ask-lint-compatibility-plan', tier: 'plan', fixture: 'plain-20',
+    prompt: "Plan this app's upgrade to Angular 22; do not edit anything. We choose compatibility-first: retain supported Eager behavior and propose a narrow exception only for @angular-eslint/prefer-on-push-component-change-detection in the affected components. Policy permits that exception, but show us the exact scope for approval. Defer signal modernization and explain how we'll remove the exception later. Does keeping Eager also solve missing change notifications if we use zoneless?",
+    assertions: [
+      check.skillFired(), check.noChanges(),
+      check.says('Keeps the compatibility-first strategy', /compatibility|retain[^.\n]{0,80}eager|keep[^.\n]{0,80}eager/i),
+      check.says('Makes the exception temporary or conditional', /remov|follow.up|exit (condition|criteria)/i),
+      check.says('Explains that zoneless still needs notifications', /markForCheck|AsyncPipe|notif|signal[^.\n]{0,80}(update|read|template)/i),
+      check.says('Retains lint verification', /lint/i),
+      check.doesNotSay('Does not re-ask the already selected strategy', /which (path|option|strategy) (do|would|should)|do you (want|prefer) (?:me to )?(modernize|fix|keep)/i),
+    ],
+  },
+  {
     name: 'ask-how-far', tier: 'plan', fixture: 'nebular-blocked',
     prompt: "how far can i upgrade this angular app right now? we're on 20 and i heard 22 is out. dont change anything yet, just tell me",
     assertions: [
@@ -496,4 +530,3 @@ should I just use --force?`,
     assertions: [check.skillFired(), check.reachesMajor(18), check.specsUntouched(), check.noChanges(), check.says('Says no unit test can run', NO_TESTS_RAN), check.endsWithQuestion()],
   },
 ];
-

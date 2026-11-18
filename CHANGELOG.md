@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Lint and modernization:** baseline the repo's existing lint commands, then ask whether to modernize the affected code now or preserve supported behavior with explicitly approved, scoped exceptions. Keep the choice within its agreed scope, retain per-major checks, and report deferred work. Angular 22's Eager/OnPush lint conflict is an example, not a requirement to make every variable a signal.
+
 ## 0.5.0 (2026-11-16)
 
 The first release since 0.1.0. It carries what was planned as 0.2.0 to 0.5.0.

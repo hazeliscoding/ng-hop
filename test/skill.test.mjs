@@ -75,6 +75,53 @@ function skillStep(n) {
   return skill.slice(start, end < 0 ? undefined : end);
 }
 
+const lintGuide = () => readFileSync(join(SKILL_DIR, 'references', 'lint.md'), 'utf8');
+
+test('lint is baselined without fixes and checked again at every major', () => {
+  assert.match(skillStep(3), /lint/);
+  assert.match(skillStep(3), /without autofix/);
+  assert.match(skillStep(3), /no lint command/);
+  assert.match(step('f'), /same lint/);
+});
+
+test('new lint findings lead to a scoped choice before broad fixes or exceptions', () => {
+  assert.match(skillStep(2), /references\/lint\.md/);
+  assert.match(step('e'), /references\/lint\.md/);
+  const lint = lintGuide();
+  for (const text of ['rule or diagnostic IDs', 'file/component count', 'Modernize now', 'Compatibility-first', 'wait for their answer']) assert.ok(lint.includes(text), text);
+  assert.match(lint, /already chose/);
+  assert.match(lint, /scope grows materially/);
+});
+
+test('both lint choices preserve gates and unrelated existing findings', () => {
+  const lint = lintGuide();
+  assert.match(lint, /already failing/);
+  assert.match(lint, /Do not disable lint globally/);
+  assert.match(lint, /security/);
+  assert.match(lint, /strictTemplates/);
+  assert.match(lint, /runtime defects/);
+  assert.match(lint, /reason, affected files, and a removal condition/);
+  assert.match(lint, /Both choices/);
+  assert.match(lint, /every major/);
+});
+
+test('the Angular 22 example distinguishes lint policy from required signals', () => {
+  const lint = lintGuide();
+  assert.match(lint, /prefer-on-push-component-change-detection/);
+  assert.match(lint, /ChangeDetectionStrategy\.Eager/);
+  assert.match(lint, /does not require every variable to be a signal/);
+  assert.match(lint, /markForCheck/);
+  assert.match(lint, /zoneless/);
+  assert.match(lint, /angular\.dev/);
+});
+
+test('optional modernization is allowed only within the approved lint decision', () => {
+  const scope = skill.slice(skill.indexOf('## Staying in scope'));
+  assert.match(scope, /No unapproved modernization or lint exceptions/);
+  assert.match(scope, /agreed scope/);
+  assert.match(skillStep(6), /Lint decision/);
+});
+
 test('step 3 runs ng through the project\'s own package manager, since npm refuses npx where devEngines names another', () => {
   // npm 11.19.0, and 10.9.9 on Linux, stopped `npx --no-install ng build` with EBADDEVENGINES in a project whose
   // devEngines.packageManager names pnpm, as pnpm 12's `pnpm init` writes it, so step 3 failed before the upgrade began.
