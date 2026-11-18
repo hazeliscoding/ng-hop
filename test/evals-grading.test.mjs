@@ -19,6 +19,30 @@ test('a commit on a pnpm catalog counts at its major, read from pnpm-workspace.y
 });
 const says = (assertion, finalText) => assertion.run({ finalText, around: (m) => m[0] })[0];
 
+test('lint decision question checks reject answers that skip either tradeoff or choice', () => {
+  const modernize = check('ask-lint-remediation-choice', 'Offers fixing the affected code now');
+  assert.ok(says(modernize, 'Modernize the affected code now in the upgrade PR.'));
+  assert.ok(!says(modernize, 'Just suppress the rule.'));
+  const compatibility = check('ask-lint-remediation-choice', 'Offers compatibility with scoped exceptions');
+  assert.ok(says(compatibility, 'Compatibility-first retains Eager with a scoped exception.'));
+  assert.ok(!says(compatibility, 'Convert everything to OnPush.'));
+  const tradeoff = check('ask-lint-remediation-choice', 'Explains the review versus regression tradeoff');
+  assert.ok(says(tradeoff, 'A larger diff costs review time but can share the final regression.'));
+  assert.ok(!says(tradeoff, 'The upgrade has no tradeoffs.'));
+});
+
+test('an already selected lint strategy is not asked again, while exception scope can be approved', () => {
+  for (const name of ['ask-lint-modernize-plan', 'ask-lint-compatibility-plan']) {
+    const noRepeat = check(name, 'Does not re-ask the already selected strategy');
+    assert.ok(says(noRepeat, 'I will keep your selected strategy. Please approve this exact exception scope.'));
+    assert.ok(!says(noRepeat, 'Which strategy do you prefer?'));
+    assert.ok(!says(noRepeat, 'Do you want me to modernize or keep Eager?'));
+  }
+  const notifications = check('ask-lint-compatibility-plan', 'Explains that zoneless still needs notifications');
+  assert.ok(says(notifications, 'Eager still needs markForCheck in this zoneless callback.'));
+  assert.ok(!says(notifications, 'Eager alone solves this.'));
+});
+
 test('"21 is the furthest" accepts the ways agents really say it, and not an answer that goes further', () => {
   const furthest = check('ask-how-far', 'Says 21 is the furthest it can go today');
   for (const answer of [
